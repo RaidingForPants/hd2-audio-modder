@@ -1,1 +1,4 @@
 vgmstream-win64/
+build/
+dist/
+audio_modder.spec
