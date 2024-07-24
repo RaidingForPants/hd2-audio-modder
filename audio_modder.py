@@ -9,7 +9,7 @@ import tkinter
 from tkinter.filedialog import askdirectory
 from tkinter.filedialog import askopenfilename
 from functools import partial
-from playsound import playsound
+import simpleaudio
 import subprocess
 import multiprocessing
 import time
@@ -17,6 +17,9 @@ import atexit
 from itertools import takewhile
 
 class MemoryStream:
+    '''
+    Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
+    '''
     def __init__(self, Data=b"", IOMode = "read"):
         self.Location = 0
         self.Data = bytearray(Data)
@@ -117,6 +120,10 @@ def _16ByteAlign(addr):
     return ceil(addr/16)*16
 
 class TocEntry:
+    '''
+    Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
+    '''
+
     def __init__(self):
         self.FileID = self.TypeID = self.TocDataOffset = self.Unknown1 = self.GpuResourceOffset = self.Unknown2 = self.TocDataSize = self.GpuResourceSize = self.EntryIndex = self.StreamSize = self.StreamOffset = 0
         self.Unknown3 = 16
@@ -183,6 +190,10 @@ class TocEntry:
             StreamFile.write(self.StreamData)
 
 class TocFileType:
+    '''
+    Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
+    '''
+
     def __init__(self, ID=0, NumFiles=0):
         self.unk1     = 0
         self.TypeID   = ID
@@ -204,6 +215,10 @@ class TocFileType:
         TocFile.write(self.unk3.to_bytes(4, byteorder="little"))
 
 class StreamToc:
+    '''
+    Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
+    '''
+
     def __init__(self):
         self.magic      = self.numTypes = self.numFiles = self.unknown = 0
         self.unk4Data   = bytearray(56)
@@ -314,7 +329,7 @@ class TocBankEntry(TocEntry):
         super()
         self.TocDataHeader = b""
         self.BankHeader = b""
-        self.PostDataSection = b""
+        self.PostData = b""
         self.dataSectionSize = 0
         self.dataSectionStart = 0
         self.PostDataSize = 0
@@ -349,7 +364,7 @@ class TocBankEntry(TocEntry):
         tag = tempData.read(4).decode('utf-8')
         size = tempData.uint32Read()
         if tag != "DIDX":
-            print("Error reading .bnk, no Data Index")
+            #print("Error reading .bnk, no Data Index")
             return
         for x in range(int(size/12)): self.Wems.append(BankWem(tempData.read(12)))
         
@@ -368,6 +383,9 @@ class TocBankEntry(TocEntry):
         #Any other sections (i.e. HIRC)
         self.PostData = tempData.read() #for now just store everything past the end of the data section
         self.PostDataSize = len(self.PostData)
+        
+    def GetWems(self):
+        return self.Wems
         
     def SetWem(self, wemIndex, wemData, rebuildToc=True):
         originalBankSize = self.TocDataHeader.TocFileSize
@@ -445,23 +463,14 @@ class SoundHandler:
     def __init__(self):
         self.tempFiles = []
         self.audioProcess = None
+        self.waveObject = None
         self.audioID = -1
         
-    def CleanTempFiles(self):
-        for file in self.tempFiles:
-            try:
-                os.remove(file)
-            except:
-                pass
-        self.tempFiles = []
-        
     def KillSound(self):
-        if self.audioProcess is not None:
-            self.audioProcess.terminate()
+        simpleaudio.stop_all()
         
     def PlayWem(self, soundIndex, soundData):
         self.KillSound()
-        #self.CleanTempFiles()
         if self.audioID == soundIndex:
             self.audioID = -1
             return
@@ -474,11 +483,39 @@ class SoundHandler:
                 self.tempFiles.append(f"{filename}.wav")
             os.remove(f"{filename}.wem")
         self.audioID = soundIndex
-        self.audioProcess = multiprocessing.Process(target=self._multiprocess_playsound, args=(f"{filename}.wav",))
-        self.audioProcess.start()
+        self.waveObject = simpleaudio.WaveObject.from_wave_file(f"{filename}.wav")
+        self.audioProcess = self.waveObject.play()
+        os.remove(f"{filename}.wav")
         
-    def _multiprocess_playsound(self, soundFile):
-        playsound(soundFile)
+
+class ProgressWindow:
+    def __init__(self, title, maxProgress):
+        self.title = title
+        self.maxProgress = maxProgress
+        
+    def Show(self):
+        self.root = Tk()
+        self.root.title(self.title)
+        self.root.geometry("410x45")
+        self.root.attributes('-topmost', True)
+        self.progressBar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.maxProgress)
+        self.progressBarText = Text(self.root)
+        self.progressBar.pack()
+        self.progressBarText.pack()
+        
+    def Step(self):
+        self.progressBar.step()
+        self.root.update_idletasks()
+        self.root.update()
+        
+    def SetText(self, s):
+        self.progressBarText.delete('1.0', END)
+        self.progressBarText.insert(INSERT, s)
+        self.root.update_idletasks()
+        self.root.update()
+        
+    def Destroy(self):
+        self.root.destroy()
         
 class FileHandler:
 
@@ -490,53 +527,143 @@ class FileHandler:
         
     def DumpAll():
         pass
-
+        
+    def MergeMods(self):
+        originalToc = StreamToc()
+        mod1Toc = StreamToc()
+        mod2Toc = StreamToc()
+        
+        archiveFile = askopenfilename(title="Select original archive file")
+        if os.path.splitext(archiveFile)[1] in (".stream", ".gpu_resources"):
+            archiveFile = os.path.splitext(archiveFile)[0]
+        if os.path.exists(archiveFile):
+            originalToc.FromFile(archiveFile)
+        else:
+            print("Invalid file selected, aborting merge")
+            return
+            
+        modFile = askopenfilename(title="Select first modded file to merge")
+        if os.path.splitext(modFile)[1] in (".stream", ".gpu_resources"):
+            modFile = os.path.splitext(modFile)[0]
+        if os.path.exists(modFile):
+            mod1Toc.FromFile(modFile)
+        else:
+            print("Invalid file selected, aborting merge")
+            return
+            
+        modFile = askopenfilename(title="Select second modded file to merge")
+        if os.path.splitext(modFile)[1] in (".stream", ".gpu_resources"):
+            modFile = os.path.splitext(modFile)[0]
+        if os.path.exists(modFile):
+            mod2Toc.FromFile(modFile)
+        else:
+            print("Invalid file selected, aborting merge")
+            return
+        
+        maxProgress = 0
+        for entry in originalToc.TocEntries:
+            if entry.TypeID == 5785811756662211598:
+                maxProgress = maxProgress + 1
+            elif entry.TypeID == 6006249203084351385:
+                maxProgress = maxProgress + len(entry.Wems)
+        
+        progressWindow = ProgressWindow(title="Merging modded files", maxProgress=maxProgress)
+        progressWindow.Show()
+        for index in range(len(originalToc.TocEntries)):
+            originalEntry = originalToc.TocEntries[index]
+            mod1Entry = mod1Toc.TocEntries[index]
+            mod2Entry = mod2Toc.TocEntries[index]
+            if not originalEntry.FileID == mod1Entry.FileID == mod2Entry.FileID:
+                print("Trying to combine archives with different file IDs! Aborting merge")
+                self.DestroyProgressBar()
+                return
+            if originalEntry.TypeID == 5785811756662211598:
+                mod1Different = originalEntry.StreamData != mod1Entry.StreamData
+                mod2Different = originalEntry.StreamData != mod2Entry.StreamData
+                moddedEntry = None
+                progressWindow.SetText("Merging " + str(index) + ".wem")
+                progressWindow.Step()
+                if mod1Different and mod2Different:
+                    print("Both mods overwrite the same audio file(s), aborting merge")
+                    self.DestroyProgressBar()
+                    return
+                elif not mod1Different and not mod2Different:
+                    continue
+                elif mod1Different:
+                    moddedEntry = mod1Entry
+                elif mod2Different:
+                    moddedEntry = mod2Entry
+                originalEntry.StreamData = moddedEntry.StreamData
+                originalEntry.StreamSize = moddedEntry.StreamSize
+                originalEntry.TocData[8:12] = originalEntry.StreamSize.to_bytes(4, byteorder="little")
+                offset = originalEntry.StreamOffset + _16ByteAlign(originalEntry.StreamSize)
+                for e in originalToc.TocEntries[index+1:]:
+                    if e.StreamSize > 0:
+                        e.StreamOffset = offset
+                        offset = offset + _16ByteAlign(e.StreamSize)
+            elif originalEntry.TypeID == 6006249203084351385:
+                for wemIndex in range(len(originalEntry.GetWems())):
+                    originalWem = originalEntry.GetWems()[wemIndex]
+                    mod1Wem = mod1Entry.GetWems()[wemIndex]
+                    mod2Wem = mod2Entry.GetWems()[wemIndex]
+                    mod1Different = originalWem.Data != mod1Wem.Data
+                    mod2Different = originalWem.Data != mod2Wem.Data
+                    moddedData = None
+                    progressWindow.SetText("Merging " + str(index) + "-" + str(wemIndex) + ".wem")
+                    progressWindow.Step()
+                    if mod1Different and mod2Different:
+                        print("Both mods overwrite the same audio file(s), aborting merge")
+                        self.DestroyProgressBar()
+                        return
+                    elif not mod1Different and not mod2Different:
+                        continue
+                    elif mod1Different:
+                        moddedData = mod1Wem.Data
+                    elif mod2Different:
+                        moddedData = mod2Wem.Data
+                    originalEntry.SetWem(wemIndex, moddedData, False)
+                    offset = originalEntry.TocDataOffset + _16ByteAlign(originalEntry.TocDataSize)
+                    for e in originalToc.TocEntries[index+1:]:
+                        e.TocDataOffset = offset
+                        offset = offset + _16ByteAlign(e.TocDataSize)
+                originalEntry.RebuildTocData()
+        self.streamToc = originalToc
+        progressWindow.Destroy()
+    
     def DumpAllWems(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
-        root = Tk()
-        root.title("Dumping Files")
         maxProgress = 0
         for entry in self.GetTocEntries():
             if entry.TypeID == 5785811756662211598:
                 maxProgress = maxProgress + 1
             elif entry.TypeID == 6006249203084351385:
                 maxProgress = maxProgress + len(entry.Wems)
-        progressBar = tkinter.ttk.Progressbar(root, orient=HORIZONTAL, length=400, mode="determinate", maximum=maxProgress)
-        progressBar.pack()
-        text = Text(root)
-        text.pack()
-        root.geometry("410x45")
-        root.attributes('-topmost', True)
+        progressWindow = ProgressWindow(title="Dumping Files", maxProgress=maxProgress)
+        progressWindow.Show()
         if os.path.exists(folder):
             for entry in self.GetTocEntries():
                 if entry.TypeID == 5785811756662211598:
-                    text.delete('1.0', END)
                     savePath = os.path.join(folder, str(entry.EntryIndex))
-                    text.insert(INSERT, "Dumping " + os.path.basename(savePath) + ".wav")
+                    progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
                     with open(savePath+".wem", "wb") as f:
                         f.write(entry.StreamData)
                     subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
                     os.remove(f"{savePath}.wem")
-                    progressBar.step()
-                    root.update_idletasks()
-                    root.update()
+                    progressWindow.Step()
                 elif entry.TypeID == 6006249203084351385:
                     wemIndex = 0
                     for wem in entry.Wems:
-                        text.delete('1.0', END)
                         savePath = os.path.join(folder, str(entry.EntryIndex)+"-"+str(wemIndex))
-                        text.insert(INSERT, "Dumping " + os.path.basename(savePath) + ".wav")
+                        progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
                         wemIndex = wemIndex + 1
                         with open(savePath+".wem", "wb") as f:
                             f.write(wem.GetData())
                         subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
                         os.remove(f"{savePath}.wem")
-                        progressBar.step()
-                        root.update_idletasks()
-                        root.update()
+                        progressWindow.Step()
         else:
             print("Invalid folder selected, aborting dump")
-        root.destroy()
+        progressWindow.Destroy()
         
     def DumpAllBnks():
         pass
@@ -573,18 +700,10 @@ class FileHandler:
     def LoadWems(self):
         wems = filedialog.askopenfilenames(title="Choose .wem files to import")
         modifiedBankEntries = {}
-        root = Tk()
-        root.title("Loading Files")
-        maxProgress = len(wems)
-        progressBar = tkinter.ttk.Progressbar(root, orient=HORIZONTAL, length=400, mode="determinate", maximum=maxProgress)
-        progressBar.pack()
-        text = Text(root)
-        text.pack()
-        root.geometry("410x45")
-        root.attributes('-topmost', True)
+        progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(wems))
+        progressWindow.Show()
         for file in wems:
-            text.delete('1.0', END)
-            text.insert(INSERT, "Loading "+os.path.basename(file))
+            progressWindow.SetText("Loading "+os.path.basename(file))
             index = self.GetFileNumberPrefix(os.path.basename(file))
             entry = self.streamToc.TocEntries[index]
             if "-" not in os.path.basename(file): #not part of a bank!
@@ -614,26 +733,16 @@ class FileHandler:
                 for e in toc.TocEntries[index+1:]:
                     e.TocDataOffset = offset
                     offset = offset + _16ByteAlign(e.TocDataSize)
-            progressBar.step()
-            root.update_idletasks()
-            root.update()
-        root.destroy()
+            progressWindow.Step()
+        progressWindow.Destroy()
         
-        root = Tk()
-        root.title("Loading Files")
-        progressBar = tkinter.ttk.Progressbar(root, orient=HORIZONTAL, length=400, mode="determinate", maximum=len(modifiedBankEntries.values()))
-        progressBar.pack()
-        text = Text(root)
-        text.pack()
-        text.insert(INSERT, "Rebuilding soundbanks")
-        root.geometry("410x45")
-        root.attributes('-topmost', True)
+        progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(modifiedBankEntries.values()))
+        progressWindow.Show()
+        progressWindow.SetText("Rebuilding soundbanks")
         for entry in modifiedBankEntries.values():
             entry.RebuildTocData()
-            progressBar.step()
-            root.update_idletasks()
-            root.update()
-        root.destroy()
+            progressWindow.Step()
+        progressWindow.Destroy()
         
     def LoadBnks():
         pass
@@ -678,8 +787,12 @@ class MainWindow:
         self.dumpMenu = Menu(self.menu)
         self.dumpMenu.add_command(label="Dump all .wems", command=self.DumpAllWems)
         
+        self.mergeMenu = Menu(self.menu)
+        self.mergeMenu.add_command(label="Merge mods", command=self.MergeMods)
+        
         self.menu.add_cascade(label="File", menu=self.fileMenu)
         self.menu.add_cascade(label="Dump", menu=self.dumpMenu)
+        self.menu.add_cascade(label="Merge", menu=self.mergeMenu)
         self.root.config(menu=self.menu)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel)
         
@@ -783,30 +896,30 @@ class MainWindow:
     def LoadArchive(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadArchiveFile()
-        self.soundHandler.CleanTempFiles()
         self.drawBankSubWindows = {}
         self.Update()
         
     def SaveArchive(self):
         self.soundHandler.KillSound()
         self.fileHandler.SaveArchiveFile()
-        self.soundHandler.CleanTempFiles()
         
     def LoadWems(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadWems()
-        self.soundHandler.CleanTempFiles()
         self.Update()
         
     def DumpAllWems(self):
         self.soundHandler.KillSound()
         self.fileHandler.DumpAllWems()
-        self.soundHandler.CleanTempFiles()
     
+    def MergeMods(self):
+        self.soundHandler.KillSound()
+        self.fileHandler.MergeMods()
+        self.Update()
     
     
 def exitHandler():
-    soundHandler.CleanTempFiles()
+    pass
     
 
 if __name__ == "__main__":

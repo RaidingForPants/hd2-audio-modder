@@ -1,1 +1,1 @@
-playsound==1.2.2
+simpleaudio==1.0.4
