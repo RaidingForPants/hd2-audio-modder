@@ -14,6 +14,7 @@ import subprocess
 import time
 import atexit
 from itertools import takewhile
+import copy
 
 class MemoryStream:
     '''
@@ -681,7 +682,7 @@ class FileHandler:
             self.patchedToc.TocTypes = []
             self.patchedToc.TocEntries = []
             for fileID in sorted(self.modifiedEntries):
-                self.patchedToc.TocEntries.append(self.streamToc.GetEntryByID(fileID))
+                self.patchedToc.TocEntries.append(copy.deepcopy(self.streamToc.GetEntryByID(fileID)))
                 self.patchedToc.numFiles = self.patchedToc.numFiles + 1
             self.patchedToc.UpdateTypes()
             self.patchedToc.numTypes = len(self.patchedToc.TocTypes)
