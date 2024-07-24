@@ -638,8 +638,11 @@ class FileHandler:
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(patchToc.TocEntries))
         progressWindow.Show()
         for patchEntry in patchToc.TocEntries:
-            self.modifiedEntries.add(patchEntry.FileID)
             entry = self.streamToc.GetEntryByID(patchEntry.FileID)
+            if entry is None:
+                print("Could not find matching file ID in archive! Aborting load")
+                break
+            self.modifiedEntries.add(patchEntry.FileID)
             patchEntry.TocDataOffset = entry.TocDataOffset
             patchEntry.StreamOffset = entry.StreamOffset
             self.streamToc.SetEntryByID(patchEntry.FileID, patchEntry)
@@ -658,14 +661,6 @@ class FileHandler:
                     if e.StreamSize > 0:
                         e.StreamOffset = offset
                         offset = offset + _16ByteAlign(e.StreamSize)
-            progressWindow.Step()
-        progressWindow.Destroy()
-        
-        progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(modifiedBankEntries.values()))
-        progressWindow.Show()
-        progressWindow.SetText("Rebuilding soundbanks")
-        for entry in modifiedBankEntries.values():
-            entry.RebuildTocData()
             progressWindow.Step()
         progressWindow.Destroy()
         
