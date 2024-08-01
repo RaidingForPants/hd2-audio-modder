@@ -9,7 +9,8 @@ import tkinter
 from tkinter.filedialog import askdirectory
 from tkinter.filedialog import askopenfilename
 from functools import partial
-import simpleaudio
+import pyaudio
+import wave
 import subprocess
 import time
 import atexit
@@ -567,12 +568,24 @@ class SoundHandler:
         self.audioProcess = None
         self.waveObject = None
         self.audioID = -1
+        self.audio = pyaudio.PyAudio()
         
     def KillSound(self):
-        simpleaudio.stop_all()
+        if self.audioProcess is not None:
+            if self.callback is not None:
+                self.callback()
+                self.callback = None
+            self.audioProcess.close()
+            self.waveFile.close()
+            try:
+                os.remove(self.audioFile)
+            except:
+                pass
+            self.audioProcess = None
         
-    def PlayWem(self, soundIndex, soundData):
+    def PlayWem(self, soundIndex, soundData, callback=None):
         self.KillSound()
+        self.callback = callback
         if self.audioID == soundIndex:
             self.audioID = -1
             return
@@ -585,9 +598,26 @@ class SoundHandler:
                 self.tempFiles.append(f"{filename}.wav")
             os.remove(f"{filename}.wem")
         self.audioID = soundIndex
-        self.waveObject = simpleaudio.WaveObject.from_wave_file(f"{filename}.wav")
-        self.audioProcess = self.waveObject.play()
-        os.remove(f"{filename}.wav")
+        self.waveFile = wave.open(f"{filename}.wav")
+        self.frameCount = 0
+        self.maxFrames = self.waveFile.getnframes()
+        def callback(input_data, frame_count, time_info, status):
+            self.frameCount += frame_count
+            if self.frameCount > self.maxFrames:
+                self.KillSound()
+                self.audioID = -1
+                if self.callback is not None:
+                    self.callback()
+                    self.callback = None
+                return (None, pyaudio.paComplete)
+            data = self.waveFile.readframes(frame_count)
+            return (data, pyaudio.paContinue)
+        self.audioProcess = self.audio.open(format=self.audio.get_format_from_width(self.waveFile.getsampwidth()),
+                channels=self.waveFile.getnchannels(),
+                rate=self.waveFile.getframerate(),
+                output=True,
+                stream_callback=callback)
+        self.audioFile = f"{filename}.wav"
         
 
 class ProgressWindow:
@@ -916,7 +946,16 @@ class MainWindow:
                 self.mainCanvas.create_window(15, self.draw_height+3, window=expand, anchor='nw')
             else:
                 #Play: unicode 23f5 or 25B6. Stop: 23f9
-                play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'), command=partial(self.PlayWemFromStream, row['ID']))
+                play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
+                def resetButtonIcon(button):
+                    button.configure(text= '\u23f5', fg='green')
+                def pressButton(button, rowID, callback):
+                    if button['text'] == '\u23f9':
+                        button.configure(text= '\u23f5', fg='green')
+                    else:
+                        button.configure(text= '\u23f9', fg='red')
+                    self.PlayWemFromStream(rowID, callback)
+                play.configure(command=partial(pressButton, play, row['ID'], partial(resetButtonIcon, play)))
                 self.mainCanvas.create_window(10, self.draw_height+3, window=play, anchor='nw')
             if row['Unsaved']:
                 revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertEntry, row['ID']))
@@ -940,7 +979,16 @@ class MainWindow:
                         self.mainCanvas.create_text(340, self.draw_height+5, text=wem.FileID, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
                         self.mainCanvas.create_text(640, self.draw_height+5, text=wem.DataOffset, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
                         self.mainCanvas.create_text(940, self.draw_height+5, text=wem.DataSize, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-                        play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'), command=partial(self.PlayWemFromBank, row['ID'], wem_count))
+                        play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
+                        def resetButtonIcon(button):
+                            button.configure(text= '\u23f5', fg='green')
+                        def pressButton(button, rowID, wemCount, callback):
+                            if button['text'] == '\u23f9':
+                                button.configure(text= '\u23f5', fg='green')
+                            else:
+                                button.configure(text= '\u23f9', fg='red')
+                            self.PlayWemFromBank(rowID, wemCount, callback)
+                        play.configure(command=partial(pressButton, play, row['ID'], wem_count, partial(resetButtonIcon, play)))
                         self.mainCanvas.create_window(40, self.draw_height+3, window=play, anchor='nw')
                         if wem.Modified:
                             revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertWem, row['ID'], wem_count))
@@ -988,11 +1036,11 @@ class MainWindow:
         self.soundHandler.KillSound()
         self.fileHandler.DumpAllWems()
         
-    def PlayWemFromStream(self, fileID):
-        self.soundHandler.PlayWem(fileID, self.fileHandler.GetToc().GetEntryByID(fileID).StreamData)
+    def PlayWemFromStream(self, fileID, callback):
+        self.soundHandler.PlayWem(fileID, self.fileHandler.GetToc().GetEntryByID(fileID).StreamData, callback)
         
-    def PlayWemFromBank(self, bankID, wemID):
-        self.soundHandler.PlayWem(int(str(bankID) + str(wemID)), self.fileHandler.GetToc().GetEntryByID(bankID).GetWems()[wemID].GetData())
+    def PlayWemFromBank(self, bankID, wemID, callback):
+        self.soundHandler.PlayWem(int(str(bankID) + str(wemID)), self.fileHandler.GetToc().GetEntryByID(bankID).GetWems()[wemID].GetData(), callback)
         
     def RevertEntry(self, fileID):
         self.soundHandler.KillSound()
@@ -1021,7 +1069,7 @@ class MainWindow:
         self.Update()
     
 def exitHandler():
-    pass
+    soundHandler.audio.terminate()
     
 
 if __name__ == "__main__":
