@@ -132,6 +132,7 @@ class TocEntry:
         self.TocData =  self.TocData_OLD = b""
         self.GpuData =  self.GpuData_OLD = b""
         self.StreamData =  self.StreamData_OLD = b""
+        self.Modified = False
         
     # -- Load TocEntry -- #
     def Load(self, TocFile):
@@ -188,6 +189,34 @@ class TocEntry:
         if self.StreamSize > 0:
             StreamFile.seek(self.StreamOffset)
             StreamFile.write(self.StreamData)
+            
+    def SetData(self, tocData, gpuData, streamData):
+        if not self.Modified:
+            self.TocData_OLD = self.TocData
+            self.GpuData_OLD = self.GpuData
+            self.StreamData_OLD = self.StreamData
+            self.Modified = True
+        if tocData is not None:
+            self.TocData = tocData
+            self.TocDataSize = len(tocData)
+        if streamData is not None:
+            self.StreamData = streamData
+            self.StreamSize = len(streamData)
+        if gpuData is not None:
+            self.GpuData = gpuData
+            self.GpuResourceSize = len(gpuData)
+            
+            
+    def RevertModifications(self):
+        if self.Modified:
+            self.TocData = self.TocData_OLD
+            self.TocDataSize = len(self.TocData)
+            self.GpuData = self.GpuData_OLD
+            self.GpuResourceSize = len(self.GpuData)
+            self.StreamData = self.StreamData_OLD
+            self.StreamSize = len(self.StreamData)
+            self.Modified = False
+            
 
 class TocFileType:
     '''
@@ -301,6 +330,23 @@ class StreamToc:
         for entry in self.TocEntries:
             if entry.FileID == fileID:
                 self.TocEntries[self.TocEntries.index(entry)] = newEntry
+                
+    def RebuildEntryHeaders(self):
+        tocOffset = 80 + 32 * len(self.TocTypes) + 80 * len(self.TocEntries)
+        streamOffset = 0
+        gpuOffset = 0
+        for entry in self.TocEntries:
+            entry.TocDataOffset = tocOffset
+            entry.GpuResourceOffset = gpuOffset
+            entry.StreamOffset = streamOffset
+            streamOffset += _16ByteAlign(entry.StreamSize)
+            tocOffset += _16ByteAlign(entry.TocDataSize)
+            gpuOffset += _16ByteAlign(entry.GpuResourceSize)
+                
+    def SetEntryData(self, entryIndex, tocData=None, gpuData=None, streamData=None, rebuildHeaders=True):
+        self.TocEntries[entryIndex].SetData(tocData, gpuData, streamData)
+        if rebuildHeaders:
+            self.RebuildEntryHeaders()
                         
     def FromFile(self, path):
         self.UpdatePath(path)
@@ -348,7 +394,7 @@ class TocEntryFactory:
 class TocBankEntry(TocEntry):
 
     def __init__(self):
-        super()
+        super().__init__()
         self.TocDataHeader = b""
         self.BankHeader = b""
         self.PostData = b""
@@ -415,6 +461,7 @@ class TocBankEntry(TocEntry):
                 return wem
         
     def SetWem(self, wemIndex, wemData, rebuildToc=True):
+        self.Modified = True
         originalBankSize = self.TocDataHeader.TocFileSize
         originalWemSize = self.Wems[wemIndex].DataSize
         if wemIndex == len(self.Wems)-1: #each wem is padded to 16 bytes EXCEPT THE LAST ONE IN A BANK!!!
@@ -424,17 +471,16 @@ class TocBankEntry(TocEntry):
             newBankSize = originalBankSize - _16ByteAlign(originalWemSize) + _16ByteAlign(len(wemData))
             self.dataSectionSize = self.dataSectionSize - _16ByteAlign(originalWemSize) + _16ByteAlign(len(wemData))
         self.TocDataHeader.TocFileSize = newBankSize
-        self.Wems[wemIndex].DataSize = len(wemData)
-        self.Wems[wemIndex].LoadData(wemData)
-        offset = self.Wems[wemIndex].DataOffset + _16ByteAlign(self.Wems[wemIndex].DataSize)
-        for wem in self.Wems[wemIndex+1:]:
-            wem.DataOffset = offset
-            offset = offset + _16ByteAlign(wem.DataSize)
+        self.Wems[wemIndex].SetData(wemData)
         if rebuildToc:
             self.RebuildTocData() #rebuildToc could be False if you intend to call SetWem many times as a performance optimization
         
         
     def RebuildTocData(self):
+        offset = 0
+        for wem in self.Wems:
+            wem.DataOffset = offset
+            offset += _16ByteAlign(wem.DataSize)
         tempData = MemoryStream()
         tempData.write("BKHD".encode('utf-8'))
         tempData.write(len(self.BankHeader).to_bytes(4, byteorder='little'))
@@ -459,6 +505,8 @@ class BankWem:
     
     def __init__(self, DataIndexEntry):
         self.Load(DataIndexEntry)
+        self.Modified = False
+        self.Data = self.Data_OLD = None
         
     def Load(self, DataIndexEntry):
         self.FileID = int.from_bytes(DataIndexEntry[0:4], byteorder='little')
@@ -467,6 +515,20 @@ class BankWem:
         
     def LoadData(self, Data):
         self.Data = Data
+        
+    def SetData(self, data):
+        if not self.Modified:
+            self.Data_OLD = self.Data
+        self.Data = data
+        self.Modified = True
+        self.DataSize = len(data)
+        
+    def Revert(self):
+        if self.Modified:
+            self.Data = self.Data_OLD
+            self.DataSize = len(self.Data)
+            self.Modified = False
+            
         
     def GetData(self):
         return self.Data
@@ -529,6 +591,7 @@ class ProgressWindow:
         self.progressBarText = Text(self.root)
         self.progressBar.pack()
         self.progressBarText.pack()
+        self.root.resizable(False, False)
         
     def Step(self):
         self.progressBar.step()
@@ -548,8 +611,6 @@ class FileHandler:
 
     def __init__(self, streamToc):
         self.streamToc = streamToc
-        self.patchedToc = StreamToc()
-        self.modifiedEntries = set()
 
     def DumpSelected():
         pass
@@ -616,7 +677,6 @@ class FileHandler:
             print("Invalid folder selected, aborting save")
         
     def LoadArchiveFile(self):
-        self.modifiedEntries = set()
         archiveFile = askopenfilename(title="Select archive")
         if os.path.splitext(archiveFile)[1] in (".stream", ".gpu_resources"):
             archiveFile = os.path.splitext(archiveFile)[0]
@@ -635,7 +695,6 @@ class FileHandler:
         else:
             print("Invalid file selected, aborting load")
             return
-        modifiedBankEntries = {}
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(patchToc.TocEntries))
         progressWindow.Show()
         for patchEntry in patchToc.TocEntries:
@@ -643,59 +702,42 @@ class FileHandler:
             if entry is None:
                 print("Could not find matching file ID in archive! Aborting load")
                 break
-            self.modifiedEntries.add(patchEntry.FileID)
-            patchEntry.TocDataOffset = entry.TocDataOffset
-            patchEntry.StreamOffset = entry.StreamOffset
-            self.streamToc.SetEntryByID(patchEntry.FileID, patchEntry)
+            gpuData = streamData = tocData = None
+            tocData = patchEntry.TocData
+            if patchEntry.GpuResourceSize > 0:
+                gpuData = patchEntry.GpuData
+            if patchEntry.StreamSize > 0:
+                streamData = patchEntry.StreamData
+            self.GetToc().SetEntryData(entryIndex=patchEntry.EntryIndex, tocData=tocData, streamData=streamData, gpuData=gpuData, rebuildHeaders=False)
             if isinstance(entry, TocBankEntry):
                 progressWindow.SetText("Loading "+str(patchEntry.EntryIndex)+" .bnk")
-                modifiedBankEntries[entry.FileID] = entry
-                offset = patchEntry.TocDataOffset + _16ByteAlign(patchEntry.TocDataSize)
-                for e in self.streamToc.TocEntries[self.streamToc.TocEntries.index(patchEntry)+1:]:
-                    e.TocDataOffset = offset
-                    offset = offset + _16ByteAlign(e.TocDataSize)
             else:
                 progressWindow.SetText("Loading "+str(patchEntry.EntryIndex)+" .wem")
-                entry.TocData[8:12] = entry.StreamSize.to_bytes(4, byteorder="little")
-                offset = patchEntry.StreamOffset + _16ByteAlign(patchEntry.StreamSize)
-                for e in self.streamToc.TocEntries[self.streamToc.TocEntries.index(patchEntry)+1:]:
-                    if e.StreamSize > 0:
-                        e.StreamOffset = offset
-                        offset = offset + _16ByteAlign(e.StreamSize)
             progressWindow.Step()
+        self.GetToc().RebuildEntryHeaders()
         progressWindow.Destroy()
-        
-    def GetModifiedEntries(self):
-        return self.modifiedEntries
-        
+
     def WritePatch(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
         if os.path.exists(folder):
-            self.patchedToc = StreamToc()
-            self.patchedToc.Name = self.streamToc.Name + ".patch_0"
-            self.patchedToc.LocalName = self.streamToc.LocalName
-            self.patchedToc.magic = self.streamToc.magic
-            self.patchedToc.numTypes = 0
-            self.patchedToc.numFiles = 0
-            self.patchedToc.unknown = self.streamToc.unknown
-            self.patchedToc.unk4Data = self.streamToc.unk4Data
-            self.patchedToc.TocTypes = []
-            self.patchedToc.TocEntries = []
-            for fileID in sorted(self.modifiedEntries):
-                self.patchedToc.TocEntries.append(copy.deepcopy(self.streamToc.GetEntryByID(fileID)))
-                self.patchedToc.numFiles = self.patchedToc.numFiles + 1
-            self.patchedToc.UpdateTypes()
-            self.patchedToc.numTypes = len(self.patchedToc.TocTypes)
-            tocOffset = 80 + 32 * len(self.patchedToc.TocTypes) + 80 * len(self.patchedToc.TocEntries)
-            streamOffset = 0
-            for entry in self.patchedToc.TocEntries:
-                entry.StreamOffset = streamOffset
-                streamOffset = streamOffset + _16ByteAlign(entry.StreamSize)
-                
-                entry.TocDataOffset = tocOffset
-                tocOffset = tocOffset + _16ByteAlign(entry.TocDataSize)
-            
-            self.patchedToc.ToFile(folder)
+            patchedToc = StreamToc()
+            patchedToc.Name = self.streamToc.Name + ".patch_0"
+            patchedToc.LocalName = self.streamToc.LocalName
+            patchedToc.magic = self.streamToc.magic
+            patchedToc.numTypes = 0
+            patchedToc.numFiles = 0
+            patchedToc.unknown = self.streamToc.unknown
+            patchedToc.unk4Data = self.streamToc.unk4Data
+            patchedToc.TocTypes = []
+            patchedToc.TocEntries = []
+            for entry in self.GetTocEntries():
+                if entry.Modified:
+                    patchedToc.TocEntries.append(copy.deepcopy(entry))
+                    patchedToc.numFiles = patchedToc.numFiles + 1
+            patchedToc.UpdateTypes()
+            patchedToc.numTypes = len(patchedToc.TocTypes)
+            patchedToc.RebuildEntryHeaders()
+            patchedToc.ToFile(folder)
         else:
             print("Invalid folder selected, aborting save")
 
@@ -713,36 +755,26 @@ class FileHandler:
                     print("When importing \"" + os.path.basename(file) + "\", tried to import .wem in place of .bnk. Check filename")
                     continue
                 with open(file, 'rb') as f:
-                    entry.StreamData = f.read()
-                    entry.StreamSize = len(entry.StreamData)
-                self.modifiedEntries.add(entry.FileID)
-                #write the new filesize to the TocData of the FileEntry
-                entry.TocData[8:12] = entry.StreamSize.to_bytes(4, byteorder="little")
-                offset = entry.StreamOffset + _16ByteAlign(entry.StreamSize)
-                for e in self.streamToc.TocEntries[self.streamToc.TocEntries.index(entry)+1:]:
-                    if e.StreamSize > 0:
-                        e.StreamOffset = offset
-                        offset = offset + _16ByteAlign(e.StreamSize)
+                    streamData = f.read()
+                    tocData = entry.TocData
+                    tocData[8:12] = len(streamData).to_bytes(4, byteorder="little")
+                    self.GetToc().SetEntryData(entryIndex=index, tocData=tocData, streamData=streamData, rebuildHeaders=False)
             else: #part of a bank!
                 if not isinstance(entry, TocBankEntry):
                     #either wrong index for a bank or someone accidentally put a - in the filename for a loose wem
                     print("When importing \"" + os.path.basename(file) + "\", no matching soundbank found. Check filename.")
                     continue
                 modifiedBankEntries[entry.FileID] = entry
-                self.modifiedEntries.add(entry.FileID)
                 wemIndex = self.GetFileNumberPrefix(os.path.basename(file).split("-")[1])
                 with open(file, 'rb') as f:
                     entry.SetWem(wemIndex, f.read(), False)
-                offset = entry.TocDataOffset + _16ByteAlign(entry.TocDataSize)
-                for e in self.streamToc.TocEntries[self.streamToc.TocEntries.index(entry)+1:]:
-                    e.TocDataOffset = offset
-                    offset = offset + _16ByteAlign(e.TocDataSize)
             progressWindow.Step()
         progressWindow.Destroy()
         
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(modifiedBankEntries.values()))
         progressWindow.Show()
         progressWindow.SetText("Rebuilding soundbanks")
+        self.GetToc().RebuildEntryHeaders()
         for entry in modifiedBankEntries.values():
             entry.RebuildTocData()
             progressWindow.Step()
@@ -800,7 +832,7 @@ class MainWindow:
         self.menu.add_cascade(label="Dump", menu=self.dumpMenu)
         self.root.config(menu=self.menu)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel)
-        
+        self.root.resizable(False, False)
         self.root.mainloop()
         
     def _on_mousewheel(self, event):
@@ -810,7 +842,6 @@ class MainWindow:
         for child in self.mainCanvas.winfo_children():
             child.destroy()
         self.mainCanvas.delete("all")
-        self.unsavedEntries = fileHandler.GetModifiedEntries() - self.savedEntries
         rows = []
         for entry in toc.TocEntries:
             if entry.TypeID == 5785811756662211598:
@@ -820,7 +851,7 @@ class MainWindow:
                 row['Size'] = entry.StreamSize
                 row['File Offset'] = entry.StreamOffset
                 row['EntryIndex'] = entry.EntryIndex
-                row['Unsaved'] = entry.FileID in self.unsavedEntries
+                row['Unsaved'] = entry.Modified
                 rows.append(row)
             if entry.TypeID == 6006249203084351385:
                 row = {}
@@ -830,23 +861,17 @@ class MainWindow:
                 row['Size'] = entry.TocDataSize
                 row['File Offset'] = entry.TocDataOffset
                 row['EntryIndex'] = entry.EntryIndex
-                row['Unsaved'] = entry.FileID in self.unsavedEntries
+                row['Unsaved'] = entry.Modified
                 rows.append(row)
         self.draw_height = 0
         self.mainCanvas.configure(scrollregion=(0,0,1280,len(rows)*30+5))
         scrollregionSize = len(rows)*30+5
         for row in rows:
-            if row['Unsaved']:
-                self.mainCanvas.create_rectangle(35, self.draw_height, 335, self.draw_height+30, fill="lawn green")
-                self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill="lawn green")
-                self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill="lawn green")
-                self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill="lawn green")
-
-            else:
-                self.mainCanvas.create_rectangle(35, self.draw_height, 335, self.draw_height+30, fill="white")
-                self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill="white")
-                self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill="white")
-                self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill="white")
+            fillColor = "lawn green" if row['Unsaved'] else "white"
+            self.mainCanvas.create_rectangle(35, self.draw_height, 335, self.draw_height+30, fill=fillColor)
+            self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill=fillColor)
+            self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill=fillColor)
+            self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill=fillColor)
             if "expand" in row:
                 t = ">"
                 try:
@@ -870,10 +895,11 @@ class MainWindow:
                     bankEntry = self.fileHandler.GetToc().GetEntryByID(row['ID'])
                     wem_count = 0
                     for wem in bankEntry.Wems:#construct a row
-                        self.mainCanvas.create_rectangle(65, self.draw_height, 335, self.draw_height+30, fill="white")
-                        self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill="white")
-                        self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill="white")
-                        self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill="white")
+                        fillColor = "lawn green" if wem.Modified else "white"
+                        self.mainCanvas.create_rectangle(65, self.draw_height, 335, self.draw_height+30, fill=fillColor)
+                        self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill=fillColor)
+                        self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill=fillColor)
+                        self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill=fillColor)
                         self.mainCanvas.create_text(70, self.draw_height+5, text=(str(row['EntryIndex']) + "-" + str(wem_count) + ".wem"), fill='black', font=('Arial', 16, 'bold'), anchor='nw')
                         self.mainCanvas.create_text(340, self.draw_height+5, text=wem.FileID, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
                         self.mainCanvas.create_text(640, self.draw_height+5, text=wem.DataOffset, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
@@ -909,7 +935,7 @@ class MainWindow:
         self.Update()
         
     def SaveArchive(self):
-        self.savedEntries = fileHandler.GetModifiedEntries()
+        #clear modifications?
         self.soundHandler.KillSound()
         self.fileHandler.SaveArchiveFile()
         self.Update()
@@ -924,20 +950,20 @@ class MainWindow:
         self.fileHandler.DumpAllWems()
         
     def PlayWemFromStream(self, fileID):
-        soundHandler.PlayWem(fileID, self.fileHandler.GetToc().GetEntryByID(fileID).StreamData)
+        self.soundHandler.PlayWem(fileID, self.fileHandler.GetToc().GetEntryByID(fileID).StreamData)
         
     def PlayWemFromBank(self, bankID, wemID):
-        soundHandler.PlayWem(int(str(bankID) + str(wemID)), self.fileHandler.GetToc().GetEntryByID(bankID).GetWems()[wemID].GetData())
+        self.soundHandler.PlayWem(int(str(bankID) + str(wemID)), self.fileHandler.GetToc().GetEntryByID(bankID).GetWems()[wemID].GetData())
         
     def WritePatch(self):
-        self.savedEntries = fileHandler.GetModifiedEntries()
+        #clear modifications?
         self.soundHandler.KillSound()
-        fileHandler.WritePatch()
+        self.fileHandler.WritePatch()
         self.Update()
         
     def LoadPatch(self):
         self.soundHandler.KillSound()
-        fileHandler.LoadPatch()
+        self.fileHandler.LoadPatch()
         self.Update()
     
 def exitHandler():
