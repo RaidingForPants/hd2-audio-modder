@@ -331,6 +331,14 @@ class StreamToc:
             if entry.FileID == fileID:
                 self.TocEntries[self.TocEntries.index(entry)] = newEntry
                 
+    def RevertModifications(self, entry=None):
+        if entry is None:
+            for e in self.TocEntries:
+                e.RevertModifications()
+        else:
+            entry.RevertModifications()
+        self.RebuildEntryHeaders()
+                
     def RebuildEntryHeaders(self):
         tocOffset = 80 + 32 * len(self.TocTypes) + 80 * len(self.TocEntries)
         streamOffset = 0
@@ -474,7 +482,12 @@ class TocBankEntry(TocEntry):
         self.Wems[wemIndex].SetData(wemData)
         if rebuildToc:
             self.RebuildTocData() #rebuildToc could be False if you intend to call SetWem many times as a performance optimization
-        
+            
+    def RevertModifications(self):
+        self.Modified = False
+        for wem in self.Wems:
+            wem.Revert()
+        self.RebuildTocData()
         
     def RebuildTocData(self):
         offset = 0
@@ -617,6 +630,22 @@ class FileHandler:
         
     def DumpAll():
         pass
+        
+    def RevertAll(self):
+        self.GetToc().RevertModifications()
+        
+    def RevertEntry(self, fileID):
+        entry = self.GetToc().GetEntryByID(fileID)
+        self.GetToc().RevertModifications(entry)
+        
+    def RevertBankWem(self, fileID, wemIndex):
+        entry = self.GetToc().GetEntryByID(fileID)
+        entry.Wems[wemIndex].Revert()
+        entry.RebuildTocData()
+        for wem in entry.Wems:
+            if wem.Modified:
+                return
+        entry.Modified = False
     
     def DumpAllWems(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
@@ -825,10 +854,14 @@ class MainWindow:
         self.fileMenu.add_command(label="Import Patch File", command=self.LoadPatch)
         self.fileMenu.add_command(label="Import .wems", command=self.LoadWems)
         
+        self.editMenu = Menu(self.menu)
+        self.editMenu.add_command(label="Revert All Changes", command=self.RevertAll)
+        
         self.dumpMenu = Menu(self.menu)
         self.dumpMenu.add_command(label="Dump all .wems", command=self.DumpAllWems)
         
         self.menu.add_cascade(label="File", menu=self.fileMenu)
+        self.menu.add_cascade(label="Edit", menu=self.editMenu)
         self.menu.add_cascade(label="Dump", menu=self.dumpMenu)
         self.root.config(menu=self.menu)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel)
@@ -885,6 +918,9 @@ class MainWindow:
                 #Play: unicode 23f5 or 25B6. Stop: 23f9
                 play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'), command=partial(self.PlayWemFromStream, row['ID']))
                 self.mainCanvas.create_window(10, self.draw_height+3, window=play, anchor='nw')
+            if row['Unsaved']:
+                revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertEntry, row['ID']))
+                self.mainCanvas.create_window(305, self.draw_height+2, window=revert, anchor='nw')
             self.mainCanvas.create_text(40, self.draw_height+5, text=row['name'], fill='black', font=('Arial', 16, 'bold'), anchor='nw')
             self.mainCanvas.create_text(340, self.draw_height+5, text=row['ID'], fill='black', font=('Arial', 16, 'bold'), anchor='nw')
             self.mainCanvas.create_text(640, self.draw_height+5, text=row['File Offset'], fill='black', font=('Arial', 16, 'bold'), anchor='nw')
@@ -906,6 +942,9 @@ class MainWindow:
                         self.mainCanvas.create_text(940, self.draw_height+5, text=wem.DataSize, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
                         play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'), command=partial(self.PlayWemFromBank, row['ID'], wem_count))
                         self.mainCanvas.create_window(40, self.draw_height+3, window=play, anchor='nw')
+                        if wem.Modified:
+                            revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertWem, row['ID'], wem_count))
+                            self.mainCanvas.create_window(305, self.draw_height+2, window=revert, anchor='nw')
                         self.draw_height = self.draw_height + 30
                         scrollregionSize = scrollregionSize + 30
                         wem_count = wem_count + 1
@@ -954,6 +993,21 @@ class MainWindow:
         
     def PlayWemFromBank(self, bankID, wemID):
         self.soundHandler.PlayWem(int(str(bankID) + str(wemID)), self.fileHandler.GetToc().GetEntryByID(bankID).GetWems()[wemID].GetData())
+        
+    def RevertEntry(self, fileID):
+        self.soundHandler.KillSound()
+        self.fileHandler.RevertEntry(fileID)
+        self.Update()
+        
+    def RevertWem(self, fileID, wemIndex):
+        self.soundHandler.KillSound()
+        self.fileHandler.RevertBankWem(fileID, wemIndex)
+        self.Update()
+        
+    def RevertAll(self):
+        self.soundHandler.KillSound()
+        self.fileHandler.RevertAll()
+        self.Update()
         
     def WritePatch(self):
         #clear modifications?
