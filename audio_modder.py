@@ -847,8 +847,7 @@ class MainWindow:
     def __init__(self, fileHandler, soundHandler):
         self.fileHandler = fileHandler
         self.soundHandler = soundHandler
-        self.savedEntries = set()
-        self.unsavedEntries = set()
+        self.expandedBanks = set()
         
         self.root = Tk()
         self.titleCanvas = Canvas(self.root, width=1280, height=30)
@@ -873,7 +872,6 @@ class MainWindow:
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry("1280x720")
-        self.drawBankSubWindows = {}
 
         self.menu = Menu(self.root)
         
@@ -901,115 +899,100 @@ class MainWindow:
     def _on_mousewheel(self, event):
         self.mainCanvas.yview_scroll(int(-1*(event.delta/120)), 'units')
         
+    def CreateTableRow(self, tocEntry):
+        fillColor = "lawn green" if tocEntry.Modified else "white"
+        self.mainCanvas.create_rectangle(35, self.draw_height, 335, self.draw_height+30, fill=fillColor)
+        self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill=fillColor)
+        self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill=fillColor)
+        self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill=fillColor)
+        name = str(tocEntry.EntryIndex) + (".wem" if tocEntry.TypeID == 5785811756662211598 else ".bnk")
+        ID = tocEntry.FileID
+        offset = tocEntry.StreamOffset if tocEntry.TypeID == 5785811756662211598 else tocEntry.TocDataOffset
+        size = tocEntry.StreamSize if tocEntry.TypeID == 5785811756662211598 else tocEntry.TocDataSize
+        self.mainCanvas.create_text(40, self.draw_height+5, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        self.mainCanvas.create_text(340, self.draw_height+5, text=ID, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        self.mainCanvas.create_text(640, self.draw_height+5, text=offset, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        self.mainCanvas.create_text(940, self.draw_height+5, text=size, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        if tocEntry.TypeID == 5785811756662211598:
+            #create play button
+            play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
+            def resetButtonIcon(button):
+                button.configure(text= '\u23f5', fg='green')
+            def pressButton(button, rowID, callback):
+                if button['text'] == '\u23f9':
+                    button.configure(text= '\u23f5', fg='green')
+                else:
+                    button.configure(text= '\u23f9', fg='red')
+                self.PlayWemFromStream(rowID, callback)
+            play.configure(command=partial(pressButton, play, tocEntry.FileID, partial(resetButtonIcon, play)))
+            self.mainCanvas.create_window(10, self.draw_height+3, window=play, anchor='nw')
+        else:
+            #create expand button
+            t = "v" if tocEntry.FileID in self.expandedBanks else ">"
+            expand = Button(self.mainCanvas, text=t,command=partial(self.ExpandBank, tocEntry.FileID))
+            self.mainCanvas.create_window(15, self.draw_height+3, window=expand, anchor='nw')
+        if tocEntry.Modified:
+            #create revert button
+            revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertEntry, tocEntry.FileID))
+            self.mainCanvas.create_window(305, self.draw_height+2, window=revert, anchor='nw')
+        
+    def CreateBankSubtableRow(self, bankWem, bankIdx, wemIdx):
+        fillColor = "lawn green" if bankWem.Modified else "white"
+        self.mainCanvas.create_rectangle(65, self.draw_height, 335, self.draw_height+30, fill=fillColor)
+        self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill=fillColor)
+        self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill=fillColor)
+        self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill=fillColor)
+        ID = bankWem.FileID
+        offset = bankWem.DataOffset
+        size = bankWem.DataSize
+        name = str(bankIdx) + "-" + str(wemIdx) + ".wem"
+        self.mainCanvas.create_text(70, self.draw_height+5, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        self.mainCanvas.create_text(340, self.draw_height+5, text=ID, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        self.mainCanvas.create_text(640, self.draw_height+5, text=offset, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        self.mainCanvas.create_text(940, self.draw_height+5, text=size, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        
+        fileID = self.fileHandler.GetToc().GetEntryByIndex(bankIdx).FileID
+        
+        #create play button
+        play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
+        def resetButtonIcon(button):
+            button.configure(text= '\u23f5', fg='green')
+        def pressButton(button, rowID, wemCount, callback):
+            if button['text'] == '\u23f9':
+                button.configure(text= '\u23f5', fg='green')
+            else:
+                button.configure(text= '\u23f9', fg='red')
+            self.PlayWemFromBank(rowID, wemCount, callback)
+        play.configure(command=partial(pressButton, play, fileID, wemIdx, partial(resetButtonIcon, play)))
+        self.mainCanvas.create_window(40, self.draw_height+3, window=play, anchor='nw')
+        
+        #create revert button
+        if bankWem.Modified:
+            revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertWem, fileID, wem_count))
+            self.mainCanvas.create_window(305, self.draw_height+2, window=revert, anchor='nw')
+        
+        
     def UpdateTable(self, toc):
         for child in self.mainCanvas.winfo_children():
             child.destroy()
         self.mainCanvas.delete("all")
-        rows = []
-        for entry in toc.TocEntries:
-            if entry.TypeID == 5785811756662211598:
-                row = {}
-                row['name'] = str(entry.EntryIndex) + ".wem"
-                row['ID'] = entry.FileID
-                row['Size'] = entry.StreamSize
-                row['File Offset'] = entry.StreamOffset
-                row['EntryIndex'] = entry.EntryIndex
-                row['Unsaved'] = entry.Modified
-                rows.append(row)
-            if entry.TypeID == 6006249203084351385:
-                row = {}
-                row['name'] = str(entry.EntryIndex) + ".bnk"
-                row['expand'] = True
-                row['ID'] = entry.FileID
-                row['Size'] = entry.TocDataSize
-                row['File Offset'] = entry.TocDataOffset
-                row['EntryIndex'] = entry.EntryIndex
-                row['Unsaved'] = entry.Modified
-                rows.append(row)
+        validTypes = [5785811756662211598, 6006249203084351385]
         self.draw_height = 0
-        self.mainCanvas.configure(scrollregion=(0,0,1280,len(rows)*30+5))
-        scrollregionSize = len(rows)*30+5
-        for row in rows:
-            fillColor = "lawn green" if row['Unsaved'] else "white"
-            self.mainCanvas.create_rectangle(35, self.draw_height, 335, self.draw_height+30, fill=fillColor)
-            self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill=fillColor)
-            self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill=fillColor)
-            self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill=fillColor)
-            if "expand" in row:
-                t = ">"
-                try:
-                    if self.drawBankSubWindows[row['ID']]:
-                        t = "v"
-                except KeyError:
-                    pass
-                expand = Button(self.mainCanvas, text=t,command=partial(self.ExpandBank, row['ID']))
-                self.mainCanvas.create_window(15, self.draw_height+3, window=expand, anchor='nw')
-            else:
-                #Play: unicode 23f5 or 25B6. Stop: 23f9
-                play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
-                def resetButtonIcon(button):
-                    button.configure(text= '\u23f5', fg='green')
-                def pressButton(button, rowID, callback):
-                    if button['text'] == '\u23f9':
-                        button.configure(text= '\u23f5', fg='green')
-                    else:
-                        button.configure(text= '\u23f9', fg='red')
-                    self.PlayWemFromStream(rowID, callback)
-                play.configure(command=partial(pressButton, play, row['ID'], partial(resetButtonIcon, play)))
-                self.mainCanvas.create_window(10, self.draw_height+3, window=play, anchor='nw')
-            if row['Unsaved']:
-                revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertEntry, row['ID']))
-                self.mainCanvas.create_window(305, self.draw_height+2, window=revert, anchor='nw')
-            self.mainCanvas.create_text(40, self.draw_height+5, text=row['name'], fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-            self.mainCanvas.create_text(340, self.draw_height+5, text=row['ID'], fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-            self.mainCanvas.create_text(640, self.draw_height+5, text=row['File Offset'], fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-            self.mainCanvas.create_text(940, self.draw_height+5, text=row['Size'], fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-            self.draw_height = self.draw_height + 30
-            try: #add bank subwindows
-                if self.drawBankSubWindows[row['ID']]:
-                    bankEntry = self.fileHandler.GetToc().GetEntryByID(row['ID'])
-                    wem_count = 0
-                    for wem in bankEntry.Wems:#construct a row
-                        fillColor = "lawn green" if wem.Modified else "white"
-                        self.mainCanvas.create_rectangle(65, self.draw_height, 335, self.draw_height+30, fill=fillColor)
-                        self.mainCanvas.create_rectangle(335, self.draw_height, 635, self.draw_height+30, fill=fillColor)
-                        self.mainCanvas.create_rectangle(635, self.draw_height, 935, self.draw_height+30, fill=fillColor)
-                        self.mainCanvas.create_rectangle(935, self.draw_height, 1235, self.draw_height+30, fill=fillColor)
-                        self.mainCanvas.create_text(70, self.draw_height+5, text=(str(row['EntryIndex']) + "-" + str(wem_count) + ".wem"), fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-                        self.mainCanvas.create_text(340, self.draw_height+5, text=wem.FileID, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-                        self.mainCanvas.create_text(640, self.draw_height+5, text=wem.DataOffset, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-                        self.mainCanvas.create_text(940, self.draw_height+5, text=wem.DataSize, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-                        play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
-                        def resetButtonIcon(button):
-                            button.configure(text= '\u23f5', fg='green')
-                        def pressButton(button, rowID, wemCount, callback):
-                            if button['text'] == '\u23f9':
-                                button.configure(text= '\u23f5', fg='green')
-                            else:
-                                button.configure(text= '\u23f9', fg='red')
-                            self.PlayWemFromBank(rowID, wemCount, callback)
-                        play.configure(command=partial(pressButton, play, row['ID'], wem_count, partial(resetButtonIcon, play)))
-                        self.mainCanvas.create_window(40, self.draw_height+3, window=play, anchor='nw')
-                        if wem.Modified:
-                            revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertWem, row['ID'], wem_count))
-                            self.mainCanvas.create_window(305, self.draw_height+2, window=revert, anchor='nw')
-                        self.draw_height = self.draw_height + 30
-                        scrollregionSize = scrollregionSize + 30
-                        wem_count = wem_count + 1
-                    self.mainCanvas.configure(scrollregion=(0,0,1280,scrollregionSize))
-            except KeyError:
-                pass
-                
-
-    def ExpandBank(self, bankIdx):
+        for entry in toc.TocEntries:
+            if entry.TypeID in validTypes:
+                self.CreateTableRow(entry)
+                self.draw_height += 30
+                if entry.FileID in self.expandedBanks:
+                    for index, wem in enumerate(entry.Wems):
+                        self.CreateBankSubtableRow(wem, entry.EntryIndex, index)
+                        self.draw_height += 30               
+        self.mainCanvas.configure(scrollregion=(0,0,1280,self.draw_height + 5))
+        
+    def ExpandBank(self, bankId):
         try:
-            if self.drawBankSubWindows[bankIdx]:
-                self.drawBankSubWindows[bankIdx] = False
-                self.Update()
-                return
+            self.expandedBanks.remove(bankId)
         except KeyError:
-            pass
-        self.drawBankSubWindows[bankIdx] = True
+            self.expandedBanks.add(bankId)
         self.Update()
     
     def Update(self):
@@ -1018,7 +1001,7 @@ class MainWindow:
     def LoadArchive(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadArchiveFile()
-        self.drawBankSubWindows = {}
+        self.expandedBanks.clear()
         self.Update()
         
     def SaveArchive(self):
