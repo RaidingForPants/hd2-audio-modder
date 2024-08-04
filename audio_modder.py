@@ -16,6 +16,7 @@ import time
 import atexit
 from itertools import takewhile
 import copy
+import numpy
 
 class MemoryStream:
     '''
@@ -611,13 +612,39 @@ class SoundHandler:
                     self.callback = None
                 return (None, pyaudio.paComplete)
             data = self.waveFile.readframes(frame_count)
+            if self.waveFile.getnchannels() > 2:
+                data = self.DownmixToStereo(data, self.waveFile.getnchannels(), self.waveFile.getsampwidth(), frame_count)
             return (data, pyaudio.paContinue)
         self.audioProcess = self.audio.open(format=self.audio.get_format_from_width(self.waveFile.getsampwidth()),
-                channels=self.waveFile.getnchannels(),
+                channels = min(self.waveFile.getnchannels(), 2),
                 rate=self.waveFile.getframerate(),
                 output=True,
                 stream_callback=callback)
         self.audioFile = f"{filename}.wav"
+        
+    def DownmixToStereo(self, data, channels, channelWidth, frameCount):
+        if channelWidth == 2:
+            arr = numpy.frombuffer(data, dtype=numpy.int16)
+            stereoArr = numpy.zeros(shape=(frameCount, 2), dtype=numpy.int16)
+        elif channelWidth == 1:
+            arr = numpy.frombuffer(data, dtype=numpy.int8)
+            stereoArr = numpy.zeros(shape=(frameCount, 2), dtype=numpy.int8)
+        elif channelWidth == 4:
+            arr = numpy.frombuffer(data, dtype=numpy.int32)
+            stereoArr = numpy.zeros(shape=(frameCount, 2), dtype=numpy.int32)
+        arr = arr.reshape((frameCount, channels))
+        
+        if channels == 4:
+            for index, frame in enumerate(arr):
+                stereoArr[index][0] = int(0.42265 * frame[0] + 0.366025 * frame[2] + 0.211325 * frame[3])
+                stereoArr[index][1] = int(0.42265 * frame[1] + 0.366025 * frame[3] + 0.211325 * frame[2])
+                
+        if channels == 6:
+            for index, frame in enumerate(arr):
+                stereoArr[index][0] = int(0.374107*frame[1] + 0.529067*frame[0] + 0.458186*frame[3] + 0.264534*frame[4] + 0.374107*frame[5])
+                stereoArr[index][1] = int(0.374107*frame[1] + 0.529067*frame[2] + 0.458186*frame[4] + 0.264534*frame[3] + 0.374107*frame[5])
+        
+        return stereoArr.tobytes()
         
 
 class ProgressWindow:
