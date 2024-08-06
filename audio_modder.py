@@ -501,7 +501,7 @@ class TocBankEntry(TocEntry):
         offset = 0
         originalDataSize = self.dataSectionSize
         self.dataSectionSize = 0
-        for index, wem in enumerate(self.Wems):
+        for index, wem in enumerate(self.Wems.values()):
             if index != len(self.Wems)-1:
                 self.dataSectionSize += _16ByteAlign(wem.DataSize)
             else:
