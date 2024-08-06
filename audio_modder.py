@@ -917,7 +917,7 @@ class MainWindow:
         self.root = Tk()
 
         self.scrollBar = Scrollbar(self.root, orient=VERTICAL)
-        self.mainCanvas = Canvas(self.root, width=420, height=720, yscrollcommand=self.scrollBar.set)
+        self.mainCanvas = Canvas(self.root, width=500, height=720, yscrollcommand=self.scrollBar.set)
         self.scrollBar['command'] = self.mainCanvas.yview
         
         #self.titleCanvas.pack(side="top")
@@ -925,7 +925,7 @@ class MainWindow:
         self.mainCanvas.pack(side="left")
         
         self.root.title("Helldivers 2 Audio Modder")
-        self.root.geometry("420x720")
+        self.root.geometry("500x720")
 
         self.menu = Menu(self.root)
         
@@ -957,10 +957,12 @@ class MainWindow:
     def CreateTableRow(self, tocEntry):
         fillColor = "lawn green" if tocEntry.Modified else "white"
         self.mainCanvas.create_rectangle(65, self.draw_height, 400, self.draw_height+30, fill=fillColor)
+        self.mainCanvas.create_rectangle(400, self.draw_height, 480, self.draw_height+30, fill=fillColor)
         
         name = str(tocEntry.FileID) + (".wem" if tocEntry.TypeID == 5785811756662211598 else ".bnk")
         
         self.mainCanvas.create_text(70, self.draw_height+5, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        self.mainCanvas.create_text(405, self.draw_height+5, text=tocEntry.EntryIndex, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
         if tocEntry.TypeID == 5785811756662211598:
             #create play button
             play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
