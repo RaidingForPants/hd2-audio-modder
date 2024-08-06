@@ -274,10 +274,7 @@ class StreamToc:
         TocEntryStart   = self.TocFile.tell()
         #entryList = [TocEntryFactory.CreateTocEntry(self.TocFile) for n in range(self.numFiles)]
         entryList = list(TocEntryFactory.CreateTocEntries(self.numFiles, self.TocFile))
-        print(self.numFiles)
         idList = [entry.FileID for entry in entryList]
-        for entry in entryList:
-            print(entry.TypeID)
         self.TocEntries = { id:entry for (id, entry) in zip(idList, entryList) }
         for key in sorted(self.TocEntries.keys()):
             self.TocEntries[key].LoadData(self.TocFile, self.GpuFile, self.StreamFile)
@@ -660,7 +657,6 @@ class SoundHandler:
                 stereoArr[index][1] = int(0.374107*frame[1] + 0.529067*frame[2] + 0.458186*frame[4] + 0.264534*frame[3] + 0.374107*frame[5])
         
         return stereoArr.tobytes()
-
 
 class ProgressWindow:
     def __init__(self, title, maxProgress):
