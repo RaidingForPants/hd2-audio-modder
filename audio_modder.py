@@ -278,7 +278,6 @@ class StreamToc:
         self.TocEntries = { id:entry for (id, entry) in zip(idList, entryList) }
         for key in sorted(self.TocEntries.keys()):
             self.TocEntries[key].LoadData(self.TocFile, self.GpuFile, self.StreamFile)
-            
         return True
 
     def SaveFile(self):
@@ -906,6 +905,22 @@ class FileHandler:
         
     def LoadBnks():
         pass
+        
+class TableInfo:
+
+    WEM = 0
+    BANK = 1
+    EXPANDED_BANK = 2
+    BANK_WEM = 3
+
+    def __init__(self):
+        self._type = 0
+        self.modified = False
+        self.hidden = False
+        self.rectangles = []
+        self.buttons = []
+        self.revertButton = None
+        self.text = []
 
 class MainWindow:
 
@@ -913,33 +928,49 @@ class MainWindow:
         self.fileHandler = fileHandler
         self.soundHandler = soundHandler
         self.expandedBanks = set()
+        self.tableInfo = {}
         
         self.root = Tk()
+        
+        self.fakeImage = tkinter.PhotoImage(width=1, height=1)
+        
+        self.titleCanvas = Canvas(self.root, width=500, height=30)
+        self.searchText = tkinter.StringVar(self.root)
+        self.searchBar = Entry(self.titleCanvas, textvariable=self.searchText, font=('Arial', 16))
+        self.searchText.trace("w", lambda name, index, mode, searchText=self.searchText: self.Search(searchText))
+        self.titleCanvas.pack(side="top")
+        
+        self.titleCanvas.create_text(230, 0, text="\u2315", fill='gray', font=('Arial', 20), anchor='nw')
+        self.titleCanvas.create_window(250, 3, window=self.searchBar, anchor='nw')
 
         self.scrollBar = Scrollbar(self.root, orient=VERTICAL)
         self.mainCanvas = Canvas(self.root, width=500, height=720, yscrollcommand=self.scrollBar.set)
         self.scrollBar['command'] = self.mainCanvas.yview
         
-        #self.titleCanvas.pack(side="top")
+        self.titleCanvas.pack(side="top")
         self.scrollBar.pack(side="right", fill="y")
         self.mainCanvas.pack(side="left")
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry("500x720")
-
-        self.menu = Menu(self.root)
         
-        self.fileMenu = Menu(self.menu)
+        self.rightClickMenu = Menu(self.root, tearoff=0)
+        self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
+        self.rightClickID = 0
+
+        self.menu = Menu(self.root, tearoff=0)
+        
+        self.fileMenu = Menu(self.menu, tearoff=0)
         self.fileMenu.add_command(label="Load Archive", command=self.LoadArchive)
         self.fileMenu.add_command(label="Save Archive", command=self.SaveArchive)
         self.fileMenu.add_command(label="Write Patch", command=self.WritePatch)
         self.fileMenu.add_command(label="Import Patch File", command=self.LoadPatch)
         self.fileMenu.add_command(label="Import .wems", command=self.LoadWems)
         
-        self.editMenu = Menu(self.menu)
+        self.editMenu = Menu(self.menu, tearoff=0)
         self.editMenu.add_command(label="Revert All Changes", command=self.RevertAll)
         
-        self.dumpMenu = Menu(self.menu)
+        self.dumpMenu = Menu(self.menu, tearoff=0)
         self.dumpMenu.add_command(label="Dump all as .wav", command=self.DumpAllAsWav)
         self.dumpMenu.add_command(label="Dump all as .wem", command=self.DumpAllAsWem)
         
@@ -948,24 +979,51 @@ class MainWindow:
         self.menu.add_cascade(label="Dump", menu=self.dumpMenu)
         self.root.config(menu=self.menu)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.mainCanvas.bind_all("<Button-3>", self._on_rightclick)
         self.root.resizable(False, False)
         self.root.mainloop()
+        
+    def _on_rightclick(self, event):
+        try:
+            canvas = event.widget
+            self.rightClickID = int(canvas.gettags("current")[0])
+            self.rightClickMenu.tk_popup(event.x_root, event.y_root)
+        except (AttributeError, IndexError):
+            pass
+        finally:
+            self.rightClickMenu.grab_release()
+            
+    def CopyID(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.rightClickID)
+        self.root.update()
         
     def _on_mousewheel(self, event):
         self.mainCanvas.yview_scroll(int(-1*(event.delta/120)), 'units')
         
     def CreateTableRow(self, tocEntry):
+        
+        info = TableInfo()
+    
         fillColor = "lawn green" if tocEntry.Modified else "white"
-        self.mainCanvas.create_rectangle(65, self.draw_height, 400, self.draw_height+30, fill=fillColor)
-        self.mainCanvas.create_rectangle(400, self.draw_height, 480, self.draw_height+30, fill=fillColor)
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 335, 30, fill=fillColor, tags=(tocEntry.FileID, "rect")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.FileID, "rect")))
         
         name = str(tocEntry.FileID) + (".wem" if tocEntry.TypeID == 5785811756662211598 else ".bnk")
+
+        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(tocEntry.FileID, "name")))
+        info.text.append(self.mainCanvas.create_text(0, 0, text=tocEntry.EntryIndex, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tag=tocEntry.FileID))
         
-        self.mainCanvas.create_text(70, self.draw_height+5, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
-        self.mainCanvas.create_text(405, self.draw_height+5, text=tocEntry.EntryIndex, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        #create revert button
+        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertEntry, tocEntry.FileID), image=self.fakeImage, compound='c', height=20, width=20)
+        
+        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=tocEntry.FileID)
+        info.buttons.append(info.revertButton)
+        
         if tocEntry.TypeID == 5785811756662211598:
+            info._type = TableInfo.WEM
             #create play button
-            play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
+            play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
             def resetButtonIcon(button):
                 button.configure(text= '\u23f5', fg='green')
             def pressButton(button, fileID, callback):
@@ -975,25 +1033,51 @@ class MainWindow:
                     button.configure(text= '\u23f9', fg='red')
                 self.PlayWemFromStream(fileID, callback)
             play.configure(command=partial(pressButton, play, tocEntry.FileID, partial(resetButtonIcon, play)))
-            self.mainCanvas.create_window(40, self.draw_height+3, window=play, anchor='nw')
+            info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=tocEntry.FileID))
         else:
+            info._type = TableInfo.BANK
             #create expand button
-            t = "v" if tocEntry.FileID in self.expandedBanks else ">"
-            expand = Button(self.mainCanvas, text=t,command=partial(self.ExpandBank, tocEntry.FileID))
-            self.mainCanvas.create_window(45, self.draw_height+3, window=expand, anchor='nw')
-        #create revert button
-        if tocEntry.Modified:
-            revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertEntry, tocEntry.FileID))
-            self.mainCanvas.create_window(10, self.draw_height+3, window=revert, anchor='nw')
+            def pressButton(button, bankId):
+                if button['text'] == "v":
+                    button.configure(text=">")
+                    #hide
+                    entry = self.fileHandler.GetToc().GetEntryByID(bankId)
+                    for wem in entry.Wems.values():
+                        self.UpdateTableEntry(wem.FileID, action="hide")
+                else:
+                    button.configure(text="v")
+                    #show
+                    entry = self.fileHandler.GetToc().GetEntryByID(bankId)
+                    for wem in entry.Wems.values():
+                        self.UpdateTableEntry(wem.FileID, action="show")
+                self.Update()
+            expand = Button(self.mainCanvas, text=">", font=('Arial', 14, 'bold'), height=20, width=20, image=self.fakeImage, compound='c')
+            expand.configure(command=partial(pressButton, expand, tocEntry.FileID))
+            info.buttons.append(self.mainCanvas.create_window(0, 0, window=expand, anchor='nw', tag=tocEntry.FileID))
+        
+
+        self.tableInfo[tocEntry.FileID] = info
         
     def CreateBankSubtableRow(self, bankWem):
+    
+        info = TableInfo()
+        info.hidden = True
+        info._type = TableInfo.BANK_WEM
+    
         fillColor = "lawn green" if bankWem.Modified else "white"
-        self.mainCanvas.create_rectangle(95, self.draw_height, 400, self.draw_height+30, fill=fillColor)
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor, tags=(bankWem.FileID, "rect")))
         name = str(bankWem.FileID) + ".wem"
-        self.mainCanvas.create_text(100, self.draw_height+5, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw')
+        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(bankWem.FileID, "name")))
+        
+        
+        #create revert button
+        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertEntry, bankWem.FileID), image=self.fakeImage, compound='c', height=20, width=20)
+        
+        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=bankWem.FileID)
+        info.buttons.append(info.revertButton)
         
         #create play button
-        play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 10, 'bold'))
+        play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
         def resetButtonIcon(button):
             button.configure(text= '\u23f5', fg='green')
         def pressButton(button, fileID, callback):
@@ -1003,54 +1087,116 @@ class MainWindow:
                 button.configure(text= '\u23f9', fg='red')
             self.PlayWemFromBank(fileID, callback)
         play.configure(command=partial(pressButton, play, bankWem.FileID, partial(resetButtonIcon, play)))
-        self.mainCanvas.create_window(70, self.draw_height+3, window=play, anchor='nw')
+        info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=bankWem.FileID))
         
-        #create revert button
-        if bankWem.Modified:
-            revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 10, 'bold'), command=partial(self.RevertEntry, bankWem.FileID))
-            self.mainCanvas.create_window(40, self.draw_height+2, window=revert, anchor='nw')
-        
-    def UpdateTable(self, toc):
+        self.tableInfo[bankWem.FileID] = info
+            
+    def CreateTable(self, toc):
         for child in self.mainCanvas.winfo_children():
             child.destroy()
         self.mainCanvas.delete("all")
+        self.tableInfo = {}
         validTypes = [5785811756662211598, 6006249203084351385]
-        self.draw_height = 0
+        draw_y = 0
         for key in sorted(toc.TocEntries.keys()):
             entry = toc.TocEntries[key]
+            name = str(entry.FileID) + (".wem" if entry.TypeID == 5785811756662211598 else ".bnk")
             if entry.TypeID in validTypes:
                 self.CreateTableRow(entry)
-                self.draw_height += 30
-                if entry.FileID in self.expandedBanks:
+                draw_y += 30
+                if entry.TypeID == 6006249203084351385:
                     for id, wem in entry.Wems.items():
                         self.CreateBankSubtableRow(wem)
-                        self.draw_height += 30               
-        self.mainCanvas.configure(scrollregion=(0,0,1280,self.draw_height + 5))
+                        draw_y += 30               
+        self.mainCanvas.configure(scrollregion=(0,0,500,draw_y + 5))
+    
+    def UpdateTableEntry(self, fileID, action="update"):
+        if action == "update":
+            entry = self.fileHandler.GetToc().GetEntryByID(fileID)
+            self.tableInfo[fileID].modified = entry.Modified
+            for rect in self.tableInfo[fileID].rectangles:
+                if entry.Modified:
+                    self.mainCanvas.itemconfigure(rect, fill="lawn green")
+                else:
+                    self.mainCanvas.itemconfigure(rect, fill="white")
+        elif action == "show":
+            self.tableInfo[fileID].hidden = False
+        elif action == "hide":
+            self.tableInfo[fileID].hidden = True
+            
+    def UpdateTableEntries(self):
+        for fileID in self.fileHandler.GetTocEntries().keys():
+            self.UpdateTableEntry(fileID)
+            
+    def DrawTableRow(self, fileID, x, y):
+        rowInfo = self.tableInfo[fileID]
+        if not rowInfo.hidden:
+            if rowInfo._type == TableInfo.BANK_WEM: x += 30
+            for button in rowInfo.buttons:
+                self.mainCanvas.moveto(button, x, y+3)
+                x += 30
+            for index, rect in enumerate(rowInfo.rectangles):
+                if rowInfo.modified:
+                    self.mainCanvas.itemconfigure(rect, fill="lawn green")
+                else:
+                    self.mainCanvas.itemconfigure(rect, fill="white")
+                self.mainCanvas.moveto(rect, x, y)
+                self.mainCanvas.moveto(rowInfo.text[index], x + 5, y+5)
+                x += (self.mainCanvas.coords(rect)[2]-self.mainCanvas.coords(rect)[0])
+            if not rowInfo.modified:
+                self.mainCanvas.moveto(rowInfo.revertButton, -1000, -1000)
+        else:
+            for button in rowInfo.buttons:
+                self.mainCanvas.moveto(button, -1000, -1000)
+            for rect in rowInfo.rectangles:
+                self.mainCanvas.moveto(rect, -1000, -1000)
+            for text in rowInfo.text:
+                self.mainCanvas.moveto(text, -1000, -1000)
         
-    def ExpandBank(self, bankId):
-        try:
-            self.expandedBanks.remove(bankId)
-        except KeyError:
-            self.expandedBanks.add(bankId)
-        self.Update()
+    def RedrawTable(self, toc):
+        draw_y = 0
+        draw_x = 0
+        for key in sorted(toc.TocEntries.keys()):
+            draw_x = 0
+            entry = toc.TocEntries[key]
+            self.DrawTableRow(entry.FileID, draw_x, draw_y)
+            if not self.tableInfo[key].hidden: draw_y += 30 
+            if entry.TypeID == 6006249203084351385:
+                for id in entry.Wems.keys():
+                    self.DrawTableRow(id, draw_x, draw_y)
+                    if not self.tableInfo[id].hidden: draw_y += 30       
+        self.mainCanvas.configure(scrollregion=(0,0,1280,draw_y + 5))
+
+    def Search(self, searchText):
+        for fileID, info in self.tableInfo.items():
+            
+            name = str(fileID) + (".bnk" if info._type == TableInfo.BANK else ".wem")
+            if name.startswith(searchText.get()) or name.endswith(searchText.get()):
+                self.UpdateTableEntry(fileID, action="show")
+                if info._type == TableInfo.BANK_WEM:
+                    self.UpdateTableEntry(self.fileHandler.GetToc().GetEntryByID(fileID).Parent.FileID, action="show")
+            else:
+                self.UpdateTableEntry(fileID, action="hide")
+        self.RedrawTable(self.fileHandler.GetToc())
     
     def Update(self):
-        self.UpdateTable(self.fileHandler.GetToc())
+        self.RedrawTable(self.fileHandler.GetToc())
         
     def LoadArchive(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadArchiveFile()
         self.expandedBanks.clear()
+        self.CreateTable(self.fileHandler.GetToc())
         self.Update()
         
     def SaveArchive(self):
         self.soundHandler.KillSound()
         self.fileHandler.SaveArchiveFile()
-        self.Update()
         
     def LoadWems(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadWems()
+        self.UpdateTableEntries()
         self.Update()
         
     def DumpAllAsWem(self):
@@ -1070,26 +1216,30 @@ class MainWindow:
     def RevertEntry(self, fileID):
         self.soundHandler.KillSound()
         self.fileHandler.RevertEntry(fileID)
+        self.UpdateTableEntry(fileID)
         self.Update()
         
     def RevertWem(self, fileID, wemIndex):
         self.soundHandler.KillSound()
         self.fileHandler.RevertBankWem(fileID, wemIndex)
+        self.UpdateTableEntry(fileID)
         self.Update()
         
     def RevertAll(self):
         self.soundHandler.KillSound()
         self.fileHandler.RevertAll()
+        self.UpdateTableEntries()
         self.Update()
         
     def WritePatch(self):
         self.soundHandler.KillSound()
         self.fileHandler.WritePatch()
-        self.Update()
+        #self.Update()
         
     def LoadPatch(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadPatch()
+        self.UpdateTableEntries()
         self.Update()
     
 def exitHandler():
