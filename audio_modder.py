@@ -894,7 +894,7 @@ class FileHandler:
             if isinstance(entry, BankWem):
                 with open(file, 'rb') as f:
                     entry.SetData(f.read())
-                    entry.Parent.Modified = True
+                    entry.Parent.RaiseModified()
                     modifiedBankEntries.add(entry.Parent)
             elif isinstance(entry, TocBankEntry):
                 with open(file, 'rb') as f:
