@@ -143,7 +143,7 @@ class TocEntry:
         self.TocDataOffset      = TocFile.uint64Read()
         self.StreamOffset       = TocFile.uint64Read()
         self.GpuResourceOffset  = TocFile.uint64Read()
-        self.Unknown1           = TocFile.uint64Read()
+        self.Unknown1           = TocFile.uint64Read() #seems to contain duplicate entry index
         self.Unknown2           = TocFile.uint64Read()
         self.TocDataSize        = TocFile.uint32Read()
         self.StreamSize         = TocFile.uint32Read()
@@ -401,7 +401,7 @@ class TocEntryFactory:
                 case 6006249203084351385:
                     Entry = TocBankEntry()
                     yield Entry.Load(TocFile)
-                case _:
+                case _: #BUGGED: MAKES IT SO OVERWRITING FILES IS IMPOSSIBLE, MUST USE PATCH
                     TocFile.read(80) #skip making a TocEntry if it isn't an audio type
         #return Entry.Load(TocFile)
             
@@ -416,6 +416,7 @@ class TocBankEntry(TocEntry):
         self.dataSectionStart = 0
         self.PostDataSize = 0
         self.Wems = {}
+        self.ModifiedWems = 0
 
     def LoadData(self, TocFile, GpuFile, StreamFile):
         super().LoadData(TocFile, GpuFile, StreamFile)
@@ -443,8 +444,12 @@ class TocBankEntry(TocEntry):
         self.BankHeader = tempData.read(size)
         
         #DIDX section
-        tag = tempData.read(4).decode('utf-8')
-        size = tempData.uint32Read()
+        try:
+            tag = tempData.read(4).decode('utf-8')
+            size = tempData.uint32Read()
+        except:
+            print("Warning: .bnk missing Data Index section, unable to load its audio data")
+            return
         if tag != "DIDX":
             #print("Error reading .bnk, no Data Index")
             return
@@ -476,7 +481,7 @@ class TocBankEntry(TocEntry):
         return self.Wems[fileID]
         
     def SetWem(self, wemIndex, wemData, rebuildToc=True):
-        self.Modified = True
+        self.RaiseModified()
         originalBankSize = self.TocDataHeader.TocFileSize
         originalWemSize = self.Wems[wemIndex].DataSize
         if wemIndex == len(self.Wems)-1: #each wem is padded to 16 bytes EXCEPT THE LAST ONE IN A BANK!!!
@@ -495,6 +500,16 @@ class TocBankEntry(TocEntry):
         for wem in self.Wems.values():
             wem.RevertModifications()
         self.RebuildTocData()
+        
+    def RaiseModified(self):
+        self.ModifiedWems += 1
+        self.Modified = True
+        
+    def LowerModified(self):
+        if self.ModifiedWems > 0:
+            self.ModifiedWems -= 1
+        if self.ModifiedWems == 0:
+            self.Modified = False
         
     def RebuildTocData(self):
         offset = 0
@@ -557,6 +572,7 @@ class BankWem:
             self.Data = self.Data_OLD
             self.DataSize = len(self.Data)
             self.Modified = False
+            self.Parent.LowerModified()
             
     def GetData(self):
         return self.Data
@@ -1127,6 +1143,10 @@ class MainWindow:
     def UpdateTableEntries(self):
         for fileID in self.fileHandler.GetTocEntries().keys():
             self.UpdateTableEntry(fileID)
+            entry = self.fileHandler.GetToc().GetEntryByID(fileID)
+            if entry.TypeID == 6006249203084351385:
+                for wem in entry.GetWems():
+                    self.UpdateTableEntry(wem.FileID)
             
     def DrawTableRow(self, fileID, x, y):
         rowInfo = self.tableInfo[fileID]
@@ -1169,7 +1189,6 @@ class MainWindow:
 
     def Search(self, searchText):
         for fileID, info in self.tableInfo.items():
-            
             name = str(fileID) + (".bnk" if info._type == TableInfo.BANK else ".wem")
             if name.startswith(searchText.get()) or name.endswith(searchText.get()):
                 self.UpdateTableEntry(fileID, action="show")
@@ -1216,13 +1235,7 @@ class MainWindow:
     def RevertEntry(self, fileID):
         self.soundHandler.KillSound()
         self.fileHandler.RevertEntry(fileID)
-        self.UpdateTableEntry(fileID)
-        self.Update()
-        
-    def RevertWem(self, fileID, wemIndex):
-        self.soundHandler.KillSound()
-        self.fileHandler.RevertBankWem(fileID, wemIndex)
-        self.UpdateTableEntry(fileID)
+        self.UpdateTableEntries()
         self.Update()
         
     def RevertAll(self):
