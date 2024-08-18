@@ -268,11 +268,9 @@ class StreamToc:
         self.unknown    = self.TocFile.uint32Read()
         self.unk4Data   = self.TocFile.bytes(self.unk4Data, 56)
         self.TocTypes   = [TocFileType() for n in range(self.numTypes)]
-        #self.TocEntries = [TocEntry() for n in range(self.numFiles)]
         # serialize Entries in correct order
         self.TocTypes   = [Entry.Load(self.TocFile) for Entry in self.TocTypes]
         TocEntryStart   = self.TocFile.tell()
-        #entryList = [TocEntryFactory.CreateTocEntry(self.TocFile) for n in range(self.numFiles)]
         entryList = list(TocEntryFactory.CreateTocEntries(self.numFiles, self.TocFile))
         idList = [entry.FileID for entry in entryList]
         self.TocEntries = { id:entry for (id, entry) in zip(idList, entryList) }
@@ -323,17 +321,7 @@ class StreamToc:
                 if isinstance(entry, TocBankEntry):
                     if fileID in entry.Wems.keys():
                         return entry.Wems[fileID]
-                
-    def GetEntryByIndex(self, entryIndex):
-        for id, entry in self.TocEntries:
-            if entry.EntryIndex == entryIndex:
-                return entry
-                
-    def SetEntryByIndex(self, entryIndex, newEntry):
-        for id, entry in self.TocEntries:
-            if entry.EntryIndex == entryIndex:
-                self.TocEntries[id] = newEntry
-                
+
     def SetEntryByID(self, fileID, newEntry):
         self.TocEntries[fileID] = newEntry
                 
@@ -479,21 +467,6 @@ class TocBankEntry(TocEntry):
         
     def GetWemByID(self, fileID):
         return self.Wems[fileID]
-        
-    def SetWem(self, wemIndex, wemData, rebuildToc=True):
-        self.RaiseModified()
-        originalBankSize = self.TocDataHeader.TocFileSize
-        originalWemSize = self.Wems[wemIndex].DataSize
-        if wemIndex == len(self.Wems)-1: #each wem is padded to 16 bytes EXCEPT THE LAST ONE IN A BANK!!!
-            newBankSize = originalBankSize - originalWemSize + len(wemData)
-            self.dataSectionSize = self.dataSectionSize - originalWemSize + len(wemData)
-        else:
-            newBankSize = originalBankSize - _16ByteAlign(originalWemSize) + _16ByteAlign(len(wemData))
-            self.dataSectionSize = self.dataSectionSize - _16ByteAlign(originalWemSize) + _16ByteAlign(len(wemData))
-        self.TocDataHeader.TocFileSize = newBankSize
-        self.Wems[wemIndex].SetData(wemData)
-        if rebuildToc:
-            self.RebuildTocData() #rebuildToc should be False if you intend to call SetWem many times as a performance optimization
             
     def RevertModifications(self):
         self.Modified = False
@@ -515,7 +488,7 @@ class TocBankEntry(TocEntry):
         offset = 0
         originalDataSize = self.dataSectionSize
         self.dataSectionSize = 0
-        for index, wem in enumerate(self.Wems.values()):
+        for index, wem in enumerate(self.GetWems()):
             if index != len(self.Wems)-1:
                 self.dataSectionSize += _16ByteAlign(wem.DataSize)
             else:
@@ -612,20 +585,20 @@ class SoundHandler:
                 pass
             self.audioProcess = None
         
-    def PlayWem(self, soundIndex, soundData, callback=None):
+    def PlayWem(self, soundID, soundData, callback=None):
         self.KillSound()
         self.callback = callback
-        if self.audioID == soundIndex:
+        if self.audioID == soundID:
             self.audioID = -1
             return
-        filename = f"temp{soundIndex}"
+        filename = f"temp{soundID}"
         if not os.path.isfile(f"{filename}.wav"):
             with open(f'{filename}.wem', 'wb') as f:
                 f.write(soundData)
             subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{filename}.wav", f"{filename}.wem"], stdout=subprocess.DEVNULL)
             os.remove(f"{filename}.wem")
             
-        self.audioID = soundIndex
+        self.audioID = soundID
         self.waveFile = wave.open(f"{filename}.wav")
         self.audioFile = f"{filename}.wav"
         self.frameCount = 0
@@ -795,9 +768,6 @@ class FileHandler:
             
         progressWindow.Destroy()
         
-    def DumpAllBnks():
-        pass
-        
     def GetFileNumberPrefix(self, n):
         number = ''.join(takewhile(str.isdigit, n or ""))
         try:
@@ -918,9 +888,6 @@ class FileHandler:
             progressWindow.Step()
         
         progressWindow.Destroy()
-        
-    def LoadBnks():
-        pass
         
 class TableInfo:
 
@@ -1180,11 +1147,11 @@ class MainWindow:
             draw_x = 0
             entry = toc.TocEntries[key]
             self.DrawTableRow(entry.FileID, draw_x, draw_y)
-            if not self.tableInfo[key].hidden: draw_y += 30 
+            if not self.tableInfo[key].hidden: draw_y += 30
             if entry.TypeID == 6006249203084351385:
                 for id in entry.Wems.keys():
                     self.DrawTableRow(id, draw_x, draw_y)
-                    if not self.tableInfo[id].hidden: draw_y += 30       
+                    if not self.tableInfo[id].hidden: draw_y += 30
         self.mainCanvas.configure(scrollregion=(0,0,1280,draw_y + 5))
 
     def Search(self, searchText):
@@ -1247,7 +1214,6 @@ class MainWindow:
     def WritePatch(self):
         self.soundHandler.KillSound()
         self.fileHandler.WritePatch()
-        #self.Update()
         
     def LoadPatch(self):
         self.soundHandler.KillSound()
