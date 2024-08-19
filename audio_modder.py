@@ -1009,6 +1009,11 @@ class MainWindow:
         info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
         
         name = str(tocEntry.GetFileID()) + (".wem" if tocEntry.GetTypeID() == 5785811756662211598 else ".bnk")
+        if tocEntry.GetTypeID() == 6006249203084351385:
+            try:
+                name = tocEntry.Dep.Data.split('/')[-1]
+            except:
+                pass
 
         info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(tocEntry.GetFileID(), "name")))
         info.text.append(self.mainCanvas.create_text(0, 0, text=tocEntry.GetEntryIndex(), fill='black', font=('Arial', 16, 'bold'), anchor='nw', tag=tocEntry.GetFileID()))
