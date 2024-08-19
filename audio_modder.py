@@ -61,7 +61,7 @@ class MemoryStream:
 
         newData = self.Data[self.Location:self.Location+length]
         self.Location += length
-        return bytes(newData)
+        return bytearray(newData)
 
     def write(self, bytes): # Write Bytes To Stream
         length = len(bytes)
@@ -120,449 +120,483 @@ def PadTo16ByteAlign(data):
     
 def _16ByteAlign(addr):
     return ceil(addr/16)*16
-
-class TocEntry:
-    '''
-    Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
-    '''
-
-    def __init__(self):
-        self.FileID = self.TypeID = self.TocDataOffset = self.Unknown1 = self.GpuResourceOffset = self.Unknown2 = self.TocDataSize = self.GpuResourceSize = self.EntryIndex = self.StreamSize = self.StreamOffset = 0
-        self.Unknown3 = 16
-        self.Unknown4 = 64
-
-        self.TocData =  self.TocData_OLD = b""
-        self.GpuData =  self.GpuData_OLD = b""
-        self.StreamData =  self.StreamData_OLD = b""
-        self.Modified = False
-        
-    # -- Load TocEntry -- #
-    def Load(self, TocFile):
-        self.FileID             = TocFile.uint64Read()
-        self.TypeID             = TocFile.uint64Read()
-        self.TocDataOffset      = TocFile.uint64Read()
-        self.StreamOffset       = TocFile.uint64Read()
-        self.GpuResourceOffset  = TocFile.uint64Read()
-        self.Unknown1           = TocFile.uint64Read() #seems to contain duplicate entry index
-        self.Unknown2           = TocFile.uint64Read()
-        self.TocDataSize        = TocFile.uint32Read()
-        self.StreamSize         = TocFile.uint32Read()
-        self.GpuResourceSize    = TocFile.uint32Read()
-        self.Unknown3           = TocFile.uint32Read()
-        self.Unknown4           = TocFile.uint32Read()
-        self.EntryIndex         = TocFile.uint32Read()
-        return self
-        
-    def LoadData(self, TocFile, GpuFile, StreamFile):
-
-        TocFile.seek(self.TocDataOffset)
-        self.TocData = bytearray(self.TocDataSize)
-        self.TocData = TocFile.bytes(self.TocData)
-        if self.GpuResourceSize > 0:
-            GpuFile.seek(self.GpuResourceOffset)
-            self.GpuData = bytearray(self.GpuResourceSize)
-            self.GpuData = GpuFile.bytes(self.GpuData)
-        if self.StreamSize > 0:
-            StreamFile.seek(self.StreamOffset)
-            self.StreamData = bytearray(self.StreamSize)
-            self.StreamData = StreamFile.bytes(self.StreamData)
-            
-    def Save(self, TocFile):
-        TocFile.write(self.FileID.to_bytes(8, byteorder="little"))
-        TocFile.write(self.TypeID.to_bytes(8, byteorder="little"))
-        TocFile.write(self.TocDataOffset.to_bytes(8, byteorder="little"))
-        TocFile.write(self.StreamOffset.to_bytes(8, byteorder="little"))
-        TocFile.write(self.GpuResourceOffset.to_bytes(8, byteorder="little"))
-        TocFile.write(self.Unknown1.to_bytes(8, byteorder="little"))
-        TocFile.write(self.Unknown2.to_bytes(8, byteorder="little"))
-        TocFile.write(self.TocDataSize.to_bytes(4, byteorder="little"))
-        TocFile.write(self.StreamSize.to_bytes(4, byteorder="little"))
-        TocFile.write(self.GpuResourceSize.to_bytes(4, byteorder="little"))
-        TocFile.write(self.Unknown3.to_bytes(4, byteorder="little"))
-        TocFile.write(self.Unknown4.to_bytes(4, byteorder="little"))
-        TocFile.write(self.EntryIndex.to_bytes(4, byteorder="little"))
-        
-    def SaveData(self, TocFile, GpuFile, StreamFile):
-        TocFile.seek(self.TocDataOffset)
-        TocFile.write(PadTo16ByteAlign(self.TocData))
-        if self.GpuResourceSize > 0:
-            GpuFile.seek(self.GpuResourceOffset)
-            GpuFile.write(self.GpuData)
-        if self.StreamSize > 0:
-            StreamFile.seek(self.StreamOffset)
-            StreamFile.write(self.StreamData)
-            
-    def SetData(self, TocData, GpuData, StreamData):
-        if not self.Modified:
-            self.TocData_OLD = self.TocData
-            self.GpuData_OLD = self.GpuData
-            self.StreamData_OLD = self.StreamData
-            self.Modified = True
-        if TocData is not None:
-            self.TocData = TocData
-            self.TocDataSize = len(TocData)
-        if StreamData is not None:
-            self.StreamData = StreamData
-            self.StreamSize = len(StreamData)
-        if GpuData is not None:
-            self.GpuData = GpuData
-            self.GpuResourceSize = len(GpuData)
-            
-            
-    def RevertModifications(self):
-        if self.Modified:
-            self.TocData = self.TocData_OLD
-            self.TocDataSize = len(self.TocData)
-            self.GpuData = self.GpuData_OLD
-            self.GpuResourceSize = len(self.GpuData)
-            self.StreamData = self.StreamData_OLD
-            self.StreamSize = len(self.StreamData)
-            self.Modified = False
-            
-
-class TocFileType:
-    '''
-    Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
-    '''
-
-    def __init__(self, ID=0, NumFiles=0):
-        self.unk1     = 0
-        self.TypeID   = ID
-        self.NumFiles = NumFiles
-        self.unk2     = 16
-        self.unk3     = 64
-    def Load(self, TocFile):
-        self.unk1     = TocFile.uint64Read()
-        self.TypeID   = TocFile.uint64Read()
-        self.NumFiles = TocFile.uint64Read()
-        self.unk2     = TocFile.uint32Read()
-        self.unk3     = TocFile.uint32Read()
-        return self
-    def Save(self, TocFile):
-        TocFile.write(self.unk1.to_bytes(8, byteorder="little"))
-        TocFile.write(self.TypeID.to_bytes(8, byteorder="little"))
-        TocFile.write(self.NumFiles.to_bytes(8, byteorder="little"))
-        TocFile.write(self.unk2.to_bytes(4, byteorder="little"))
-        TocFile.write(self.unk3.to_bytes(4, byteorder="little"))
-
-class StreamToc:
-    '''
-    Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
-    '''
-
-    def __init__(self):
-        self.magic      = self.numTypes = self.numFiles = self.unknown = 0
-        self.unk4Data   = bytearray(56)
-        self.TocTypes   = []
-        self.TocEntries = {}
-        self.Path = ""
-        self.Name = ""
-        self.LocalName = ""
-
-    def LoadFile(self):
-        self.magic      = self.TocFile.uint32Read()
-        if self.magic != 4026531857: return False
-
-        self.numTypes   = self.TocFile.uint32Read()
-        self.numFiles   = self.TocFile.uint32Read()
-        self.unknown    = self.TocFile.uint32Read()
-        self.unk4Data   = self.TocFile.bytes(self.unk4Data, 56)
-        self.TocTypes   = [TocFileType() for n in range(self.numTypes)]
-        # serialize Entries in correct order
-        self.TocTypes   = [Entry.Load(self.TocFile) for Entry in self.TocTypes]
-        TocEntryStart   = self.TocFile.tell()
-        entryList = list(TocEntryFactory.CreateTocEntries(self.numFiles, self.TocFile))
-        idList = [entry.FileID for entry in entryList]
-        self.TocEntries = { id:entry for (id, entry) in zip(idList, entryList) }
-        for key in sorted(self.TocEntries.keys()):
-            self.TocEntries[key].LoadData(self.TocFile, self.GpuFile, self.StreamFile)
-        return True
-
-    def SaveFile(self):
-        self.TocFile = MemoryStream()
-        self.GpuFile = MemoryStream()
-        self.StreamFile = MemoryStream()
-        self.TocFile.write(self.magic.to_bytes(4, byteorder="little"))
-        
-        self.TocFile.write(self.numTypes.to_bytes(4, byteorder="little"))
-        self.TocFile.write(self.numFiles.to_bytes(4, byteorder="little"))
-        self.TocFile.write(self.unknown.to_bytes(4, byteorder="little"))
-        self.TocFile.write(self.unk4Data)
-
-        # serialize Entries in correct order
-        for entry in self.TocTypes:
-            entry.Save(self.TocFile)
-            
-        for id in sorted(self.TocEntries.keys()):
-            self.TocEntries[id].Save(self.TocFile)
-        for id in sorted(self.TocEntries.keys()):
-            self.TocEntries[id].SaveData(self.TocFile, self.GpuFile, self.StreamFile)
-
-    def UpdateTypes(self):
-        self.TocTypes = []
-        for Entry in self.TocEntries.values():
-            exists = False
-            for Type in self.TocTypes:
-                if Type.TypeID == Entry.TypeID:
-                    Type.NumFiles += 1; exists = True
-                    break
-            if not exists:
-                self.TocTypes.append(TocFileType(Entry.TypeID, 1))
-
-    def UpdatePath(self, path):
-        self.Path = path
-        self.Name = Path(path).name
-        
-    def GetEntryByID(self, fileID):
-        if fileID in self.TocEntries.keys():
-            return self.TocEntries[fileID]
-        else:
-            for entry in self.TocEntries.values():
-                if isinstance(entry, TocBankEntry):
-                    if fileID in entry.Wems.keys():
-                        return entry.Wems[fileID]
-
-    def SetEntryByID(self, fileID, newEntry):
-        self.TocEntries[fileID] = newEntry
-                
-    def RevertModifications(self):
-        for entry in self.TocEntries.values():
-            entry.RevertModifications()
-        self.RebuildEntryHeaders()
-                
-    def RebuildEntryHeaders(self):
-        tocOffset = 80 + 32 * len(self.TocTypes) + 80 * len(self.TocEntries)
-        streamOffset = 0
-        gpuOffset = 0
-        for key in sorted(self.TocEntries.keys()):
-            entry = self.TocEntries[key]
-            entry.TocDataOffset = tocOffset
-            entry.GpuResourceOffset = gpuOffset
-            entry.StreamOffset = streamOffset
-            streamOffset += _16ByteAlign(entry.StreamSize)
-            tocOffset += _16ByteAlign(entry.TocDataSize)
-            gpuOffset += _16ByteAlign(entry.GpuResourceSize)
-                        
-    def FromFile(self, path):
-        self.UpdatePath(path)
-        with open(path, 'r+b') as f:
-            self.TocFile = MemoryStream(f.read())
-
-        self.GpuFile    = MemoryStream()
-        self.StreamFile = MemoryStream()
-        if os.path.isfile(path+".gpu_resources"):
-            with open(path+".gpu_resources", 'r+b') as f:
-                self.GpuFile = MemoryStream(f.read())
-        if os.path.isfile(path+".stream"):
-            with open(path+".stream", 'r+b') as f:
-                self.StreamFile = MemoryStream(f.read())
-        return self.LoadFile()
-        
-    def ToFile(self, path):
-        self.UpdateTypes()
-        self.SaveFile()
-        with open(path+"/"+self.Name, 'wb') as f:
-            f.write(self.TocFile.Data)
-        if len(self.GpuFile.Data) > 0:
-            with open(path+"/"+self.Name+".gpu_resources", 'wb') as f:
-                f.write(self.GpuFile.Data)
-        if len(self.StreamFile.Data) > 0:
-            with open(path+"/"+self.Name+".stream", 'wb') as f:
-                f.write(self.StreamFile.Data)
-            
-class TocEntryFactory:
-    @classmethod
-    def CreateTocEntries(cls, n, TocFile):
-        num = 0
-        while num < n:
-            num += 1
-            TypeID = 0
-            Entry = TocEntry()
-            startPosition = TocFile.tell()
-            TocFile.uint64Read()
-            TypeID = TocFile.uint64Read()
-            TocFile.seek(startPosition)
-            match TypeID:
-                case 5785811756662211598:
-                    Entry = TocEntry()
-                    yield Entry.Load(TocFile)
-                case 6006249203084351385:
-                    Entry = TocBankEntry()
-                    yield Entry.Load(TocFile)
-                case _: #BUGGED: MAKES IT SO OVERWRITING FILES IS IMPOSSIBLE, MUST USE PATCH
-                    TocFile.read(80) #skip making a TocEntry if it isn't an audio type
-        #return Entry.Load(TocFile)
-            
-class TocBankEntry(TocEntry):
-
-    def __init__(self):
-        super().__init__()
-        self.TocDataHeader = b""
-        self.BankHeader = b""
-        self.PostData = b""
-        self.dataSectionSize = 0
-        self.dataSectionStart = 0
-        self.PostDataSize = 0
-        self.Wems = {}
-        self.ModifiedWems = 0
-
-    def LoadData(self, TocFile, GpuFile, StreamFile):
-        super().LoadData(TocFile, GpuFile, StreamFile)
-        if TocFile.IsReading(): self.LoadBank()
-        
-        
-    def LoadBank(self):
-        tempData = MemoryStream()
-        tempData.write(self.TocData)
-        tempData.seek(0)
-        self.TocDataHeader = TocDataHeader(tempData.read(16))
-        self.BankHeader = b""
-        self.PostDataSection = b""
-        self.dataSectionSize = 0
-        self.dataSectionStart = 0
-        self.PostDataSize = 0
-        self.Wems = {}
-        
-        #BKHD section
-        tag = tempData.read(4).decode('utf-8')
-        size = tempData.uint32Read()
-        if tag != "BKHD":
-            print("Error reading .bnk, invalid header")
-            return
-        self.BankHeader = tempData.read(size)
-        
-        #DIDX section
-        try:
-            tag = tempData.read(4).decode('utf-8')
-            size = tempData.uint32Read()
-        except:
-            print("Warning: .bnk missing Data Index section, unable to load its audio data")
-            return
-        if tag != "DIDX":
-            #print("Error reading .bnk, no Data Index")
-            return
-        for x in range(int(size/12)):
-            wem = BankWem(tempData.read(12))
-            self.Wems[wem.FileID] = wem
-        
-        #DATA section
-        tag = tempData.read(4).decode('utf-8')
-        size = tempData.uint32Read()
-        if tag != "DATA":
-            print("Error reading .bnk, DATA section not in expected location")
-            return    
-        self.dataSectionStart = tempData.tell()
-        for wem in self.Wems.values():
-            tempData.seek(self.dataSectionStart + wem.DataOffset)
-            wem.LoadData(tempData.read(wem.DataSize))
-            wem.Parent = self
-        self.dataSectionSize = tempData.tell() - self.dataSectionStart
-        
-        #Any other sections (i.e. HIRC)
-        self.PostData = tempData.read() #for now just store everything past the end of the data section
-        self.PostDataSize = len(self.PostData)
-        
-    def GetWems(self):
-        return self.Wems.values()
-        
-    def GetWemByID(self, fileID):
-        return self.Wems[fileID]
-            
-    def RevertModifications(self):
-        self.Modified = False
-        for wem in self.Wems.values():
-            wem.RevertModifications()
-        self.RebuildTocData()
-        
-    def RaiseModified(self):
-        self.ModifiedWems += 1
-        self.Modified = True
-        
-    def LowerModified(self):
-        if self.ModifiedWems > 0:
-            self.ModifiedWems -= 1
-        if self.ModifiedWems == 0:
-            self.Modified = False
-        
-    def RebuildTocData(self):
-        offset = 0
-        originalDataSize = self.dataSectionSize
-        self.dataSectionSize = 0
-        for index, wem in enumerate(self.GetWems()):
-            if index != len(self.Wems)-1:
-                self.dataSectionSize += _16ByteAlign(wem.DataSize)
-            else:
-                self.dataSectionSize += wem.DataSize
-            wem.DataOffset = offset
-            offset += _16ByteAlign(wem.DataSize)
-        self.TocDataHeader.TocFileSize = self.TocDataHeader.TocFileSize - originalDataSize + self.dataSectionSize
-        tempData = MemoryStream()
-        tempData.write("BKHD".encode('utf-8'))
-        tempData.write(len(self.BankHeader).to_bytes(4, byteorder='little'))
-        tempData.write(self.BankHeader)
-        tempData.write("DIDX".encode('utf-8'))
-        tempData.write((12*len(self.Wems)).to_bytes(4, byteorder='little'))
-        for key in sorted(self.Wems.keys()):
-            tempData.write(self.Wems[key].GetDataIndexEntry())
-        tempData.write("DATA".encode('utf-8'))
-        tempData.write(self.dataSectionSize.to_bytes(4, byteorder='little'))
-        for index, key in enumerate(sorted(self.Wems.keys())): #each wem is padded to 16 bytes EXCEPT THE LAST ONE IN A BANK!!!
-            wem = self.Wems[key]
-            if index == len(self.Wems)-1:
-                tempData.write(wem.GetData())
-            else:
-                tempData.write(PadTo16ByteAlign(wem.GetData()))
-        tempData.write(self.PostData)
-        self.TocData = self.TocDataHeader.Get() + tempData.Data
-        self.TocDataSize = len(self.TocData)
-            
-
-class BankWem:
     
-    def __init__(self, DataIndexEntry):
-        self.Load(DataIndexEntry)
+def SortContent(content):
+    return content.FileID
+    
+class AudioData:
+    
+    def __init__(self):
+        self.FileID = 0
+        self.Data = b""
+        self.Offset = 0
+        self.Size = 0
         self.Modified = False
-        self.Data = self.Data_OLD = None
-        self.Parent = None
+        self.Data_OLD = b""
+        self.Subscribers = set()
         
-    def Load(self, DataIndexEntry):
-        self.FileID = int.from_bytes(DataIndexEntry[0:4], byteorder='little')
-        self.DataOffset = int.from_bytes(DataIndexEntry[4:8], byteorder='little')
-        self.DataSize = int.from_bytes(DataIndexEntry[8:], byteorder='little')
-        
-    def LoadData(self, Data):
-        self.Data = Data
-        
-    def SetData(self, data):
-        if not self.Modified:
+    def SetData(self, data, notifySubscribers=True, setModified=True):
+        if not self.Modified and setModified:
             self.Data_OLD = self.Data
         self.Data = data
-        self.Modified = True
-        self.DataSize = len(data)
+        self.Size = len(self.Data)
+        if notifySubscribers:
+            for item in self.Subscribers:
+                item.Update(self)
+                if not self.Modified:
+                    item.RaiseModified()
+        if setModified:
+            self.Modified = True
         
-    def RevertModifications(self):
-        if self.Modified:
-            self.Data = self.Data_OLD
-            self.DataSize = len(self.Data)
-            self.Modified = False
-            self.Parent.LowerModified()
-            
+        
     def GetData(self):
         return self.Data
         
-    def GetDataIndexEntry(self):
-        return self.FileID.to_bytes(4, byteorder='little') + self.DataOffset.to_bytes(4, byteorder='little') + self.DataSize.to_bytes(4, byteorder='little')
+    def GetFileID(self):
+        return self.FileID
         
-        
-class TocDataHeader():
+    def RevertModifications(self, notifySubscribers=True):
+        if self.Modified:
+            self.Modified = False
+            self.Data = self.Data_OLD
+            self.Data_OLD = b""
+            self.Size = len(self.Data)
+            if notifySubscribers:
+                for item in self.Subscribers:
+                    item.LowerModified()
+                    item.Update(self)
+                
+class TocHeader:
 
-    def __init__(self, header):
-        self.Tag = header[0:4]
-        self.TocFileSize = int.from_bytes(header[4:8], byteorder='little')
-        self.FileID = int.from_bytes(header[8:], byteorder="little")
+    def __init__(self):
+        pass
         
-    def Get(self):
-        return self.Tag + self.TocFileSize.to_bytes(4, byteorder="little") + self.FileID.to_bytes(8, byteorder="little")
+    def FromMemoryStream(self, stream):
+        self.Offset             = stream.tell()
+        self.FileID             = stream.uint64Read()
+        self.TypeID             = stream.uint64Read()
+        self.TocDataOffset      = stream.uint64Read()
+        self.StreamOffset       = stream.uint64Read()
+        self.GpuResourceOffset  = stream.uint64Read()
+        self.Unknown1           = stream.uint64Read() #seems to contain duplicate entry index
+        self.Unknown2           = stream.uint64Read()
+        self.TocDataSize        = stream.uint32Read()
+        self.StreamSize         = stream.uint32Read()
+        self.GpuResourceSize    = stream.uint32Read()
+        self.Unknown3           = stream.uint32Read()
+        self.Unknown4           = stream.uint32Read()
+        self.EntryIndex         = stream.uint32Read()
+        
+    def GetData(self):
+        return (self.FileID.to_bytes(8, byteorder='little')
+                + self.TypeID.to_bytes(8, byteorder='little')
+                + self.TocDataOffset.to_bytes(8, byteorder='little')
+                + self.StreamOffset.to_bytes(8, byteorder='little')
+                + self.GpuResourceOffset.to_bytes(8, byteorder='little')
+                + self.Unknown1.to_bytes(8, byteorder='little')
+                + self.Unknown2.to_bytes(8, byteorder='little')
+                + self.TocDataSize.to_bytes(4, byteorder='little')
+                + self.StreamSize.to_bytes(4, byteorder='little')
+                + self.GpuResourceSize.to_bytes(4, byteorder='little')
+                + self.Unknown3.to_bytes(4, byteorder='little')
+                + self.Unknown4.to_bytes(4, byteorder='little')
+                + self.EntryIndex.to_bytes(4, byteorder='little'))
+                
+class WwiseDep:
+
+    def __init__(self):
+        self.Data = ""
+        
+    def FromMemoryStream(self, stream):
+        self.Offset = stream.tell()
+        self.Tag = stream.uint32Read()
+        self.DataSize = stream.uint32Read()
+        self.Data = stream.read(self.DataSize).decode('utf-8')
+        
+    def GetData(self):
+        return (self.Tag.to_bytes(4, byteorder='little')
+                + self.DataSize.to_bytes(4, byteorder='little')
+                + self.Data.encode('utf-8'))
+                
+class Subscriber:
+    def __init__(self):
+        pass
+        
+    def Update(self, content):
+        pass
+        
+    def Rebuild(self):
+        pass
+        
+    def RaiseModified(self):
+        pass
+        
+    def LowerModified(self):
+        pass
+    
+class DataIndexEntry(Subscriber):
+
+    def __init__(self):
+        self.Size = 0
+        self.Offset = 0
+        self.Content = None
+        self.Modified = False
+        self.Parent = None
+        
+    def RaiseModified(self):
+        self.Modified = True
+        
+    def LowerModified(self):
+        self.Modified = False
+        
+    def GetFileID(self):
+        return str(self.Parent.GetFileID()) + "-" + str(self.Content.FileID)
+        
+    
+class WwiseBank(Subscriber):
+    
+    def __init__(self):
+        self.DataIndex = {}
+        self.DataSize = 0
+        self.BankHeader = b""
+        self.TocDataHeader = b""
+        self.BankPostData = b""
+        self.Modified = False
+        self.TocHeader = None
+        self.Dep = None
+        self.ModifiedCount = 0
+        
+    def AddContent(self, content):
+        content.Subscribers.add(self)
+        didxEntry = DataIndexEntry()
+        didxEntry.Size = content.Size
+        didxEntry.Offset = _16ByteAlign(self.DataSize)
+        didxEntry.Content = content
+        didxEntry.Parent = self
+        content.Subscribers.add(didxEntry)
+        self.DataIndex[content.GetFileID()] = didxEntry
+        self.DataSize += _16ByteAlign(didxEntry.Size)
+        bankSize = self.DataSize + 8 + len(self.BankHeader) + len(self.BankPostData) + 12*len(self.DataIndex) + 8
+        self.TocHeader.TocDataSize = bankSize + 16
+        self.TocDataHeader[4:8] = bankSize.to_bytes(4, byteorder='little')
+        
+    def RemoveContent(self, content):
+        try:
+            content.Subscribers.remove(self)
+            content.Subscribers.remove(self.DataIndex[content.GetFileID()])
+        except:
+            pass
+            
+        try:
+            del self.DataIndex[content.GetFileID()]
+        except:
+            pass
+
+            
+    def Update(self, content, recomputeOffsets=False):
+        entry = self.DataIndex[content.GetFileID()]
+        self.DataSize -= _16ByteAlign(entry.Size)
+        entry.Size = len(content.GetData())
+        self.DataSize +=  _16ByteAlign(entry.Size)
+        bankSize = self.DataSize + 8 + len(self.BankHeader) + len(self.BankPostData) + 12*len(self.DataIndex) + 8
+        self.TocHeader.TocDataSize = bankSize + 16
+        self.TocDataHeader[4:8] = bankSize.to_bytes(4, byteorder='little')
+        if recomputeOffsets:
+            self.Rebuild()
+            
+    def Rebuild(self):
+        offset = 0
+        for entry in self.DataIndex.values():
+            entry.Offset = offset
+            offset += _16ByteAlign(entry.Size)
+            
+    def GetContent(self):
+        return [entry.Content for entry in self.DataIndex.values()]
+        
+    def RaiseModified(self):
+        self.Modified = True
+        self.ModifiedCount += 1
+        
+    def LowerModified(self):
+        if self.Modified:
+            self.ModifiedCount -= 1
+            if self.ModifiedCount == 0:
+                self.Modified = False
+        
+    def GetName(self):
+        return self.Dep.Data
+        
+    def GetFileID(self):
+        try:
+            return self.TocHeader.FileID
+        except:
+            return 0
+            
+    def GetTypeID(self):
+        try:
+            return self.TocHeader.TypeID
+        except:
+            return 0
+            
+    def GetData(self):
+        data = bytearray()
+        data += self.BankHeader
+        
+        if len(self.DataIndex) > 0:
+            dataSection = "DATA".encode('utf-8') + self.DataSize.to_bytes(4, byteorder='little')
+            didxSectionSize = 12*len(self.DataIndex)
+            didxSection = "DIDX".encode('utf-8') + didxSectionSize.to_bytes(4, byteorder='little')
+            for fileID, entry in self.DataIndex.items():
+                didxSection += fileID.to_bytes(4, byteorder='little')
+                didxSection += entry.Offset.to_bytes(4, byteorder='little')
+                didxSection += entry.Size.to_bytes(4, byteorder='little')
+                dataSection += PadTo16ByteAlign(entry.Content.GetData())
+            data += didxSection
+            data += dataSection
+        
+        data += self.BankPostData
+        return data 
+            
+    def GetEntryIndex(self):
+        try:
+            return self.TocHeader.EntryIndex
+        except:
+            return 0
+        
+class WwiseStream(Subscriber):
+
+    def __init__(self):
+        self.Content = None
+        self.Modified = False
+        self.TocHeader = None
+        self.TocData = bytearray()
+        
+    def SetContent(self, content):
+        try:
+            self.Content.Subscribers.remove(self)
+        except:
+            pass
+        self.Content = content
+        content.Subscribers.add(self)
+        
+    def Update(self, content):
+        self.TocHeader.StreamSize = content.Size
+        self.TocData[8:12] = content.Size.to_bytes(4, byteorder='little')
+        
+    def RaiseModified(self):
+        self.Modified = True
+        
+    def LowerModified(self):
+        self.Modified = False
+        
+    def GetFileID(self):
+        try:
+            return self.TocHeader.FileID
+        except:
+            return 0
+        
+    def GetTypeID(self):
+        try:
+            return self.TocHeader.TypeID
+        except:
+            return 0
+            
+    def GetEntryIndex(self):
+        try:
+            return self.TocHeader.EntryIndex
+        except:
+            return 0
+            
+    def GetData(self):
+        return self.Content.GetData()
+
+class FileReader:
+    
+    def __init__(self):
+        pass
+        
+    def FromFile(self, path):
+        self.Name = os.path.basename(path)
+        tocFile = MemoryStream()
+        with open(path, 'r+b') as f:
+            tocFile = MemoryStream(f.read())
+
+        streamFile = MemoryStream()
+        if os.path.isfile(path+".stream"):
+            with open(path+".stream", 'r+b') as f:
+                streamFile = MemoryStream(f.read())
+        self.Load(tocFile, streamFile)
+        
+    def ToFile(self, path):
+        tocFile = MemoryStream()
+        streamFile = MemoryStream()
+        self.numFiles = len(self.WwiseStreams) + len(self.WwiseBanks)
+        self.numTypes = 0
+        if len(self.WwiseStreams) > 0: self.numTypes += 1
+        if len(self.WwiseBanks) > 0: self.numTypes += 1
+        
+        tocFile.write(self.magic.to_bytes(4, byteorder="little"))
+        
+        tocFile.write(self.numTypes.to_bytes(4, byteorder="little"))
+        tocFile.write(self.numFiles.to_bytes(4, byteorder="little"))
+        tocFile.write(self.unknown.to_bytes(4, byteorder="little"))
+        tocFile.write(self.unk4Data)
+        
+        if len(self.WwiseStreams) > 0:
+            unk = 0
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = 5785811756662211598
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = len(self.WwiseStreams)
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = 16
+            tocFile.write(unk.to_bytes(4, byteorder='little'))
+            unk = 64
+            tocFile.write(unk.to_bytes(4, byteorder='little'))
+            
+        if len(self.WwiseBanks) > 0:
+            unk = 0
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = 6006249203084351385
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = len(self.WwiseBanks)
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = 16
+            tocFile.write(unk.to_bytes(4, byteorder='little'))
+            unk = 64
+            tocFile.write(unk.to_bytes(4, byteorder='little'))
+        
+        tocPosition = tocFile.tell()
+        for key in self.WwiseStreams.keys():
+            tocFile.seek(tocPosition)
+            tocPosition += 80
+            stream = self.WwiseStreams[key]
+            tocFile.write(stream.TocHeader.GetData())
+            tocFile.seek(stream.TocHeader.TocDataOffset)
+            tocFile.write(PadTo16ByteAlign(stream.TocData))
+            streamFile.seek(stream.TocHeader.StreamOffset)
+            streamFile.write(PadTo16ByteAlign(stream.Content.GetData()))
+            
+        for key in self.WwiseBanks.keys():
+            tocFile.seek(tocPosition)
+            tocPosition += 80
+            bank = self.WwiseBanks[key]
+            tocFile.write(bank.TocHeader.GetData())
+            tocFile.seek(bank.TocHeader.TocDataOffset)
+            tocFile.write(PadTo16ByteAlign(bank.TocDataHeader + bank.GetData()))
+            #tocFile.seek(bank.Dep.Offset)
+            #tocFile.write(bank.Dep.GetData())
+            
+            
+        with open(os.path.join(path, self.Name), 'w+b') as f:
+            f.write(tocFile.Data)
+            
+        if len(streamFile.Data) > 0:
+            with open(os.path.join(path, self.Name+".stream"), 'w+b') as f:
+                f.write(streamFile.Data)
+
+    def RebuildHeaders(self):
+        self.numTypes = 0
+        if len(self.WwiseStreams) > 0: self.numTypes += 1
+        if len(self.WwiseBanks) > 0: self.numTypes += 1
+        self.numFiles = len(self.WwiseStreams) + len(self.WwiseBanks)
+        streamOffset = 0
+        tocOffset = 80 + self.numTypes * 32 + 80 * self.numFiles
+        for key, value in self.WwiseStreams.items():
+            value.TocHeader.StreamOffset = streamOffset
+            value.TocHeader.TocDataOffset = tocOffset
+            streamOffset += _16ByteAlign(value.TocHeader.StreamSize)
+            tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
+            
+        for key, value in self.WwiseBanks.items():
+            value.TocHeader.TocDataOffset = tocOffset
+            tocOffset += _16ByteAlign(value.DataSize)
+            
+        
+    def Load(self, tocFile, streamFile):
+        self.WwiseStreams = {}
+        self.WwiseBanks = {}
+        self.AudioData = {}
+        self.magic      = tocFile.uint32Read()
+        if self.magic != 4026531857: return False
+
+        self.numTypes   = tocFile.uint32Read()
+        self.numFiles   = tocFile.uint32Read()
+        self.unknown    = tocFile.uint32Read()
+        self.unk4Data   = tocFile.read(56)
+        tocFile.seek(tocFile.tell() + 32 * self.numTypes)
+        tocStart = tocFile.tell()
+        for n in range(self.numFiles):
+            tocFile.seek(tocStart + n*80)
+            tocHeader = TocHeader()
+            tocHeader.FromMemoryStream(tocFile)
+            entry = None
+            if tocHeader.TypeID == 5785811756662211598:
+                audio = AudioData()
+                entry = WwiseStream()
+                entry.TocHeader = tocHeader
+                tocFile.seek(tocHeader.TocDataOffset)
+                entry.TocData = tocFile.read(tocHeader.TocDataSize)
+                streamFile.seek(tocHeader.StreamOffset)
+                audio.SetData(streamFile.read(tocHeader.StreamSize), notifySubscribers=False, setModified=False)
+                audio.FileID = tocHeader.FileID
+                audio.Offset = tocHeader.StreamOffset
+                audio.Size = tocHeader.StreamSize
+                entry.SetContent(audio)
+                self.AudioData[audio.GetFileID()] = audio
+                self.WwiseStreams[entry.GetFileID()] = entry
+            elif tocHeader.TypeID == 6006249203084351385:
+                entry = WwiseBank()
+                entry.TocHeader = tocHeader
+                tocDataOffset = tocHeader.TocDataOffset
+                tocDataSize = tocHeader.TocDataSize
+                tocFile.seek(tocDataOffset)
+                entry.TocDataHeader = tocFile.read(16)
+                tag = tocFile.read(4).decode('utf-8')
+                size = tocFile.uint32Read()
+                if tag != "BKHD":
+                    print("Error reading .bnk, invalid header")
+                    continue
+                entry.BankHeader = tag.encode('utf-8') + size.to_bytes(4, byteorder='little') + tocFile.read(size)
+                
+                #DIDX section
+                try:
+                    tag = tocFile.read(4).decode('utf-8')
+                    size = tocFile.uint32Read()
+                except: #skip
+                    continue
+                if tag != "DIDX": #skip empty .bnk
+                    continue
+                didxStart = tocFile.tell()
+                dataStart = didxStart + size + 8
+                for x in range(int(size/12)):
+                    tocFile.seek(didxStart + 12*x)
+                    audioID = tocFile.uint32Read()
+                    audioOffset = tocFile.uint32Read()
+                    audioSize = tocFile.uint32Read()
+                    if audioID not in self.AudioData.keys():
+                        audio = AudioData()
+                        audio.FileID = audioID
+                        audio.Offset = audioOffset
+                        audio.Size = audioSize
+                        tocFile.seek(dataStart + audio.Offset)
+                        audio.SetData(tocFile.read(audio.Size), notifySubscribers=False, setModified=False)
+                        self.AudioData[audioID] = audio
+                    entry.AddContent(self.AudioData[audioID])
+                tocFile.seek(dataStart - 4)
+                size = tocFile.uint32Read()
+                tocFile.seek(tocFile.tell() + size)
+                self.WwiseBanks[entry.GetFileID()] = entry
+                #Any other sections (i.e. HIRC)
+                entry.BankPostData = tocFile.read(tocDataSize + tocDataOffset - tocFile.tell()) #for now just store everything past the end of the data section
+            elif tocHeader.TypeID == 12624162998411505776: #wwise dep
+                dep = WwiseDep()
+                tocFile.seek(tocHeader.TocDataOffset)
+                dep.FromMemoryStream(tocFile)
+                try:
+                    self.WwiseBanks[tocHeader.FileID].Dep = dep
+                except KeyError:
+                    pass
             
 class SoundHandler:
     
@@ -585,7 +619,7 @@ class SoundHandler:
                 pass
             self.audioProcess = None
         
-    def PlayWem(self, soundID, soundData, callback=None):
+    def PlayAudio(self, soundID, soundData, callback=None):
         self.KillSound()
         self.callback = callback
         if self.audioID == soundID:
@@ -678,52 +712,44 @@ class ProgressWindow:
         
 class FileHandler:
 
-    def __init__(self, streamToc):
-        self.streamToc = streamToc
-
-    def DumpSelected():
-        pass
-        
-    def DumpAll():
-        pass
+    def __init__(self):
+        self.FileReader = FileReader()
         
     def RevertAll(self):
-        self.GetToc().RevertModifications()
+        for audio in self.FileReader.AudioData.values():
+            audio.RevertModifications()
         
-    def RevertEntry(self, fileID):
-        entry = self.GetToc().GetEntryByID(fileID)
-        entry.RevertModifications()
+    def RevertAudio(self, fileID):
+        audio = self.GetAudioByID(fileID)
+        audio.RevertModifications()
+        
+    def DumpAsWem(self, fileID):
+        outputFile = filedialog.asksaveasfile(mode='wb', title="Save As", initialfile=(str(fileID)+".wem"), defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
+        if outputFile is None: return
+        outputFile.write(self.FileReader.AudioData[fileID].GetData())
+        
+    def DumpAsWav(self, fileID):
+        outputFile = filedialog.asksaveasfilename(title="Save As", initialfile=(str(fileID)+".wav"), defaultextension=".wav", filetypes=[("Wav Audio", "*.wav")])
+        if outputFile == "": return
+        savePath = os.path.splitext(outputFile)[0]
+        with open(f"{savePath}.wem", 'wb') as f:
+            f.write(self.FileReader.AudioData[fileID].GetData())
+        subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
+        os.remove(f"{savePath}.wem")
 
     def DumpAllAsWem(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
         
-        maxProgress = 0
-        for entry in self.GetTocEntries().values():
-            if entry.TypeID == 5785811756662211598:
-                maxProgress = maxProgress + 1
-            elif entry.TypeID == 6006249203084351385:
-                maxProgress = maxProgress + len(entry.Wems)
-
-        progressWindow = ProgressWindow(title="Dumping Files", maxProgress=maxProgress)
+        progressWindow = ProgressWindow(title="Dumping Files", maxProgress=len(self.FileReader.AudioData))
         progressWindow.Show()
         
         if os.path.exists(folder):
-            for entry in self.GetTocEntries().values():
-                if entry.TypeID == 5785811756662211598:
-                    savePath = os.path.join(folder, str(entry.FileID) + ".wem")
-                    progressWindow.SetText("Dumping " + os.path.basename(savePath))
-                    with open(savePath, "wb") as f:
-                        f.write(entry.StreamData)
-                    progressWindow.Step()
-                elif entry.TypeID == 6006249203084351385:
-                    wemIndex = 0
-                    for wem in entry.Wems.values():
-                        savePath = os.path.join(folder, str(wem.FileID) + ".wem")
-                        progressWindow.SetText("Dumping " + os.path.basename(savePath))
-                        wemIndex = wemIndex + 1
-                        with open(savePath, "wb") as f:
-                            f.write(wem.GetData())
-                        progressWindow.Step()
+            for audio in self.FileReader.AudioData.values():
+                savePath = os.path.join(folder, str(audio.GetFileID()))
+                progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wem")
+                with open(savePath+".wem", "wb") as f:
+                    f.write(audio.GetData())
+                progressWindow.Step()
         else:
             print("Invalid folder selected, aborting dump")
             
@@ -731,38 +757,19 @@ class FileHandler:
     
     def DumpAllAsWav(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
-        
-        maxProgress = 0
-        for entry in self.GetTocEntries().values():
-            if entry.TypeID == 5785811756662211598:
-                maxProgress = maxProgress + 1
-            elif entry.TypeID == 6006249203084351385:
-                maxProgress = maxProgress + len(entry.Wems)
 
-        progressWindow = ProgressWindow(title="Dumping Files", maxProgress=maxProgress)
+        progressWindow = ProgressWindow(title="Dumping Files", maxProgress=len(self.FileReader.AudioData))
         progressWindow.Show()
         
         if os.path.exists(folder):
-            for entry in self.GetTocEntries().values():
-                if entry.TypeID == 5785811756662211598:
-                    savePath = os.path.join(folder, str(entry.FileID))
-                    progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
-                    with open(savePath+".wem", "wb") as f:
-                        f.write(entry.StreamData)
-                    subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
-                    os.remove(f"{savePath}.wem")
-                    progressWindow.Step()
-                elif entry.TypeID == 6006249203084351385:
-                    wemIndex = 0
-                    for wem in entry.Wems.values():
-                        savePath = os.path.join(folder, str(wem.FileID))
-                        progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
-                        wemIndex = wemIndex + 1
-                        with open(savePath+".wem", "wb") as f:
-                            f.write(wem.GetData())
-                        subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
-                        os.remove(f"{savePath}.wem")
-                        progressWindow.Step()
+            for audio in self.FileReader.AudioData.values():
+                savePath = os.path.join(folder, str(audio.GetFileID()))
+                progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
+                with open(savePath+".wem", "wb") as f:
+                    f.write(audio.GetData())
+                subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
+                os.remove(f"{savePath}.wem")
+                progressWindow.Step()
         else:
             print("Invalid folder selected, aborting dump")
             
@@ -775,119 +782,120 @@ class FileHandler:
         except:
             print("File name must begin with a number: "+n)
         
-    def GetToc(self):
-        return self.streamToc
-        
-    def GetTocEntries(self):
-        return self.streamToc.TocEntries
-        
     def SaveArchiveFile(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
         if os.path.exists(folder):
-            self.streamToc.ToFile(folder)
+            self.FileReader.ToFile(folder)
         else:
             print("Invalid folder selected, aborting save")
+            
+    def GetAudioByID(self, fileID):
+        return self.FileReader.AudioData[fileID]
+        
+    def GetWwiseStreams(self):
+        return self.FileReader.WwiseStreams
+        
+    def GetWwiseBanks(self):
+        return self.FileReader.WwiseBanks
+        
+    def GetAudio(self):
+        return self.FileReader.AudioData
         
     def LoadArchiveFile(self):
         archiveFile = askopenfilename(title="Select archive")
         if os.path.splitext(archiveFile)[1] in (".stream", ".gpu_resources"):
             archiveFile = os.path.splitext(archiveFile)[0]
         if os.path.exists(archiveFile):
-            self.streamToc.FromFile(archiveFile)
+            self.FileReader.FromFile(archiveFile)
         else:
             print("Invalid file selected, aborting load")
             
+            
     def LoadPatch(self):
-        patchToc = StreamToc()
+        patchFileReader = FileReader()
         patchFile = filedialog.askopenfilename(title="Choose patch file to import")
         if os.path.splitext(patchFile)[1] in (".stream", ".gpu_resources"):
             patchFile = os.path.splitext(patchFile)[0]
         if os.path.exists(patchFile):
-            patchToc.FromFile(patchFile)
+            patchFileReader.FromFile(patchFile)
         else:
             print("Invalid file selected, aborting load")
             return
             
-        progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(patchToc.TocEntries))
+        progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(patchFileReader.AudioData))
         progressWindow.Show()
         
-        for patchEntry in patchToc.TocEntries.values():
-            entry = self.streamToc.GetEntryByID(patchEntry.FileID)
-            if entry is None:
-                print("Could not find matching file ID in archive! Aborting load")
-                break
-            if isinstance(entry, TocEntry):
-                entry.SetData(TocData=patchEntry.TocData, GpuData=patchEntry.GpuData, StreamData=patchEntry.StreamData)
-            elif isinstance(entry, BankWem):
-                entry.SetData(patchEntry.GetData())
+        subscribers = set()
+        
+        for newAudio in patchFileReader.AudioData.values():
+            progressWindow.SetText("Loading "+str(newAudio.GetFileID()))
+            oldAudio = self.GetAudioByID(newAudio.GetFileID())
+            for item in oldAudio.Subscribers:
+                subscribers.add(item)
+            oldAudio.SetData(newAudio.GetData())
             progressWindow.Step()
-            
-            
-        self.GetToc().RebuildEntryHeaders()
+                
+        for entry in subscribers:
+            entry.Rebuild()
+        
         progressWindow.Destroy()
 
     def WritePatch(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
         if os.path.exists(folder):
-            patchedToc = StreamToc()
-            patchedToc.Name = self.streamToc.Name + ".patch_0"
-            patchedToc.LocalName = self.streamToc.LocalName
-            patchedToc.magic = self.streamToc.magic
-            patchedToc.numTypes = 0
-            patchedToc.numFiles = 0
-            patchedToc.unknown = self.streamToc.unknown
-            patchedToc.unk4Data = self.streamToc.unk4Data
-            patchedToc.TocTypes = []
-            patchedToc.TocEntries = {}
-            for id, entry in self.GetTocEntries().items():
-                if entry.Modified:
-                    patchedToc.TocEntries[id] = entry
-                    patchedToc.numFiles = patchedToc.numFiles + 1
-            patchedToc.UpdateTypes()
-            patchedToc.numTypes = len(patchedToc.TocTypes)
-            patchedToc.RebuildEntryHeaders()
-            patchedToc.ToFile(folder)
+            patchedFileReader = FileReader()
+            patchedFileReader.Name = self.FileReader.Name + ".patch_0"
+            patchedFileReader.magic = self.FileReader.magic
+            patchedFileReader.numTypes = 0
+            patchedFileReader.numFiles = 0
+            patchedFileReader.unknown = self.FileReader.unknown
+            patchedFileReader.unk4Data = self.FileReader.unk4Data
+            patchedFileReader.AudioData = self.FileReader.AudioData
+            patchedFileReader.WwiseBanks = {}
+            patchedFileReader.WwiseStreams = {}
+            
+            for key, value in self.FileReader.WwiseStreams.items():
+                if value.Modified:
+                    patchedFileReader.WwiseStreams[key] = copy.deepcopy(value)
+                    
+            for key, value in self.FileReader.WwiseBanks.items():
+                if value.Modified:
+                    patchedFileReader.WwiseBanks[key] = copy.deepcopy(value)
+                    
+            patchedFileReader.RebuildHeaders()
+            
+            patchedFileReader.ToFile(folder)
         else:
             print("Invalid folder selected, aborting save")
 
     def LoadWems(self):
         wems = filedialog.askopenfilenames(title="Choose .wem files to import")
-        modifiedBankEntries = set()
         
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(wems))
         progressWindow.Show()
         
+        subscribers = set()
+        
         for file in wems:
             progressWindow.SetText("Loading "+os.path.basename(file))
             fileID = self.GetFileNumberPrefix(os.path.basename(file))
-            entry = self.GetToc().GetEntryByID(fileID)
-            if isinstance(entry, BankWem):
-                with open(file, 'rb') as f:
-                    entry.SetData(f.read())
-                    entry.Parent.RaiseModified()
-                    modifiedBankEntries.add(entry.Parent)
-            elif isinstance(entry, TocBankEntry):
-                with open(file, 'rb') as f:
-                    entry.SetData(TocData=f.read(), GpuData=None, StreamData=None)
-            elif isinstance(entry, TocEntry):
-                with open(file, 'rb') as f:
-                    streamData = f.read()
-                    tocData = entry.TocData
-                    tocData[8:12] = len(streamData).to_bytes(4, byteorder="little")
-                    entry.SetData(TocData=tocData, GpuData=None, StreamData=streamData)
+            audio = self.GetAudioByID(fileID)
+            for item in audio.Subscribers:
+                subscribers.add(item)
+            with open(file, 'rb') as f:
+                audio.SetData(f.read())
             progressWindow.Step()
         
         progressWindow.Destroy()
-        progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(modifiedBankEntries))
+        progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(subscribers))
         progressWindow.Show()
         progressWindow.SetText("Rebuilding soundbanks")
         
-        self.GetToc().RebuildEntryHeaders()
-        for entry in modifiedBankEntries:
-            entry.RebuildTocData()
-            progressWindow.Step()
+        for entry in subscribers:
+            entry.Rebuild()
         
         progressWindow.Destroy()
+        
         
 class TableInfo:
 
@@ -939,6 +947,8 @@ class MainWindow:
         
         self.rightClickMenu = Menu(self.root, tearoff=0)
         self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
+        self.rightClickMenu.add_command(label="Dump As .wem", command=self.DumpAsWem)
+        self.rightClickMenu.add_command(label="Dump As .wav", command=self.DumpAsWav)
         self.rightClickID = 0
 
         self.menu = Menu(self.root, tearoff=0)
@@ -981,6 +991,12 @@ class MainWindow:
         self.root.clipboard_append(self.rightClickID)
         self.root.update()
         
+    def DumpAsWem(self):
+        self.fileHandler.DumpAsWem(self.rightClickID)
+        
+    def DumpAsWav(self):
+        self.fileHandler.DumpAsWav(self.rightClickID)
+        
     def _on_mousewheel(self, event):
         self.mainCanvas.yview_scroll(int(-1*(event.delta/120)), 'units')
         
@@ -989,21 +1005,20 @@ class MainWindow:
         info = TableInfo()
     
         fillColor = "lawn green" if tocEntry.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 335, 30, fill=fillColor, tags=(tocEntry.FileID, "rect")))
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.FileID, "rect")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 335, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
         
-        name = str(tocEntry.FileID) + (".wem" if tocEntry.TypeID == 5785811756662211598 else ".bnk")
+        name = str(tocEntry.GetFileID()) + (".wem" if tocEntry.GetTypeID() == 5785811756662211598 else ".bnk")
 
-        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(tocEntry.FileID, "name")))
-        info.text.append(self.mainCanvas.create_text(0, 0, text=tocEntry.EntryIndex, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tag=tocEntry.FileID))
+        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(tocEntry.GetFileID(), "name")))
+        info.text.append(self.mainCanvas.create_text(0, 0, text=tocEntry.GetEntryIndex(), fill='black', font=('Arial', 16, 'bold'), anchor='nw', tag=tocEntry.GetFileID()))
         
         #create revert button
-        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertEntry, tocEntry.FileID), image=self.fakeImage, compound='c', height=20, width=20)
-        
-        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=tocEntry.FileID)
+        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, tocEntry.GetFileID()), image=self.fakeImage, compound='c', height=20, width=20)
+        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=tocEntry.GetFileID())
         info.buttons.append(info.revertButton)
         
-        if tocEntry.TypeID == 5785811756662211598:
+        if tocEntry.GetTypeID() == 5785811756662211598:
             info._type = TableInfo.WEM
             #create play button
             play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
@@ -1014,9 +1029,9 @@ class MainWindow:
                     button.configure(text= '\u23f5', fg='green')
                 else:
                     button.configure(text= '\u23f9', fg='red')
-                self.PlayWemFromStream(fileID, callback)
-            play.configure(command=partial(pressButton, play, tocEntry.FileID, partial(resetButtonIcon, play)))
-            info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=tocEntry.FileID))
+                self.PlayAudio(fileID, callback)
+            play.configure(command=partial(pressButton, play, tocEntry.GetFileID(), partial(resetButtonIcon, play)))
+            info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=tocEntry.GetFileID()))
         else:
             info._type = TableInfo.BANK
             #create expand button
@@ -1024,39 +1039,37 @@ class MainWindow:
                 if button['text'] == "v":
                     button.configure(text=">")
                     #hide
-                    entry = self.fileHandler.GetToc().GetEntryByID(bankId)
-                    for wem in entry.Wems.values():
-                        self.UpdateTableEntry(wem.FileID, action="hide")
+                    for entry in self.fileHandler.GetWwiseBanks()[bankId].DataIndex.values():
+                        self.UpdateTableEntry(entry, action="hide")
                 else:
                     button.configure(text="v")
                     #show
-                    entry = self.fileHandler.GetToc().GetEntryByID(bankId)
-                    for wem in entry.Wems.values():
-                        self.UpdateTableEntry(wem.FileID, action="show")
+                    for entry in self.fileHandler.GetWwiseBanks()[bankId].DataIndex.values():
+                        self.UpdateTableEntry(entry, action="show")
                 self.Update()
             expand = Button(self.mainCanvas, text=">", font=('Arial', 14, 'bold'), height=20, width=20, image=self.fakeImage, compound='c')
-            expand.configure(command=partial(pressButton, expand, tocEntry.FileID))
-            info.buttons.append(self.mainCanvas.create_window(0, 0, window=expand, anchor='nw', tag=tocEntry.FileID))
+            expand.configure(command=partial(pressButton, expand, tocEntry.GetFileID()))
+            info.buttons.append(self.mainCanvas.create_window(0, 0, window=expand, anchor='nw', tag=tocEntry.GetFileID()))
         
 
-        self.tableInfo[tocEntry.FileID] = info
+        self.tableInfo[tocEntry.GetFileID()] = info
         
-    def CreateBankSubtableRow(self, bankWem):
+    def CreateBankSubtableRow(self, bankWem, parent):
     
         info = TableInfo()
         info.hidden = True
         info._type = TableInfo.BANK_WEM
     
         fillColor = "lawn green" if bankWem.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor, tags=(bankWem.FileID, "rect")))
-        name = str(bankWem.FileID) + ".wem"
-        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(bankWem.FileID, "name")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor, tags=(bankWem.GetFileID(), "rect")))
+        name = str(bankWem.GetFileID()) + ".wem"
+        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(bankWem.GetFileID(), "name")))
         
         
         #create revert button
-        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertEntry, bankWem.FileID), image=self.fakeImage, compound='c', height=20, width=20)
+        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, bankWem.GetFileID()), image=self.fakeImage, compound='c', height=20, width=20)
         
-        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=bankWem.FileID)
+        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=bankWem.GetFileID())
         info.buttons.append(info.revertButton)
         
         #create play button
@@ -1068,55 +1081,55 @@ class MainWindow:
                 button.configure(text= '\u23f5', fg='green')
             else:
                 button.configure(text= '\u23f9', fg='red')
-            self.PlayWemFromBank(fileID, callback)
-        play.configure(command=partial(pressButton, play, bankWem.FileID, partial(resetButtonIcon, play)))
-        info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=bankWem.FileID))
-        
-        self.tableInfo[bankWem.FileID] = info
+            self.PlayAudio(fileID, callback)
+        play.configure(command=partial(pressButton, play, bankWem.GetFileID(), partial(resetButtonIcon, play)))
+        info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=bankWem.GetFileID()))
+        self.tableInfo[str(parent.GetFileID())+'-'+str(bankWem.GetFileID())] = info
             
-    def CreateTable(self, toc):
+    def CreateTable(self):
         for child in self.mainCanvas.winfo_children():
             child.destroy()
         self.mainCanvas.delete("all")
         self.tableInfo = {}
-        validTypes = [5785811756662211598, 6006249203084351385]
         draw_y = 0
-        for key in sorted(toc.TocEntries.keys()):
-            entry = toc.TocEntries[key]
-            name = str(entry.FileID) + (".wem" if entry.TypeID == 5785811756662211598 else ".bnk")
-            if entry.TypeID in validTypes:
-                self.CreateTableRow(entry)
+        streamDict = self.fileHandler.GetWwiseStreams()
+        for key in streamDict.keys():
+            stream = streamDict[key]
+            name = str(stream.GetFileID()) + ".wem"
+            self.CreateTableRow(stream)
+            draw_y += 30
+        bankDict = self.fileHandler.GetWwiseBanks()
+        for key in bankDict.keys():
+            bank = bankDict[key]
+            self.CreateTableRow(bank)
+            draw_y += 30
+            for item in bank.GetContent():
+                self.CreateBankSubtableRow(item, bank)
                 draw_y += 30
-                if entry.TypeID == 6006249203084351385:
-                    for id, wem in entry.Wems.items():
-                        self.CreateBankSubtableRow(wem)
-                        draw_y += 30               
         self.mainCanvas.configure(scrollregion=(0,0,500,draw_y + 5))
     
-    def UpdateTableEntry(self, fileID, action="update"):
+    def UpdateTableEntry(self, item, action="update"):
+        fileID = item.GetFileID()
+        info = self.tableInfo[fileID]
         if action == "update":
-            entry = self.fileHandler.GetToc().GetEntryByID(fileID)
-            self.tableInfo[fileID].modified = entry.Modified
-            for rect in self.tableInfo[fileID].rectangles:
-                if entry.Modified:
-                    self.mainCanvas.itemconfigure(rect, fill="lawn green")
-                else:
-                    self.mainCanvas.itemconfigure(rect, fill="white")
+            info.modified = item.Modified
         elif action == "show":
-            self.tableInfo[fileID].hidden = False
+            info.hidden = False
         elif action == "hide":
-            self.tableInfo[fileID].hidden = True
+            info.hidden = True
             
     def UpdateTableEntries(self):
-        for fileID in self.fileHandler.GetTocEntries().keys():
-            self.UpdateTableEntry(fileID)
-            entry = self.fileHandler.GetToc().GetEntryByID(fileID)
-            if entry.TypeID == 6006249203084351385:
-                for wem in entry.GetWems():
-                    self.UpdateTableEntry(wem.FileID)
+        streamDict = self.fileHandler.GetWwiseStreams()
+        for stream in streamDict.values():
+            self.UpdateTableEntry(stream)
+        bankDict = self.fileHandler.GetWwiseBanks()
+        for bank in bankDict.values():
+            self.UpdateTableEntry(bank)
+            for entry in bank.DataIndex.values():
+                self.UpdateTableEntry(entry)
             
-    def DrawTableRow(self, fileID, x, y):
-        rowInfo = self.tableInfo[fileID]
+    def DrawTableRow(self, item, x, y):
+        rowInfo = self.tableInfo[item.GetFileID()]
         if not rowInfo.hidden:
             if rowInfo._type == TableInfo.BANK_WEM: x += 30
             for button in rowInfo.buttons:
@@ -1140,39 +1153,49 @@ class MainWindow:
             for text in rowInfo.text:
                 self.mainCanvas.moveto(text, -1000, -1000)
         
-    def RedrawTable(self, toc):
+    def RedrawTable(self):
         draw_y = 0
         draw_x = 0
-        for key in sorted(toc.TocEntries.keys()):
+        streamDict = self.fileHandler.GetWwiseStreams()
+        for stream in streamDict.values():
             draw_x = 0
-            entry = toc.TocEntries[key]
-            self.DrawTableRow(entry.FileID, draw_x, draw_y)
-            if not self.tableInfo[key].hidden: draw_y += 30
-            if entry.TypeID == 6006249203084351385:
-                for id in entry.Wems.keys():
-                    self.DrawTableRow(id, draw_x, draw_y)
-                    if not self.tableInfo[id].hidden: draw_y += 30
+            self.DrawTableRow(stream, draw_x, draw_y)
+            if not self.tableInfo[stream.GetFileID()].hidden: draw_y += 30
+        bankDict = self.fileHandler.GetWwiseBanks()
+        for bank in bankDict.values():
+            draw_x = 0
+            self.DrawTableRow(bank, draw_x, draw_y)
+            if not self.tableInfo[bank.GetFileID()].hidden: draw_y += 30
+            for item in bank.DataIndex.values():
+                self.DrawTableRow(item, draw_x, draw_y)
+                if not self.tableInfo[item.GetFileID()].hidden:
+                    draw_y += 30
         self.mainCanvas.configure(scrollregion=(0,0,1280,draw_y + 5))
+        
 
     def Search(self, searchText):
-        for fileID, info in self.tableInfo.items():
-            name = str(fileID) + (".bnk" if info._type == TableInfo.BANK else ".wem")
+        for item in self.tableInfo.values():
+            item.hidden = True
+        for audio in self.fileHandler.GetAudio().values():
+            name = str(audio.GetFileID()) + ".wem"
             if name.startswith(searchText.get()) or name.endswith(searchText.get()):
-                self.UpdateTableEntry(fileID, action="show")
-                if info._type == TableInfo.BANK_WEM:
-                    self.UpdateTableEntry(self.fileHandler.GetToc().GetEntryByID(fileID).Parent.FileID, action="show")
-            else:
-                self.UpdateTableEntry(fileID, action="hide")
-        self.RedrawTable(self.fileHandler.GetToc())
+                for subscriber in audio.Subscribers:
+                    self.UpdateTableEntry(subscriber, action="show")
+        bankDict = self.fileHandler.GetWwiseBanks()
+        for bank in bankDict.values():
+            name = str(bank.GetFileID()) + ".bnk"
+            if name.startswith(searchText.get()) or name.endswith(searchText.get()):
+                self.UpdateTableEntry(bank, action="show")
+        self.RedrawTable()
     
     def Update(self):
-        self.RedrawTable(self.fileHandler.GetToc())
+        self.RedrawTable()
         
     def LoadArchive(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadArchiveFile()
         self.expandedBanks.clear()
-        self.CreateTable(self.fileHandler.GetToc())
+        self.CreateTable()
         self.Update()
         
     def SaveArchive(self):
@@ -1193,15 +1216,12 @@ class MainWindow:
         self.soundHandler.KillSound()
         self.fileHandler.DumpAllAsWav()
         
-    def PlayWemFromStream(self, fileID, callback):
-        self.soundHandler.PlayWem(fileID, self.fileHandler.GetToc().GetEntryByID(fileID).StreamData, callback)
+    def PlayAudio(self, fileID, callback):
+        self.soundHandler.PlayAudio(fileID, self.fileHandler.GetAudioByID(fileID).GetData(), callback)
         
-    def PlayWemFromBank(self, wemID, callback):
-        self.soundHandler.PlayWem(wemID, self.fileHandler.GetToc().GetEntryByID(wemID).GetData(), callback)
-        
-    def RevertEntry(self, fileID):
+    def RevertAudio(self, fileID):
         self.soundHandler.KillSound()
-        self.fileHandler.RevertEntry(fileID)
+        self.fileHandler.RevertAudio(fileID)
         self.UpdateTableEntries()
         self.Update()
         
@@ -1226,8 +1246,7 @@ def exitHandler():
     
 
 if __name__ == "__main__":
-    toc = StreamToc()
     soundHandler = SoundHandler()
-    fileHandler = FileHandler(toc)
+    fileHandler = FileHandler()
     atexit.register(exitHandler)
     window = MainWindow(fileHandler, soundHandler)
