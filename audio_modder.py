@@ -1143,7 +1143,7 @@ class MainWindow:
         self.root.config(menu=self.menu)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel)
         self.mainCanvas.bind_all("<Button-3>", self._on_rightclick)
-        self.root.bind_all("<Return>", self._on_enter)
+        self.searchBar.bind("<Return>", self._on_enter)
         self.root.resizable(False, False)
         self.root.mainloop()
         
