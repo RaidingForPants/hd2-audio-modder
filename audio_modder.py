@@ -437,6 +437,14 @@ class StringEntry:
         sizeDifference = len(self.Text) - textLen
         self.Parent.Rebuild(self.FileID, sizeDifference)
         
+    def SetText(self, text):
+        self.Modified = True
+        textLen = len(self.Text)
+        self.Text = text
+        sizeDifference = len(self.Text) - textLen
+        self.TextVariable.set(text)
+        self.Parent.Rebuild(self.FileID, sizeDifference)
+        
     def __deepcopy__(self, memo):
         newEntry = StringEntry()
         newEntry.Text = self.Text
@@ -987,6 +995,11 @@ class FileHandler:
                 
         for entry in subscribers:
             entry.Rebuild()
+            
+        for textData in patchFileReader.TextData.values():
+            oldTextData = self.GetStrings()[textData.GetFileID()]
+            for entry in textData.StringEntries.values():
+                oldTextData.StringEntries[entry.GetFileID()].SetText(entry.GetText())
         
         progressWindow.Destroy()
 
@@ -1086,7 +1099,6 @@ class MainWindow:
         self.titleCanvas = Canvas(self.root, width=500, height=30)
         self.searchText = tkinter.StringVar(self.root)
         self.searchBar = Entry(self.titleCanvas, textvariable=self.searchText, font=('Arial', 16))
-        self.searchText.trace("w", lambda name, index, mode, searchText=self.searchText: self.Search(searchText))
         self.titleCanvas.pack(side="top")
         
         self.titleCanvas.create_text(230, 0, text="\u2315", fill='gray', font=('Arial', 20), anchor='nw')
@@ -1131,8 +1143,12 @@ class MainWindow:
         self.root.config(menu=self.menu)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel)
         self.mainCanvas.bind_all("<Button-3>", self._on_rightclick)
+        self.root.bind_all("<Return>", self._on_enter)
         self.root.resizable(False, False)
         self.root.mainloop()
+        
+    def _on_enter(self, event):
+        self.Search()
         
     def _on_rightclick(self, event):
         try:
@@ -1166,13 +1182,11 @@ class MainWindow:
     
         fillColor = "white"
         info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor))
-        #info.text.append(self.mainCanvas.create_text(0, 0, text=stringEntry.GetText(), fill='black', font=('Arial', 16, 'bold'), anchor='nw'))
         self.tableInfo[stringEntry.GetFileID()] = info
         text = tkinter.StringVar(self.mainCanvas)
         textBox = Entry(self.mainCanvas, width=50, textvariable=text, font=('Arial', 8))
         stringEntry.TextVariable = text
         textBox.insert(END, stringEntry.GetText())
-        #self.searchBar = Entry(self.titleCanvas, textvariable=self.searchText, font=('Arial', 16))
         info.text.append(self.mainCanvas.create_window(0, 0, window=textBox, anchor='nw'))
         
         #create revert button
@@ -1408,26 +1422,27 @@ class MainWindow:
         self.mainCanvas.configure(scrollregion=(0,0,1280,draw_y + 5))
         
 
-    def Search(self, searchText):
+    def Search(self):
+        text = self.searchText.get()
         for item in self.tableInfo.values():
             item.hidden = True
         for audio in self.fileHandler.GetAudio().values():
             name = str(audio.GetFileID()) + ".wem"
-            if name.startswith(searchText.get()) or name.endswith(searchText.get()):
+            if name.startswith(text) or name.endswith(text):
                 for subscriber in audio.Subscribers:
                     self.UpdateTableEntry(subscriber, action="show")
         bankDict = self.fileHandler.GetWwiseBanks()
         for bank in bankDict.values():
             name = str(bank.GetFileID()) + ".bnk"
-            if name.startswith(searchText.get()) or name.endswith(searchText.get()):
+            if name.startswith(text) or name.endswith(text):
                 self.UpdateTableEntry(bank, action="show")
         for item in self.fileHandler.GetStrings().values():
             name = str(item.GetFileID()) + ".text"
-            if name.startswith(searchText.get()) or name.endswith(searchText.get()):
+            if name.startswith(text) or name.endswith(text):
                 self.UpdateTableEntry(item, action="show")
             for entry in item.StringEntries.values():
                 name = entry.TextVariable.get()
-                if searchText.get() in name:
+                if text in name:
                     self.UpdateTableEntry(entry, action="show")
                     self.UpdateTableEntry(entry.Parent, action="show")
         self.RedrawTable()
