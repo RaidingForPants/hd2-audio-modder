@@ -410,6 +410,117 @@ class WwiseStream(Subscriber):
     def GetData(self):
         return self.Content.GetData()
 
+
+class StringEntry:
+
+    def __init__(self):
+        self.Text = ""
+        self.Offset = 0
+        self.FileID = 0
+        self.TextVariable = None
+        self.Modified = False
+        self.Parent = None
+        
+    def GetFileID(self):
+        return self.FileID
+        
+    def GetText(self):
+        return self.Text
+    
+    def GetOffset(self):
+        return self.Offset
+        
+    def UpdateText(self):
+        self.Modified = True
+        textLen = len(self.Text)
+        self.Text = self.TextVariable.get()
+        sizeDifference = len(self.Text) - textLen
+        self.Parent.Rebuild(self.FileID, sizeDifference)
+        
+    def __deepcopy__(self, memo):
+        newEntry = StringEntry()
+        newEntry.Text = self.Text
+        newEntry.Offset = self.Offset
+        newEntry.FileID = self.FileID
+        newEntry.TextVariable = self.TextVariable
+        newEntry.Modified = self.Modified
+        newEntry.Parent = self.Parent
+        return newEntry
+        
+class TextData:
+    
+    def __init__(self):
+        self.TocHeader = None
+        self.Data = b''
+        self.IDs = b''
+        self.StringEntries = {}
+        self.Language = ""
+        self.Modified = False
+        
+    def SetData(self, data):
+        numEntries = int.from_bytes(data[8:12], byteorder='little')
+        self.Language = "English(US)"
+        idStart = 16
+        offsetStart = idStart + 4 * numEntries
+        dataStart = offsetStart + 4 * numEntries
+        ids = data[idStart:offsetStart]
+        offsets = data[offsetStart:dataStart]
+        self.IDs = ids
+        for n in range(numEntries):
+            entry = StringEntry()
+            stringID = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
+            stringOffset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
+            entry.FileID = stringID
+            entry.Offset = stringOffset
+            stopIndex = stringOffset + 1
+            while data[stopIndex] != 0:
+                stopIndex += 1
+            entry.Text = data[stringOffset:stopIndex].decode('utf-8')
+            entry.Parent = self
+            self.StringEntries[stringID] = entry
+            
+    def Update(self):
+        self.TocHeader.TocData = self.GetData()
+        self.TocHeader.TocDataSize = len(self.TocHeader.TocData)
+        
+    def GetData(self):
+        stream = MemoryStream()
+        stream.write(b'\xae\xf3\x85\x3e\x01\x00\x00\x00')
+        stream.write(len(self.StringEntries).to_bytes(4, byteorder="little"))
+        stream.write(b'\x57\x7B\xf9\x03')
+        for entry in self.StringEntries.values():
+            stream.write(entry.FileID.to_bytes(4, byteorder="little"))
+        for entry in self.StringEntries.values():
+            stream.write(entry.Offset.to_bytes(4, byteorder="little"))
+        for entry in self.StringEntries.values():
+            stream.seek(entry.Offset)
+            stream.write(entry.Text.encode('utf-8') + b'\x00')
+        return stream.Data
+        
+    def Rebuild(self, stringID, offsetDifference):
+        modifiedEntry = self.StringEntries[stringID]
+        for entry in self.StringEntries.values():
+            if entry.Offset > modifiedEntry.Offset:
+                entry.Offset += offsetDifference
+        
+    def GetFileID(self):
+        try:
+            return self.TocHeader.FileID
+        except:
+            return 0
+        
+    def GetTypeID(self):
+        try:
+            return self.TocHeader.TypeID
+        except:
+            return 0
+            
+    def GetEntryIndex(self):
+        try:
+            return self.TocHeader.EntryIndex
+        except:
+            return 0
+
 class FileReader:
     
     def __init__(self):
@@ -430,10 +541,11 @@ class FileReader:
     def ToFile(self, path):
         tocFile = MemoryStream()
         streamFile = MemoryStream()
-        self.numFiles = len(self.WwiseStreams) + len(self.WwiseBanks)
+        self.numFiles = len(self.WwiseStreams) + len(self.WwiseBanks) + len(self.TextData)
         self.numTypes = 0
         if len(self.WwiseStreams) > 0: self.numTypes += 1
         if len(self.WwiseBanks) > 0: self.numTypes += 1
+        if len(self.TextData) > 0: self.numTypes += 1
         
         tocFile.write(self.magic.to_bytes(4, byteorder="little"))
         
@@ -465,6 +577,18 @@ class FileReader:
             tocFile.write(unk.to_bytes(4, byteorder='little'))
             unk = 64
             tocFile.write(unk.to_bytes(4, byteorder='little'))
+            
+        if len(self.TextData) > 0:
+            unk = 0
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = 979299457696010195
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = len(self.TextData)
+            tocFile.write(unk.to_bytes(8, byteorder='little'))
+            unk = 16
+            tocFile.write(unk.to_bytes(4, byteorder='little'))
+            unk = 64
+            tocFile.write(unk.to_bytes(4, byteorder='little'))
         
         tocPosition = tocFile.tell()
         for key in self.WwiseStreams.keys():
@@ -487,6 +611,14 @@ class FileReader:
             #tocFile.seek(bank.Dep.Offset)
             #tocFile.write(bank.Dep.GetData())
             
+        for key in self.TextData.keys():
+            tocFile.seek(tocPosition)
+            tocPosition += 80
+            entry = self.TextData[key]
+            tocFile.write(entry.TocHeader.GetData())
+            tocFile.seek(entry.TocHeader.TocDataOffset)
+            tocFile.write(PadTo16ByteAlign(entry.GetData()))
+            
             
         with open(os.path.join(path, self.Name), 'w+b') as f:
             f.write(tocFile.Data)
@@ -499,7 +631,8 @@ class FileReader:
         self.numTypes = 0
         if len(self.WwiseStreams) > 0: self.numTypes += 1
         if len(self.WwiseBanks) > 0: self.numTypes += 1
-        self.numFiles = len(self.WwiseStreams) + len(self.WwiseBanks)
+        if len(self.TextData) > 0: self.numTypes += 1
+        self.numFiles = len(self.WwiseStreams) + len(self.WwiseBanks) + len(self.TextData)
         streamOffset = 0
         tocOffset = 80 + self.numTypes * 32 + 80 * self.numFiles
         for key, value in self.WwiseStreams.items():
@@ -512,11 +645,17 @@ class FileReader:
             value.TocHeader.TocDataOffset = tocOffset
             tocOffset += _16ByteAlign(value.DataSize)
             
+        for key, value in self.TextData.items():
+            value.Update()
+            value.TocHeader.TocDataOffset = tocOffset
+            tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
+            
         
     def Load(self, tocFile, streamFile):
         self.WwiseStreams = {}
         self.WwiseBanks = {}
         self.AudioData = {}
+        self.TextData = {}
         self.magic      = tocFile.uint32Read()
         if self.magic != 4026531857: return False
 
@@ -597,6 +736,14 @@ class FileReader:
                     self.WwiseBanks[tocHeader.FileID].Dep = dep
                 except KeyError:
                     pass
+            elif tocHeader.TypeID == 979299457696010195: #stringEntry
+                tocFile.seek(tocHeader.TocDataOffset)
+                data = tocFile.read(tocHeader.TocDataSize)
+                if int.from_bytes(data[12:16], byteorder='little') == 66681687: #English (US)
+                    entry = TextData()
+                    entry.TocHeader = tocHeader
+                    entry.SetData(data)
+                    self.TextData[entry.GetFileID()] = entry
             
 class SoundHandler:
     
@@ -801,6 +948,9 @@ class FileHandler:
     def GetAudio(self):
         return self.FileReader.AudioData
         
+    def GetStrings(self):
+        return self.FileReader.TextData
+        
     def LoadArchiveFile(self):
         archiveFile = askopenfilename(title="Select archive")
         if os.path.splitext(archiveFile)[1] in (".stream", ".gpu_resources"):
@@ -853,6 +1003,7 @@ class FileHandler:
             patchedFileReader.AudioData = self.FileReader.AudioData
             patchedFileReader.WwiseBanks = {}
             patchedFileReader.WwiseStreams = {}
+            patchedFileReader.TextData = {}
             
             for key, value in self.FileReader.WwiseStreams.items():
                 if value.Modified:
@@ -861,6 +1012,13 @@ class FileHandler:
             for key, value in self.FileReader.WwiseBanks.items():
                 if value.Modified:
                     patchedFileReader.WwiseBanks[key] = copy.deepcopy(value)
+                    
+            for key, value in self.FileReader.TextData.items():
+                for entry in value.StringEntries.values():
+                    if entry.Modified:
+                        patchedFileReader.TextData[key] = copy.deepcopy(value)
+                        break
+                    
                     
             patchedFileReader.RebuildHeaders()
             
@@ -1000,6 +1158,36 @@ class MainWindow:
     def _on_mousewheel(self, event):
         self.mainCanvas.yview_scroll(int(-1*(event.delta/120)), 'units')
         
+    def CreateStringSubtableRow(self, stringEntry):
+            
+        info = TableInfo()
+        info.hidden = True
+        info._type = TableInfo.BANK_WEM
+    
+        fillColor = "white"
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor))
+        #info.text.append(self.mainCanvas.create_text(0, 0, text=stringEntry.GetText(), fill='black', font=('Arial', 16, 'bold'), anchor='nw'))
+        self.tableInfo[stringEntry.GetFileID()] = info
+        text = tkinter.StringVar(self.mainCanvas)
+        textBox = Entry(self.mainCanvas, width=50, textvariable=text, font=('Arial', 8))
+        stringEntry.TextVariable = text
+        textBox.insert(END, stringEntry.GetText())
+        #self.searchBar = Entry(self.titleCanvas, textvariable=self.searchText, font=('Arial', 16))
+        info.text.append(self.mainCanvas.create_window(0, 0, window=textBox, anchor='nw'))
+        
+        #create revert button
+        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        
+        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw')
+        info.buttons.append(info.revertButton)
+        
+        #create apply button
+        apply = Button(self.mainCanvas, text="\u2713", fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        def applyText(entry):
+            entry.UpdateText()
+        apply.configure(command=partial(applyText, stringEntry))
+        info.buttons.append(self.mainCanvas.create_window(0, 0, window=apply, anchor='nw'))
+        
     def CreateTableRow(self, tocEntry):
         
         info = TableInfo()
@@ -1008,7 +1196,13 @@ class MainWindow:
         info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 335, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
         info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
         
-        name = str(tocEntry.GetFileID()) + (".wem" if tocEntry.GetTypeID() == 5785811756662211598 else ".bnk")
+        name = str(tocEntry.GetFileID())
+        if tocEntry.GetTypeID() == 5785811756662211598:
+            name = name + ".wem"
+        elif tocEntry.GetTypeID() == 6006249203084351385:
+            name = name + ".bnk"
+        elif tocEntry.GetTypeID() == 979299457696010195:
+            name = name + ".text"
         if tocEntry.GetTypeID() == 6006249203084351385:
             try:
                 name = tocEntry.Dep.Data.split('/')[-1]
@@ -1037,7 +1231,13 @@ class MainWindow:
                 self.PlayAudio(fileID, callback)
             play.configure(command=partial(pressButton, play, tocEntry.GetFileID(), partial(resetButtonIcon, play)))
             info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=tocEntry.GetFileID()))
-        else:
+        elif tocEntry.GetTypeID() == 6006249203084351385:
+            def revertBank(bankId):
+                for audio in self.fileHandler.GetWwiseBanks()[bankId].GetContent():
+                    audio.RevertModifications()
+                self.UpdateTableEntries()
+                self.Update()
+            revert.configure(command=partial(revertBank, tocEntry.GetFileID()))        
             info._type = TableInfo.BANK
             #create expand button
             def pressButton(button, bankId):
@@ -1055,7 +1255,23 @@ class MainWindow:
             expand = Button(self.mainCanvas, text=">", font=('Arial', 14, 'bold'), height=20, width=20, image=self.fakeImage, compound='c')
             expand.configure(command=partial(pressButton, expand, tocEntry.GetFileID()))
             info.buttons.append(self.mainCanvas.create_window(0, 0, window=expand, anchor='nw', tag=tocEntry.GetFileID()))
-        
+        elif tocEntry.GetTypeID() == 979299457696010195:
+            #create expand button
+            def pressButton(button, textId):
+                if button['text'] == "v":
+                    button.configure(text=">")
+                    #hide
+                    for entry in self.fileHandler.GetStrings()[textId].StringEntries.values():
+                        self.UpdateTableEntry(entry, action="hide")
+                else:
+                    button.configure(text="v")
+                    #show
+                    for entry in self.fileHandler.GetStrings()[textId].StringEntries.values():
+                        self.UpdateTableEntry(entry, action="show")
+                self.Update()
+            expand = Button(self.mainCanvas, text=">", font=('Arial', 14, 'bold'), height=20, width=20, image=self.fakeImage, compound='c')
+            expand.configure(command=partial(pressButton, expand, tocEntry.GetFileID()))
+            info.buttons.append(self.mainCanvas.create_window(0, 0, window=expand, anchor='nw', tag=tocEntry.GetFileID()))
 
         self.tableInfo[tocEntry.GetFileID()] = info
         
@@ -1111,6 +1327,10 @@ class MainWindow:
             for item in bank.GetContent():
                 self.CreateBankSubtableRow(item, bank)
                 draw_y += 30
+        for entry in self.fileHandler.GetStrings().values():
+            self.CreateTableRow(entry)
+            for stringEntry in entry.StringEntries.values():
+                self.CreateStringSubtableRow(stringEntry)
         self.mainCanvas.configure(scrollregion=(0,0,500,draw_y + 5))
     
     def UpdateTableEntry(self, item, action="update"):
@@ -1149,7 +1369,10 @@ class MainWindow:
                 self.mainCanvas.moveto(rowInfo.text[index], x + 5, y+5)
                 x += (self.mainCanvas.coords(rect)[2]-self.mainCanvas.coords(rect)[0])
             if not rowInfo.modified:
-                self.mainCanvas.moveto(rowInfo.revertButton, -1000, -1000)
+                try:
+                    self.mainCanvas.moveto(rowInfo.revertButton, -1000, -1000)
+                except:
+                    pass
         else:
             for button in rowInfo.buttons:
                 self.mainCanvas.moveto(button, -1000, -1000)
@@ -1175,6 +1398,13 @@ class MainWindow:
                 self.DrawTableRow(item, draw_x, draw_y)
                 if not self.tableInfo[item.GetFileID()].hidden:
                     draw_y += 30
+        for entry in self.fileHandler.GetStrings().values():
+            self.DrawTableRow(entry, draw_x, draw_y)
+            if not self.tableInfo[entry.GetFileID()].hidden: draw_y += 30
+            for item in entry.StringEntries.values():
+                self.DrawTableRow(item, draw_x, draw_y)
+                if not self.tableInfo[item.GetFileID()].hidden:
+                    draw_y += 30
         self.mainCanvas.configure(scrollregion=(0,0,1280,draw_y + 5))
         
 
@@ -1191,6 +1421,15 @@ class MainWindow:
             name = str(bank.GetFileID()) + ".bnk"
             if name.startswith(searchText.get()) or name.endswith(searchText.get()):
                 self.UpdateTableEntry(bank, action="show")
+        for item in self.fileHandler.GetStrings().values():
+            name = str(item.GetFileID()) + ".text"
+            if name.startswith(searchText.get()) or name.endswith(searchText.get()):
+                self.UpdateTableEntry(item, action="show")
+            for entry in item.StringEntries.values():
+                name = entry.TextVariable.get()
+                if searchText.get() in name:
+                    self.UpdateTableEntry(entry, action="show")
+                    self.UpdateTableEntry(entry.Parent, action="show")
         self.RedrawTable()
     
     def Update(self):
