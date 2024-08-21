@@ -121,9 +121,6 @@ def PadTo16ByteAlign(data):
 def _16ByteAlign(addr):
     return ceil(addr/16)*16
     
-def SortContent(content):
-    return content.FileID
-    
 class AudioData:
     
     def __init__(self):
@@ -147,7 +144,6 @@ class AudioData:
                     item.RaiseModified()
         if setModified:
             self.Modified = True
-        
         
     def GetData(self):
         return self.Data
@@ -460,12 +456,12 @@ class TextData:
     def __init__(self):
         self.TocHeader = None
         self.Data = b''
-        self.IDs = b''
         self.StringEntries = {}
         self.Language = ""
         self.Modified = False
         
     def SetData(self, data):
+        self.StringEntries.clear()
         numEntries = int.from_bytes(data[8:12], byteorder='little')
         self.Language = "English(US)"
         idStart = 16
@@ -473,7 +469,6 @@ class TextData:
         dataStart = offsetStart + 4 * numEntries
         ids = data[idStart:offsetStart]
         offsets = data[offsetStart:dataStart]
-        self.IDs = ids
         for n in range(numEntries):
             entry = StringEntry()
             stringID = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
@@ -495,7 +490,7 @@ class TextData:
         stream = MemoryStream()
         stream.write(b'\xae\xf3\x85\x3e\x01\x00\x00\x00')
         stream.write(len(self.StringEntries).to_bytes(4, byteorder="little"))
-        stream.write(b'\x57\x7B\xf9\x03')
+        stream.write(b'\x57\x7B\xf9\x03') #Language code
         for entry in self.StringEntries.values():
             stream.write(entry.FileID.to_bytes(4, byteorder="little"))
         for entry in self.StringEntries.values():
@@ -796,8 +791,15 @@ class SoundHandler:
         def readStream(input_data, frame_count, time_info, status):
             self.frameCount += frame_count
             if self.frameCount > self.maxFrames:
-                self.KillSound()
+                if self.callback is not None:
+                    self.callback()
+                    self.callback = None
                 self.audioID = -1
+                self.waveFile.close()
+                try:
+                    os.remove(self.audioFile)
+                except:
+                    pass
                 return (None, pyaudio.paComplete)
             data = self.waveFile.readframes(frame_count)
             if self.waveFile.getnchannels() > 2:
@@ -1031,10 +1033,8 @@ class FileHandler:
                     if entry.Modified:
                         patchedFileReader.TextData[key] = copy.deepcopy(value)
                         break
-                    
-                    
+     
             patchedFileReader.RebuildHeaders()
-            
             patchedFileReader.ToFile(folder)
         else:
             print("Invalid folder selected, aborting save")
@@ -1317,6 +1317,7 @@ class MainWindow:
             else:
                 button.configure(text= '\u23f9', fg='red')
             self.PlayAudio(fileID, callback)
+            
         play.configure(command=partial(pressButton, play, bankWem.GetFileID(), partial(resetButtonIcon, play)))
         info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=bankWem.GetFileID()))
         self.tableInfo[str(parent.GetFileID())+'-'+str(bankWem.GetFileID())] = info
