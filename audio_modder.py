@@ -1376,14 +1376,12 @@ class MainWindow:
                     button.configure(text=">")
                     #hide
                     for entry in self.fileHandler.GetWwiseBanks()[bankId].DataIndex.values():
-                        if entry.Content.Type == AudioSource.BANK:
-                            self.UpdateTableEntry(entry, action="hide")
+                        self.UpdateTableEntry(entry, action="hide")
                 else:
                     button.configure(text="v")
                     #show
                     for entry in self.fileHandler.GetWwiseBanks()[bankId].DataIndex.values():
-                        if entry.Content.Type == AudioSource.BANK:
-                            self.UpdateTableEntry(entry, action="show")
+                        self.UpdateTableEntry(entry, action="show")
                 self.Update()
             expand = Button(self.mainCanvas, text=">", font=('Arial', 14, 'bold'), height=20, width=20, image=self.fakeImage, compound='c')
             expand.configure(command=partial(pressButton, expand, tocEntry.GetFileID()))
@@ -1470,7 +1468,10 @@ class MainWindow:
     
     def UpdateTableEntry(self, item, action="update"):
         fileID = item.GetFileID()
-        info = self.tableInfo[fileID]
+        try:
+            info = self.tableInfo[fileID]
+        except:
+            return
         if action == "update":
             info.modified = item.Modified
         elif action == "show":
@@ -1486,11 +1487,13 @@ class MainWindow:
         for bank in bankDict.values():
             self.UpdateTableEntry(bank)
             for entry in bank.DataIndex.values():
-                if entry.Content.Type == AudioSource.BANK:
-                    self.UpdateTableEntry(entry)
+                self.UpdateTableEntry(entry)
             
     def DrawTableRow(self, item, x, y):
-        rowInfo = self.tableInfo[item.GetFileID()]
+        try:
+            rowInfo = self.tableInfo[item.GetFileID()]
+        except:
+            return
         if not rowInfo.hidden:
             if rowInfo._type == TableInfo.BANK_WEM: x += 30
             for button in rowInfo.buttons:
@@ -1531,10 +1534,9 @@ class MainWindow:
             self.DrawTableRow(bank, draw_x, draw_y)
             if not self.tableInfo[bank.GetFileID()].hidden: draw_y += 30
             for item in bank.DataIndex.values():
-                if item.Content.Type == AudioSource.BANK:
-                    self.DrawTableRow(item, draw_x, draw_y)
-                    if not self.tableInfo[item.GetFileID()].hidden:
-                        draw_y += 30
+                self.DrawTableRow(item, draw_x, draw_y)
+                if item.Content.Type == AudioSource.BANK and not self.tableInfo[item.GetFileID()].hidden:
+                    draw_y += 30
         for entry in self.fileHandler.GetStrings().values():
             self.DrawTableRow(entry, draw_x, draw_y)
             if not self.tableInfo[entry.GetFileID()].hidden: draw_y += 30
