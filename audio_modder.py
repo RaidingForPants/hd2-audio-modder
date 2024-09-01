@@ -807,7 +807,10 @@ class FileReader:
                 entry.BankHeader = "BKHD".encode('utf-8') + len(bank.Chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.Chunks["BKHD"]
                 
                 hirc = HircReader()
-                hirc.Load(bank.Chunks['HIRC'])
+                try:
+                    hirc.Load(bank.Chunks['HIRC'])
+                except KeyError:
+                    continue
                 #print(hirc.Sources.keys())
                 #-------------------------------------
                 if "DIDX" in bank.Chunks.keys():
@@ -821,6 +824,8 @@ class FileReader:
                         audioId = didxChunk.uint32Read()
                         audioOffset = didxChunk.uint32Read()
                         audioSize = didxChunk.uint32Read()
+                        if audioId not in hirc.Sources:
+                            continue
                         streamType = hirc.Sources[audioId]
                         if audioId not in self.AudioSources.keys():
                             audio = AudioSource()
