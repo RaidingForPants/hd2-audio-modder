@@ -753,7 +753,7 @@ class FileReader:
             
         for key, value in self.WwiseBanks.items():
             value.TocHeader.TocDataOffset = tocOffset
-            tocOffset += _16ByteAlign(value.DataSize)
+            tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
             
         for key, value in self.TextData.items():
             value.Update()
