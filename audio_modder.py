@@ -189,8 +189,6 @@ class Subscriber:
     def Update(self, content):
         pass
         
-    def Rebuild(self):
-        pass
         
     def RaiseModified(self):
         pass
@@ -208,6 +206,7 @@ class AudioSource:
         self.Modified = False
         self.Data_OLD = b""
         self.Subscribers = set()
+        self.streamType = 0
         
     def SetData(self, data, notifySubscribers=True, setModified=True):
         if not self.Modified and setModified:
@@ -221,6 +220,12 @@ class AudioSource:
                     item.RaiseModified()
         if setModified:
             self.Modified = True
+            
+    def GetFileID(self):
+        if self.streamType == BANK:
+            return self.GetShortId()
+        else:
+            return self.GetResourceId()
         
     def GetData(self):
         return self.Data
@@ -515,8 +520,7 @@ class BankEntry(Subscriber):
 class WwiseBank(Subscriber):
     
     def __init__(self):
-        self.DataIndex = {}
-        self.DataSize = 0
+        self.data = b""
         self.BankHeader = b""
         self.TocDataHeader = b""
         self.BankPostData = b""
@@ -571,7 +575,10 @@ class WwiseBank(Subscriber):
         except:
             return 0
             
-    def GetData(self, audioSources):
+    def GetData(self):
+        return self.data
+            
+    def Generate(self, audioSources):
         data = bytearray()
         data += self.BankHeader
         
@@ -593,9 +600,9 @@ class WwiseBank(Subscriber):
                     didxSection += struct.pack("<III", source.sourceId, offset, source.memSize)
                     offset += source.memSize
                 elif source.streamType == BANK:
-                    didxSection += struct.pack("<III", source.sourceId, offset, audio.size)
+                    didxSection += struct.pack("<III", source.sourceId, offset, audio.Size)
                     dataSection += audio.GetData()
-                    offset += audio.size
+                    offset += audio.Size
             elif entry.hType == MUSIC_TRACK:
                 for index, source in enumerate(entry.sources):
                     try:
@@ -608,9 +615,9 @@ class WwiseBank(Subscriber):
                         didxSection += struct.pack("<III", source.sourceId, offset, source.memSize)
                         offset += source.memSize
                     elif source.streamType == BANK:
-                        didxSection += struct.pack("<III", source.sourceId, offset, audio.size)
+                        didxSection += struct.pack("<III", source.sourceId, offset, audio.Size)
                         dataSection += audio.GetData()
-                        offset += audio.size
+                        offset += audio.Size
         if len(didxSection) > 0:                
             didxSection = "DIDX".encode('utf-8') + len(didxSection).to_bytes(4, byteorder="little") + didxSection
             dataSection = "DATA".encode('utf-8') + len(dataSection).to_bytes(4, byteorder="little") + dataSection
@@ -622,7 +629,9 @@ class WwiseBank(Subscriber):
         data += "HIRC".encode('utf-8') + len(hircSection).to_bytes(4, byteorder="little")
         data += hircSection
         data += self.BankPostData
-        return data
+        self.TocHeader.TocDataSize = len(data) + len(self.TocDataHeader)
+        self.TocDataHeader[4:8] = len(data).to_bytes(4, byteorder="little")
+        self.data = data
                      
     def GetEntryIndex(self):
         try:
@@ -891,10 +900,9 @@ class FileReader:
             tocFile.seek(tocPosition)
             tocPosition += 80
             bank = self.WwiseBanks[key]
-            bank.Rebuild()
             tocFile.write(bank.TocHeader.GetData())
             tocFile.seek(bank.TocHeader.TocDataOffset)
-            tocFile.write(PadTo16ByteAlign(bank.TocDataHeader + bank.GetData(self.AudioSources)))
+            tocFile.write(PadTo16ByteAlign(bank.TocDataHeader + bank.GetData()))
             
         for key in self.WwiseBanks.keys():
             tocFile.seek(tocPosition)
@@ -923,9 +931,9 @@ class FileReader:
     def RebuildHeaders(self):
         self.numTypes = 0
         if len(self.WwiseStreams) > 0: self.numTypes += 1
-        if len(self.WwiseBanks) > 0: self.numTypes += 1
+        if len(self.WwiseBanks) > 0: self.numTypes += 2
         if len(self.TextData) > 0: self.numTypes += 1
-        self.numFiles = len(self.WwiseStreams) + len(self.WwiseBanks) + len(self.TextData)
+        self.numFiles = len(self.WwiseStreams) + 2*len(self.WwiseBanks) + len(self.TextData)
         streamOffset = 0
         tocOffset = 80 + self.numTypes * 32 + 80 * self.numFiles
         for key, value in self.WwiseStreams.items():
@@ -935,7 +943,12 @@ class FileReader:
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
             
         for key, value in self.WwiseBanks.items():
+            value.Generate(self.AudioSources)
             value.TocHeader.TocDataOffset = tocOffset
+            tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
+            
+        for key, value in self.WwiseBanks.items():
+            value.Dep.TocHeader.TocDataOffset = tocOffset
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
             
         for key, value in self.TextData.items():
@@ -964,6 +977,7 @@ class FileReader:
             entry = None
             if tocHeader.TypeID == 5785811756662211598:
                 audio = AudioSource()
+                audio.streamType = STREAM
                 entry = WwiseStream()
                 entry.TocHeader = tocHeader
                 tocFile.seek(tocHeader.TocDataOffset)
@@ -994,24 +1008,24 @@ class FileReader:
                 #-------------------------------------
                 #Add all bank sources to the source list
                 if "DIDX" in bank.Chunks.keys():
-                    print("DIDX")
                     mediaIndex = MediaIndex()
                     mediaIndex.Load(bank.Chunks["DIDX"], bank.Chunks["DATA"])
-                    #print(mediaIndex.data.keys())
                     for e in hirc.entries.values():
                         if e.hType == SOUND and e.source.pluginId == 0x00040001:
                             if e.source.streamType == BANK and e.source.sourceId not in self.AudioSources:
                                 audio = AudioSource()
+                                audio.streamType = BANK
                                 audio.shortId = e.source.sourceId
-                                audio.SetData(mediaIndex.data[e.source.sourceId])
+                                audio.SetData(mediaIndex.data[e.source.sourceId], setModified=False, notifySubscribers=False)
                                 self.AudioSources[e.source.sourceId] = audio
                                 entry.AddContent(audio)
                         elif e.hType == MUSIC_TRACK:
                             for source in e.sources:
                                 if source.streamType == BANK and source.sourceId not in self.AudioSources:
                                     audio = AudioSource()
+                                    audio.streamType = BANK
                                     audio.shortId = source.sourceId
-                                    audio.SetData(mediaIndex.data[source.sourceId])
+                                    audio.SetData(mediaIndex.data[source.sourceId], setModified=False, notifySubscribers=False)
                                     self.AudioSources[source.sourceId] = audio
                                     entry.AddContent(audio)
                 
@@ -1041,9 +1055,17 @@ class FileReader:
         
         
         #check that all banks have valid Dep here, and ask for more data if does not?
-        if len(self.WwiseBanks) == 0:
-            print("No banks detected! This patch may have been made in an older version of the audio modding tool!")
+        
+        for bank in self.WwiseBanks.values():
+            if bank.Dep == None: #none because older versions didn't save the dep along with the bank
+                print("No wwise_deps detected! This patch may have been made in an older version of the audio modding tool!") #make this a pop-up window
+                self.LoadDeps()
+                break
+        
+        if len(self.WwiseBanks) == 0: #0 if patch was only for streams
+            print("No banks detected! This patch may have been made in an older version of the audio modding tool!") #make this a pop-up window
             self.LoadBanks()
+            
         
         #Once every resource has been loaded, finish constructing the list of audio sources and stuff
         #Add all stream entries to the AudioSource list, using their shortID (requires mapping via the Dep)
@@ -1075,7 +1097,42 @@ class FileReader:
                         elif source.sourceId in self.AudioSources:
                             self.AudioSources[source.sourceId].resourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
                             
-        print(len(self.AudioSources))
+        
+    def LoadDeps(self):
+        while True:
+            archiveFile = askopenfilename(title="Select archive")
+            if os.path.splitext(archiveFile)[1] in (".stream", ".gpu_resources"):
+                archiveFile = os.path.splitext(archiveFile)[0]
+            if os.path.exists(archiveFile):
+                break
+        #self.Name = os.path.basename(path)
+        tocFile = MemoryStream()
+        with open(archiveFile, 'r+b') as f:
+            tocFile = MemoryStream(f.read())
+
+        self.magic      = tocFile.uint32Read()
+        if self.magic != 4026531857: return False
+
+        self.numTypes   = tocFile.uint32Read()
+        self.numFiles   = tocFile.uint32Read()
+        self.unknown    = tocFile.uint32Read()
+        self.unk4Data   = tocFile.read(56)
+        tocFile.seek(tocFile.tell() + 32 * self.numTypes)
+        tocStart = tocFile.tell()
+        for n in range(self.numFiles):
+            tocFile.seek(tocStart + n*80)
+            tocHeader = TocHeader()
+            tocHeader.FromMemoryStream(tocFile)
+            entry = None
+            if tocHeader.TypeID == 12624162998411505776: #wwise dep
+                dep = WwiseDep()
+                dep.TocHeader = tocHeader
+                tocFile.seek(tocHeader.TocDataOffset)
+                dep.FromMemoryStream(tocFile)
+                try:
+                    self.WwiseBanks[tocHeader.FileID].Dep = dep
+                except KeyError:
+                    pass
         
     def LoadBanks(self):
         while True:
@@ -1089,10 +1146,6 @@ class FileReader:
         with open(archiveFile, 'r+b') as f:
             tocFile = MemoryStream(f.read())
 
-        streamFile = MemoryStream()
-        if os.path.isfile(archiveFile+".stream"):
-            with open(archiveFile+".stream", 'r+b') as f:
-                streamFile = MemoryStream(f.read())
         self.magic      = tocFile.uint32Read()
         if self.magic != 4026531857: return False
 
@@ -1128,23 +1181,23 @@ class FileReader:
                 #-------------------------------------
                 #Add all bank sources to the source list
                 if "DIDX" in bank.Chunks.keys():
-                    print("DIDX")
                     mediaIndex = MediaIndex()
                     mediaIndex.Load(bank.Chunks["DIDX"], bank.Chunks["DATA"])
-                    #print(mediaIndex.data.keys())
                     for e in hirc.entries.values():
                         if e.hType == SOUND and e.source.pluginId == 0x00040001:
                             if e.source.streamType == BANK and e.source.sourceId not in self.AudioSources:
                                 audio = AudioSource()
+                                audio.streamType = BANK
                                 audio.shortId = e.source.sourceId
-                                audio.SetData(mediaIndex.data[e.source.sourceId])
+                                audio.SetData(mediaIndex.data[e.source.sourceId], setModified=False, notifySubscribers=False)
                                 self.AudioSources[e.source.sourceId] = audio
                         elif e.hType == MUSIC_TRACK:
                             for source in e.sources:
                                 if source.streamType == BANK and source.sourceId not in self.AudioSources:
                                     audio = AudioSource()
+                                    audio.streamType = BANK
                                     audio.shortId = source.sourceId
-                                    audio.SetData(mediaIndex.data[source.sourceId])
+                                    audio.SetData(mediaIndex.data[source.sourceId], setModified=False, notifySubscribers=False)
                                     self.AudioSources[source.sourceId] = audio
                 
                 entry.BankPostData = b''
@@ -1298,14 +1351,14 @@ class FileHandler:
     def DumpAsWem(self, fileID):
         outputFile = filedialog.asksaveasfile(mode='wb', title="Save As", initialfile=(str(fileID)+".wem"), defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
         if outputFile is None: return
-        outputFile.write(self.FileReader.AudioSources[fileID].GetData())
+        outputFile.write(self.GetAudioByID(fileID).GetData())
         
     def DumpAsWav(self, fileID):
         outputFile = filedialog.asksaveasfilename(title="Save As", initialfile=(str(fileID)+".wav"), defaultextension=".wav", filetypes=[("Wav Audio", "*.wav")])
         if outputFile == "": return
         savePath = os.path.splitext(outputFile)[0]
         with open(f"{savePath}.wem", 'wb') as f:
-            f.write(self.FileReader.AudioSources[fileID].GetData())
+            f.write(self.GetAudioByID(fileID).GetData())
         subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
         os.remove(f"{savePath}.wem")
 
@@ -1357,6 +1410,7 @@ class FileHandler:
     def SaveArchiveFile(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
         if os.path.exists(folder):
+            self.FileReader.RebuildHeaders()
             self.FileReader.ToFile(folder)
         else:
             print("Invalid folder selected, aborting save")
@@ -1408,15 +1462,15 @@ class FileHandler:
         subscribers = set()
         
         for newAudio in patchFileReader.AudioSources.values():
-            progressWindow.SetText("Loading "+str(newAudio.GetFileID()))
-            oldAudio = self.GetAudioByID(newAudio.GetFileID())
+            #progressWindow.SetText("Loading "+str(newAudio.GetFileID()))
+            oldAudio = self.GetAudioByID(newAudio.GetShortId())
             for item in oldAudio.Subscribers:
                 subscribers.add(item)
             oldAudio.SetData(newAudio.GetData())
             progressWindow.Step()
                 
-        for entry in subscribers:
-            entry.Rebuild()
+        #for entry in subscribers:
+        #    entry.Rebuild()
             
         for textData in patchFileReader.TextData.values():
             oldTextData = self.GetStrings()[textData.GetFileID()]
@@ -1445,7 +1499,6 @@ class FileHandler:
                     patchedFileReader.WwiseStreams[key] = copy.deepcopy(value)
                     
             for key, value in self.FileReader.WwiseBanks.items():
-                print(value.Modified)
                 if value.Modified:
                     patchedFileReader.WwiseBanks[key] = copy.deepcopy(value)
                     
@@ -1675,20 +1728,20 @@ class MainWindow:
             revert.configure(command=partial(revertBank, tocEntry.GetFileID()))        
             info._type = TableInfo.BANK
             #create expand button
-            def pressButton(button, bankId):
+            def pressButton(button, bank):
                 if button['text'] == "v":
                     button.configure(text=">")
                     #hide
-                    for entry in self.fileHandler.GetWwiseBanks()[bankId].DataIndex.values():
-                        self.UpdateTableEntry(entry, action="hide")
+                    for source in bank.GetContent():
+                        self.UpdateBankSubtableEntry(bank, source, action="hide")
                 else:
                     button.configure(text="v")
                     #show
-                    for entry in self.fileHandler.GetWwiseBanks()[bankId].DataIndex.values():
-                        self.UpdateTableEntry(entry, action="show")
+                    for source in bank.GetContent():
+                        self.UpdateBankSubtableEntry(bank, source, action="show")
                 self.Update()
             expand = Button(self.mainCanvas, text=">", font=('Arial', 14, 'bold'), height=20, width=20, image=self.fakeImage, compound='c')
-            expand.configure(command=partial(pressButton, expand, tocEntry.GetFileID()))
+            expand.configure(command=partial(pressButton, expand, tocEntry))
             info.buttons.append(self.mainCanvas.create_window(0, 0, window=expand, anchor='nw', tag=tocEntry.GetFileID()))
         elif tocEntry.GetTypeID() == 979299457696010195:
             #create expand button
@@ -1717,15 +1770,15 @@ class MainWindow:
         info._type = TableInfo.BANK_WEM
     
         fillColor = "lawn green" if audioSource.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor, tags=(audioSource.GetResourceId(), "rect")))
-        name = str(audioSource.GetResourceId()) + ".wem"
-        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetResourceId(), "name")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor, tags=(audioSource.GetFileID(), "rect")))
+        name = str(audioSource.GetFileID()) + ".wem"
+        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "name")))
         
         
         #create revert button
-        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, audioSource.GetResourceId()), image=self.fakeImage, compound='c', height=20, width=20)
+        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, audioSource.GetShortId()), image=self.fakeImage, compound='c', height=20, width=20)
         
-        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=audioSource.GetResourceId())
+        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=audioSource.GetFileID())
         info.buttons.append(info.revertButton)
         
         #create play button
@@ -1740,8 +1793,8 @@ class MainWindow:
             self.PlayAudio(fileID, callback)
             
         play.configure(command=partial(pressButton, play, audioSource.GetShortId(), partial(resetButtonIcon, play)))
-        info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=audioSource.GetShortId()))
-        self.tableInfo[str(parent.GetFileID())+'-'+str(audioSource.GetResourceId())] = info
+        info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=audioSource.GetFileID()))
+        self.tableInfo[str(parent.GetFileID())+'-'+str(audioSource.GetShortId())] = info
             
     def CreateTable(self):
         for child in self.mainCanvas.winfo_children():
@@ -1760,7 +1813,10 @@ class MainWindow:
             bank = bankDict[key]
             self.CreateTableRow(bank)
             draw_y += 30
-            for item in bank.GetContent():
+            #for entry in bank.hierarchy.entries.values():
+            #    if entry.
+            #    self.CreateBankSubtableRow(
+            for item in bank.GetContent(): #need a way to show the resource ID for the streams and the short ID for the bank data, for backwards compatibility. Maybe do both? No way to tell which I need from just the AudioSource. I'd like to avoid looking through the hierarchy
                 self.CreateBankSubtableRow(item, bank)
                 draw_y += 30
         for entry in self.fileHandler.GetStrings().values():
@@ -1782,6 +1838,19 @@ class MainWindow:
         elif action == "hide":
             info.hidden = True
             
+    def UpdateBankSubtableEntry(self, bank, source, action="update"):
+        fileID = str(bank.GetFileID())+"-"+str(source.GetShortId())
+        try:
+            info = self.tableInfo[fileID]
+        except:
+            return
+        if action == "update":
+            info.modified = source.Modified
+        elif action == "show":
+            info.hidden = False
+        elif action == "hide":
+            info.hidden = True
+            
     def UpdateTableEntries(self):
         streamDict = self.fileHandler.GetWwiseStreams()
         for stream in streamDict.values():
@@ -1789,8 +1858,39 @@ class MainWindow:
         bankDict = self.fileHandler.GetWwiseBanks()
         for bank in bankDict.values():
             self.UpdateTableEntry(bank)
-            for entry in bank.DataIndex.values():
-                self.UpdateTableEntry(entry)
+            for source in bank.GetContent():
+                self.UpdateBankSubtableEntry(bank, source)
+                
+    def DrawBankSubtableRow(self, bank, source, x, y):
+        try:
+            rowInfo = self.tableInfo[str(bank.GetFileID())+"-"+str(source.GetShortId())]
+        except:
+            return
+        if not rowInfo.hidden:
+            x += 30
+            for button in rowInfo.buttons:
+                self.mainCanvas.moveto(button, x, y+3)
+                x += 30
+            for index, rect in enumerate(rowInfo.rectangles):
+                if rowInfo.modified:
+                    self.mainCanvas.itemconfigure(rect, fill="lawn green")
+                else:
+                    self.mainCanvas.itemconfigure(rect, fill="white")
+                self.mainCanvas.moveto(rect, x, y)
+                self.mainCanvas.moveto(rowInfo.text[index], x + 5, y+5)
+                x += (self.mainCanvas.coords(rect)[2]-self.mainCanvas.coords(rect)[0])
+            if not rowInfo.modified:
+                try:
+                    self.mainCanvas.moveto(rowInfo.revertButton, -1000, -1000)
+                except:
+                    pass
+        else:
+            for button in rowInfo.buttons:
+                self.mainCanvas.moveto(button, -1000, -1000)
+            for rect in rowInfo.rectangles:
+                self.mainCanvas.moveto(rect, -1000, -1000)
+            for text in rowInfo.text:
+                self.mainCanvas.moveto(text, -1000, -1000)
             
     def DrawTableRow(self, item, x, y):
         try:
@@ -1835,11 +1935,12 @@ class MainWindow:
         for bank in bankDict.values():
             draw_x = 0
             self.DrawTableRow(bank, draw_x, draw_y)
-            if not self.tableInfo[bank.GetFileID()].hidden: draw_y += 30
-            for item in bank.GetContent():
-                self.DrawTableRow(item, draw_x, draw_y)
-                if self.tableInfo[item.GetFileID()].hidden:
-                    draw_y += 30
+            if not self.tableInfo[bank.GetFileID()].hidden:
+                draw_y += 30
+                for item in bank.GetContent():
+                    self.DrawBankSubtableRow(bank, item, draw_x, draw_y)
+                    if not self.tableInfo[str(bank.GetFileID()) + "-" + str(item.GetShortId())].hidden:
+                        draw_y += 30
         for entry in self.fileHandler.GetStrings().values():
             self.DrawTableRow(entry, draw_x, draw_y)
             if not self.tableInfo[entry.GetFileID()].hidden: draw_y += 30
@@ -1855,10 +1956,12 @@ class MainWindow:
         for item in self.tableInfo.values():
             item.hidden = True
         for audio in self.fileHandler.GetAudio().values():
-            name = str(audio.GetFileID()) + ".wem"
-            if name.startswith(text) or name.endswith(text):
+            name = str(audio.GetResourceId()) + ".wem"
+            name2 = str(audio.GetShortId()) + ".wem"
+            if name.startswith(text) or name.endswith(text) or name2.startswith(text) or name2.endswith(text):
                 for subscriber in audio.Subscribers:
                     self.UpdateTableEntry(subscriber, action="show")
+                    self.UpdateBankSubtableEntry(subscriber, audio, action="show")
         bankDict = self.fileHandler.GetWwiseBanks()
         for bank in bankDict.values():
             name = str(bank.GetFileID()) + ".bnk"
