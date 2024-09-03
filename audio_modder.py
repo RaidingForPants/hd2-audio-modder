@@ -17,12 +17,39 @@ import atexit
 from itertools import takewhile
 import copy
 import numpy
+import platform
 
 MUSIC_TRACK = 11
 SOUND = 2
 BANK = 0
 PREFETCH_STREAM = 1
 STREAM = 2
+ROW_HEIGHT = 30
+ROW_WIDTH = 800
+SUBROW_INDENT = 30
+WINDOW_WIDTH = 900
+WINDOW_HEIGHT = 720
+_GAME_FILE_LOCATION = ""
+_DRIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+def LookForSteamInstallWindows():
+    path = "C:\\Program Files (x86)\\steam\\steamapps\\common\\Helldivers 2\\data"
+    if os.path.exists(path):
+        return path
+    for letter in _DRIVE_LETTERS:
+        path = f"{letter}:\\SteamLibrary\\steamapps\\common\\Helldivers 2\\data"
+        if os.path.exists(path):
+            return path
+    return ""
+    
+def StripPatchIndex(filename):
+    split = filename.split(".")
+    for n in range(len(split)):
+        if "patch_" in split[n]:
+            del split[n]
+            break
+    filename = ".".join(split)
+    return filename
 
 class MemoryStream:
     '''
@@ -253,7 +280,6 @@ class TocHeader:
         pass
         
     def FromMemoryStream(self, stream):
-        self.Offset             = stream.tell()
         self.FileID             = stream.uint64Read()
         self.TypeID             = stream.uint64Read()
         self.TocDataOffset      = stream.uint64Read()
@@ -269,19 +295,20 @@ class TocHeader:
         self.EntryIndex         = stream.uint32Read()
         
     def GetData(self):
-        return (self.FileID.to_bytes(8, byteorder='little')
-                + self.TypeID.to_bytes(8, byteorder='little')
-                + self.TocDataOffset.to_bytes(8, byteorder='little')
-                + self.StreamOffset.to_bytes(8, byteorder='little')
-                + self.GpuResourceOffset.to_bytes(8, byteorder='little')
-                + self.Unknown1.to_bytes(8, byteorder='little')
-                + self.Unknown2.to_bytes(8, byteorder='little')
-                + self.TocDataSize.to_bytes(4, byteorder='little')
-                + self.StreamSize.to_bytes(4, byteorder='little')
-                + self.GpuResourceSize.to_bytes(4, byteorder='little')
-                + self.Unknown3.to_bytes(4, byteorder='little')
-                + self.Unknown4.to_bytes(4, byteorder='little')
-                + self.EntryIndex.to_bytes(4, byteorder='little'))
+        return (struct.pack("<QQQQQQQIIIIII",
+            self.FileID,
+            self.TypeID,
+            self.TocDataOffset,
+            self.StreamOffset,
+            self.GpuResourceOffset,
+            self.Unknown1,
+            self.Unknown2,
+            self.TocDataSize,
+            self.StreamSize,
+            self.GpuResourceSize,
+            self.Unknown3,
+            self.Unknown4,
+            self.EntryIndex))
                 
 class WwiseDep:
 
@@ -529,11 +556,11 @@ class WwiseBank(Subscriber):
         self.Dep = None
         self.ModifiedCount = 0
         self.hierarchy = None
-        self.Content = set()
+        self.Content = []
         
     def AddContent(self, content):
         content.Subscribers.add(self)
-        self.Content.add(content)
+        self.Content.append(content)
         
     def RemoveContent(self, content):
         try:
@@ -648,12 +675,12 @@ class WwiseStream(Subscriber):
         self.TocData = bytearray()
         
     def SetContent(self, content):
-        try:
-            self.Content.Subscribers.remove(self)
-        except:
-            pass
+        #try:
+        #    self.Content.Subscribers.remove(self)
+        #except:
+        #    pass
         self.Content = content
-        content.Subscribers.add(self)
+        #content.Subscribers.add(self)
         
     def Update(self, content):
         self.TocHeader.StreamSize = content.Size
@@ -1058,13 +1085,25 @@ class FileReader:
         
         for bank in self.WwiseBanks.values():
             if bank.Dep == None: #none because older versions didn't save the dep along with the bank
-                print("No wwise_deps detected! This patch may have been made in an older version of the audio modding tool!") #make this a pop-up window
-                self.LoadDeps()
+                #print("No wwise_deps detected! This patch may have been made in an older version of the audio modding tool!") #make this a pop-up window
+                if not self.LoadDeps():
+                    print("Failed to load")
+                    self.WwiseStreams.clear()
+                    self.WwiseBanks.clear()
+                    self.TextData.clear()
+                    self.AudioSources.clear()
+                    return
                 break
         
-        if len(self.WwiseBanks) == 0: #0 if patch was only for streams
-            print("No banks detected! This patch may have been made in an older version of the audio modding tool!") #make this a pop-up window
-            self.LoadBanks()
+        if len(self.WwiseBanks) == 0 and len(self.WwiseStreams) > 0: #0 if patch was only for streams
+            #print("No banks detected! This patch may have been made in an older version of the audio modding tool!") #make this a pop-up window
+            if not self.LoadBanks():
+                print("Failed to load")
+                self.WwiseStreams.clear()
+                self.WwiseBanks.clear()
+                self.TextData.clear()
+                self.AudioSources.clear()
+                return
             
         
         #Once every resource has been loaded, finish constructing the list of audio sources and stuff
@@ -1099,12 +1138,17 @@ class FileReader:
                             
         
     def LoadDeps(self):
-        while True:
+        if _GAME_FILE_LOCATION != "":
+            archiveFile = os.path.join(_GAME_FILE_LOCATION, StripPatchIndex(self.Name))
+        if not os.path.exists(archiveFile):
+            warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
+            warning.Show()
+            warning.root.wait_window(warning.root)
             archiveFile = askopenfilename(title="Select archive")
             if os.path.splitext(archiveFile)[1] in (".stream", ".gpu_resources"):
                 archiveFile = os.path.splitext(archiveFile)[0]
-            if os.path.exists(archiveFile):
-                break
+        if not os.path.exists(archiveFile):
+            return False
         #self.Name = os.path.basename(path)
         tocFile = MemoryStream()
         with open(archiveFile, 'r+b') as f:
@@ -1133,14 +1177,21 @@ class FileReader:
                     self.WwiseBanks[tocHeader.FileID].Dep = dep
                 except KeyError:
                     pass
+        return True
         
-    def LoadBanks(self):
-        while True:
+    def LoadBanks(self): #TO-DO: Only load banks that are required, not all of them that may be in a file
+        if _GAME_FILE_LOCATION != "":
+            archiveFile = os.path.join(_GAME_FILE_LOCATION, StripPatchIndex(self.Name))
+        if not os.path.exists(archiveFile):
+            warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
+            warning.Show()
+            warning.root.wait_window(warning.root)
             archiveFile = askopenfilename(title="Select archive")
             if os.path.splitext(archiveFile)[1] in (".stream", ".gpu_resources"):
                 archiveFile = os.path.splitext(archiveFile)[0]
-            if os.path.exists(archiveFile):
-                break
+        if not os.path.exists(archiveFile):
+            return False
+        print(archiveFile)
         #self.Name = os.path.basename(path)
         tocFile = MemoryStream()
         with open(archiveFile, 'r+b') as f:
@@ -1177,29 +1228,9 @@ class FileReader:
                     hirc.Load(bank.Chunks['HIRC'])
                 except KeyError:
                     continue
-                entry.hierarchy = hirc    
+                entry.hierarchy = hirc
                 #-------------------------------------
                 #Add all bank sources to the source list
-                if "DIDX" in bank.Chunks.keys():
-                    mediaIndex = MediaIndex()
-                    mediaIndex.Load(bank.Chunks["DIDX"], bank.Chunks["DATA"])
-                    for e in hirc.entries.values():
-                        if e.hType == SOUND and e.source.pluginId == 0x00040001:
-                            if e.source.streamType == BANK and e.source.sourceId not in self.AudioSources:
-                                audio = AudioSource()
-                                audio.streamType = BANK
-                                audio.shortId = e.source.sourceId
-                                audio.SetData(mediaIndex.data[e.source.sourceId], setModified=False, notifySubscribers=False)
-                                self.AudioSources[e.source.sourceId] = audio
-                        elif e.hType == MUSIC_TRACK:
-                            for source in e.sources:
-                                if source.streamType == BANK and source.sourceId not in self.AudioSources:
-                                    audio = AudioSource()
-                                    audio.streamType = BANK
-                                    audio.shortId = source.sourceId
-                                    audio.SetData(mediaIndex.data[source.sourceId], setModified=False, notifySubscribers=False)
-                                    self.AudioSources[source.sourceId] = audio
-                
                 entry.BankPostData = b''
                 for chunk in bank.Chunks.keys():
                     if chunk not in ["BKHD", "DATA", "DIDX", "HIRC"]:
@@ -1215,6 +1246,36 @@ class FileReader:
                     self.WwiseBanks[tocHeader.FileID].Dep = dep
                 except KeyError:
                     pass
+        
+        tempBanks = {}
+        
+        for key, bank in self.WwiseBanks.items():
+            includeBank = False
+            for hierEntry in bank.hierarchy.entries.values():
+                if hierEntry.hType == SOUND and hierEntry.source.pluginId == 0x00040001:
+                    if hierEntry.source.streamType in [STREAM, PREFETCH_STREAM]:
+                        streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(hierEntry.source.sourceId)).encode('utf-8'))
+                        for stream in self.WwiseStreams.values():
+                            if stream.GetFileID() == streamResourceId:
+                                includeBank = True
+                                tempBanks[key] = bank
+                                break
+                elif hierEntry.hType == MUSIC_TRACK:
+                    for source in hierEntry.sources:
+                        if source.streamType in [STREAM, PREFETCH_STREAM]:
+                            streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
+                            for stream in self.WwiseStreams.values():
+                                if stream.GetFileID() == streamResourceId:
+                                    includeBank = True
+                                    tempBanks[key] = bank
+                                    break
+                        if includeBank:
+                            break
+                if includeBank:
+                    break
+        self.WwiseBanks = tempBanks
+        
+        return True
         
 class SoundHandler:
     
@@ -1313,10 +1374,12 @@ class ProgressWindow:
     def Show(self):
         self.root = Tk()
         self.root.title(self.title)
+        self.root.configure(background="white")
         self.root.geometry("410x45")
         self.root.attributes('-topmost', True)
         self.progressBar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.maxProgress)
         self.progressBarText = Text(self.root)
+        self.progressBarText.configure(background="white")
         self.progressBar.pack()
         self.progressBarText.pack()
         self.root.resizable(False, False)
@@ -1331,6 +1394,26 @@ class ProgressWindow:
         self.progressBarText.insert(INSERT, s)
         self.root.update_idletasks()
         self.root.update()
+        
+    def Destroy(self):
+        self.root.destroy()
+        
+class PopupWindow:
+    def __init__(self, message, title="Missing Data!"):
+        self.message = message
+        self.title = title
+        
+    def Show(self):
+        self.root = Tk()
+        self.root.title(self.title)
+        self.root.configure(background="white")
+        #self.root.geometry("410x45")
+        self.root.attributes('-topmost', True)
+        self.text = ttk.Label(self.root, text=self.message, background="white", font=('Segoe UI', 12), wraplength=500, justify="left")
+        self.button = ttk.Button(self.root, text="OK", command=self.Destroy)
+        self.text.pack(padx=20, pady=0)
+        self.button.pack(pady=20)
+        self.root.resizable(False, False)
         
     def Destroy(self):
         self.root.destroy()
@@ -1442,7 +1525,9 @@ class FileHandler:
         if os.path.exists(archiveFile):
             self.FileReader.FromFile(archiveFile)
         else:
-            print("Invalid file selected, aborting load")
+            print("Invalid file selected, aborting load")   
+            return False
+        return True
             
             
     def LoadPatch(self): #TO-DO: only import if DIFFERENT from original audio; makes it possible to import different mods that change the same soundbank
@@ -1454,7 +1539,7 @@ class FileHandler:
             patchFileReader.FromFile(patchFile)
         else:
             print("Invalid file selected, aborting load")
-            return
+            return False
             
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(patchFileReader.AudioSources))
         progressWindow.Show()
@@ -1462,7 +1547,7 @@ class FileHandler:
         subscribers = set()
         
         for newAudio in patchFileReader.AudioSources.values():
-            #progressWindow.SetText("Loading "+str(newAudio.GetFileID()))
+            progressWindow.SetText("Loading "+str(newAudio.GetFileID()))
             oldAudio = self.GetAudioByID(newAudio.GetShortId())
             for item in oldAudio.Subscribers:
                 subscribers.add(item)
@@ -1478,6 +1563,7 @@ class FileHandler:
                 oldTextData.StringEntries[entry.GetFileID()].SetText(entry.GetText())
         
         progressWindow.Destroy()
+        return True
 
     def WritePatch(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
@@ -1495,7 +1581,7 @@ class FileHandler:
             patchedFileReader.TextData = {}
             
             for key, value in self.FileReader.WwiseStreams.items():
-                if value.Modified:
+                if value.Content.Modified:
                     patchedFileReader.WwiseStreams[key] = copy.deepcopy(value)
                     
             for key, value in self.FileReader.WwiseBanks.items():
@@ -1512,6 +1598,8 @@ class FileHandler:
             patchedFileReader.ToFile(folder)
         else:
             print("Invalid folder selected, aborting save")
+            return False
+        return True
 
     def LoadWems(self): 
         wems = filedialog.askopenfilenames(title="Choose .wem files to import")
@@ -1525,19 +1613,20 @@ class FileHandler:
             progressWindow.SetText("Loading "+os.path.basename(file))
             fileID = self.GetFileNumberPrefix(os.path.basename(file))
             audio = self.GetAudioByID(fileID)
-            for item in audio.Subscribers:
-                subscribers.add(item)
-            with open(file, 'rb') as f:
-                audio.SetData(f.read())
-            progressWindow.Step()
+            if audio is not None:
+                for item in audio.Subscribers:
+                    subscribers.add(item)
+                with open(file, 'rb') as f:
+                    audio.SetData(f.read())
+                progressWindow.Step()
         
         progressWindow.Destroy()
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(subscribers))
         progressWindow.Show()
         progressWindow.SetText("Rebuilding soundbanks")
         
-        for entry in subscribers:
-            entry.Rebuild()
+        #for entry in subscribers:
+        #    entry.Rebuild()
         
         progressWindow.Destroy()
         
@@ -1563,23 +1652,22 @@ class MainWindow:
     def __init__(self, fileHandler, soundHandler):
         self.fileHandler = fileHandler
         self.soundHandler = soundHandler
-        self.expandedBanks = set()
         self.tableInfo = {}
         
         self.root = Tk()
         
         self.fakeImage = tkinter.PhotoImage(width=1, height=1)
         
-        self.titleCanvas = Canvas(self.root, width=500, height=30)
+        self.titleCanvas = Canvas(self.root, width=WINDOW_WIDTH, height=30)
         self.searchText = tkinter.StringVar(self.root)
         self.searchBar = Entry(self.titleCanvas, textvariable=self.searchText, font=('Arial', 16))
         self.titleCanvas.pack(side="top")
         
-        self.titleCanvas.create_text(230, 0, text="\u2315", fill='gray', font=('Arial', 20), anchor='nw')
-        self.titleCanvas.create_window(250, 3, window=self.searchBar, anchor='nw')
+        self.titleCanvas.create_text(WINDOW_WIDTH-275, 0, text="\u2315", fill='gray', font=('Arial', 20), anchor='nw')
+        self.titleCanvas.create_window(WINDOW_WIDTH-250, 3, window=self.searchBar, anchor='nw')
 
         self.scrollBar = Scrollbar(self.root, orient=VERTICAL)
-        self.mainCanvas = Canvas(self.root, width=500, height=720, yscrollcommand=self.scrollBar.set)
+        self.mainCanvas = Canvas(self.root, width=WINDOW_WIDTH, height=WINDOW_HEIGHT, yscrollcommand=self.scrollBar.set)
         self.scrollBar['command'] = self.mainCanvas.yview
         
         self.titleCanvas.pack(side="top")
@@ -1587,7 +1675,7 @@ class MainWindow:
         self.mainCanvas.pack(side="left")
         
         self.root.title("Helldivers 2 Audio Modder")
-        self.root.geometry("500x720")
+        self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
         self.rightClickMenu = Menu(self.root, tearoff=0)
         self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
@@ -1655,7 +1743,7 @@ class MainWindow:
         info._type = TableInfo.BANK_WEM
     
         fillColor = "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT, ROW_HEIGHT, fill=fillColor))
         self.tableInfo[stringEntry.GetFileID()] = info
         text = tkinter.StringVar(self.mainCanvas)
         textBox = Entry(self.mainCanvas, width=50, textvariable=text, font=('Arial', 8))
@@ -1681,8 +1769,8 @@ class MainWindow:
         info = TableInfo()
     
         fillColor = "lawn green" if tocEntry.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 335, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH, ROW_HEIGHT, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
+        #info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
         
         name = str(tocEntry.GetFileID())
         if tocEntry.GetTypeID() == 5785811756662211598:
@@ -1698,7 +1786,7 @@ class MainWindow:
                 pass
 
         info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(tocEntry.GetFileID(), "name")))
-        info.text.append(self.mainCanvas.create_text(0, 0, text=tocEntry.GetEntryIndex(), fill='black', font=('Arial', 16, 'bold'), anchor='nw', tag=tocEntry.GetFileID()))
+        #info.text.append(self.mainCanvas.create_text(0, 0, text=tocEntry.GetEntryIndex(), fill='black', font=('Arial', 16, 'bold'), anchor='nw', tag=tocEntry.GetFileID()))
         
         #create revert button
         revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, tocEntry.GetFileID()), image=self.fakeImage, compound='c', height=20, width=20)
@@ -1770,10 +1858,15 @@ class MainWindow:
         info._type = TableInfo.BANK_WEM
     
         fillColor = "lawn green" if audioSource.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 305, 30, fill=fillColor, tags=(audioSource.GetFileID(), "rect")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "rect")))
         name = str(audioSource.GetFileID()) + ".wem"
         info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "name")))
         
+        #type (sound, music track)
+        
+        #if music track: also add duration, startTrim, endTrim?
+        #need function to update the hierarchy. Need some way to get hId tho (id of hirc entry), not the audio source's Id.
+        #little bit scared that two music tracks might include the same audio source
         
         #create revert button
         revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, audioSource.GetShortId()), image=self.fakeImage, compound='c', height=20, width=20)
@@ -1812,13 +1905,13 @@ class MainWindow:
         for key in bankDict.keys():
             bank = bankDict[key]
             self.CreateTableRow(bank)
-            draw_y += 30
+            draw_y += ROW_HEIGHT
             #for entry in bank.hierarchy.entries.values():
             #    if entry.
             #    self.CreateBankSubtableRow(
             for item in bank.GetContent(): #need a way to show the resource ID for the streams and the short ID for the bank data, for backwards compatibility. Maybe do both? No way to tell which I need from just the AudioSource. I'd like to avoid looking through the hierarchy
                 self.CreateBankSubtableRow(item, bank)
-                draw_y += 30
+                draw_y += ROW_HEIGHT
         for entry in self.fileHandler.GetStrings().values():
             self.CreateTableRow(entry)
             for stringEntry in entry.StringEntries.values():
@@ -1867,7 +1960,7 @@ class MainWindow:
         except:
             return
         if not rowInfo.hidden:
-            x += 30
+            x += SUBROW_INDENT
             for button in rowInfo.buttons:
                 self.mainCanvas.moveto(button, x, y+3)
                 x += 30
@@ -1898,7 +1991,7 @@ class MainWindow:
         except:
             return
         if not rowInfo.hidden:
-            if rowInfo._type == TableInfo.BANK_WEM: x += 30
+            if rowInfo._type == TableInfo.BANK_WEM: x += SUBROW_INDENT
             for button in rowInfo.buttons:
                 self.mainCanvas.moveto(button, x, y+3)
                 x += 30
@@ -1937,10 +2030,10 @@ class MainWindow:
             self.DrawTableRow(bank, draw_x, draw_y)
             if not self.tableInfo[bank.GetFileID()].hidden:
                 draw_y += 30
-                for item in bank.GetContent():
-                    self.DrawBankSubtableRow(bank, item, draw_x, draw_y)
-                    if not self.tableInfo[str(bank.GetFileID()) + "-" + str(item.GetShortId())].hidden:
-                        draw_y += 30
+            for item in bank.GetContent():
+                self.DrawBankSubtableRow(bank, item, draw_x, draw_y)
+                if not self.tableInfo[str(bank.GetFileID()) + "-" + str(item.GetShortId())].hidden:
+                    draw_y += 30
         for entry in self.fileHandler.GetStrings().values():
             self.DrawTableRow(entry, draw_x, draw_y)
             if not self.tableInfo[entry.GetFileID()].hidden: draw_y += 30
@@ -1956,9 +2049,9 @@ class MainWindow:
         for item in self.tableInfo.values():
             item.hidden = True
         for audio in self.fileHandler.GetAudio().values():
-            name = str(audio.GetResourceId()) + ".wem"
-            name2 = str(audio.GetShortId()) + ".wem"
-            if name.startswith(text) or name.endswith(text) or name2.startswith(text) or name2.endswith(text):
+            name = str(audio.GetFileID()) + ".wem"
+            #name2 = str(audio.GetShortId()) + ".wem"
+            if name.startswith(text) or name.endswith(text):
                 for subscriber in audio.Subscribers:
                     self.UpdateTableEntry(subscriber, action="show")
                     self.UpdateBankSubtableEntry(subscriber, audio, action="show")
@@ -1983,10 +2076,9 @@ class MainWindow:
         
     def LoadArchive(self):
         self.soundHandler.KillSound()
-        self.fileHandler.LoadArchiveFile()
-        self.expandedBanks.clear()
-        self.CreateTable()
-        self.Update()
+        if self.fileHandler.LoadArchiveFile():
+            self.CreateTable()
+            self.Update()
         
     def SaveArchive(self):
         self.soundHandler.KillSound()
@@ -2027,15 +2119,17 @@ class MainWindow:
         
     def LoadPatch(self):
         self.soundHandler.KillSound()
-        self.fileHandler.LoadPatch()
-        self.UpdateTableEntries()
-        self.Update()
+        if self.fileHandler.LoadPatch():
+            self.UpdateTableEntries()
+            self.Update()
     
 def exitHandler():
     soundHandler.audio.terminate()
     
 
 if __name__ == "__main__":
+    if "Windows" in platform.platform():
+        _GAME_FILE_LOCATION = LookForSteamInstallWindows()
     soundHandler = SoundHandler()
     fileHandler = FileHandler()
     atexit.register(exitHandler)
