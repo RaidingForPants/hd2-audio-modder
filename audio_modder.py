@@ -158,7 +158,6 @@ def bytes_to_long(bytes):
     assert len(bytes) == 8
     return sum((b << (k * 8) for k, b in enumerate(bytes)))
 
-
 def murmur64Hash(data, seed = 0):
 
     m = 0xc6a4a7935bd1e995
@@ -216,7 +215,6 @@ class Subscriber:
     def Update(self, content):
         pass
         
-        
     def RaiseModified(self):
         pass
         
@@ -248,7 +246,7 @@ class AudioSource:
         if setModified:
             self.Modified = True
             
-    def GetFileID(self):
+    def GetFileID(self): #for backwards compatibility
         if self.streamType == BANK:
             return self.GetShortId()
         else:
@@ -375,7 +373,6 @@ class HircEntry:
         
     def GetData(self):
         return self.hType.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hId.to_bytes(4, byteorder="little") + self.misc
-        
         
 class HircEntryFactory:
     
@@ -510,40 +507,7 @@ class Sound(HircEntry):
 
     def GetData(self):
         return struct.pack(f"<BII14s{len(self.misc)}s", self.hType, self.size, self.hId, self.source.GetData(), self.misc)
-            
-    
-class BankEntry(Subscriber):
-
-    def __init__(self):
-        self.Size = 0
-        self.Offset = 0
-        self.Content = None
-        self.Modified = False
-        self.Parent = None
-        self.Type = 0
         
-    def RaiseModified(self):
-        self.Modified = True
-        
-    def LowerModified(self):
-        self.Modified = False
-        
-    def GetFileID(self):
-        return str(self.Parent.GetFileID()) + "-" + str(self.Content.FileID)
-        
-    def GetType(self):
-        return self.Type
-        
-    def GetData(self):
-        return self.Content.GetData()[:self.Size]
-        
-    def Update(self, content):
-        if content.Type == AudioSource.PREFETCH_STREAM:
-            pass
-        elif content.Type == AudioSource.BANK:
-            self.Size = len(content.GetData())
-        
-    
 class WwiseBank(Subscriber):
     
     def __init__(self):
@@ -675,12 +639,12 @@ class WwiseStream(Subscriber):
         self.TocData = bytearray()
         
     def SetContent(self, content):
-        #try:
-        #    self.Content.Subscribers.remove(self)
-        #except:
-        #    pass
+        try:
+            self.Content.Subscribers.remove(self)
+        except:
+            pass
         self.Content = content
-        #content.Subscribers.add(self)
+        content.Subscribers.add(self)
         
     def Update(self, content):
         self.TocHeader.StreamSize = content.Size
@@ -712,7 +676,6 @@ class WwiseStream(Subscriber):
             
     def GetData(self):
         return self.Content.GetData()
-
 
 class StringEntry:
 
@@ -1084,8 +1047,7 @@ class FileReader:
         #check that all banks have valid Dep here, and ask for more data if does not?
         
         for bank in self.WwiseBanks.values():
-            if bank.Dep == None: #none because older versions didn't save the dep along with the bank
-                #print("No wwise_deps detected! This patch may have been made in an older version of the audio modding tool!") #make this a pop-up window
+            if bank.Dep == None: #can be None because older versions didn't save the dep along with the bank
                 if not self.LoadDeps():
                     print("Failed to load")
                     self.WwiseStreams.clear()
@@ -1167,7 +1129,6 @@ class FileReader:
             tocFile.seek(tocStart + n*80)
             tocHeader = TocHeader()
             tocHeader.FromMemoryStream(tocFile)
-            entry = None
             if tocHeader.TypeID == 12624162998411505776: #wwise dep
                 dep = WwiseDep()
                 dep.TocHeader = tocHeader
@@ -1179,7 +1140,7 @@ class FileReader:
                     pass
         return True
         
-    def LoadBanks(self): #TO-DO: Only load banks that are required, not all of them that may be in a file
+    def LoadBanks(self):
         if _GAME_FILE_LOCATION != "":
             archiveFile = os.path.join(_GAME_FILE_LOCATION, StripPatchIndex(self.Name))
         if not os.path.exists(archiveFile):
@@ -1191,8 +1152,6 @@ class FileReader:
                 archiveFile = os.path.splitext(archiveFile)[0]
         if not os.path.exists(archiveFile):
             return False
-        print(archiveFile)
-        #self.Name = os.path.basename(path)
         tocFile = MemoryStream()
         with open(archiveFile, 'r+b') as f:
             tocFile = MemoryStream(f.read())
@@ -1230,7 +1189,6 @@ class FileReader:
                     continue
                 entry.hierarchy = hirc
                 #-------------------------------------
-                #Add all bank sources to the source list
                 entry.BankPostData = b''
                 for chunk in bank.Chunks.keys():
                     if chunk not in ["BKHD", "DATA", "DIDX", "HIRC"]:
@@ -1247,8 +1205,8 @@ class FileReader:
                 except KeyError:
                     pass
         
+        #only include banks that contain at least 1 of the streams
         tempBanks = {}
-        
         for key, bank in self.WwiseBanks.items():
             includeBank = False
             for hierEntry in bank.hierarchy.entries.values():
@@ -1544,18 +1502,12 @@ class FileHandler:
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(patchFileReader.AudioSources))
         progressWindow.Show()
         
-        subscribers = set()
         
         for newAudio in patchFileReader.AudioSources.values():
             progressWindow.SetText("Loading "+str(newAudio.GetFileID()))
             oldAudio = self.GetAudioByID(newAudio.GetShortId())
-            for item in oldAudio.Subscribers:
-                subscribers.add(item)
             oldAudio.SetData(newAudio.GetData())
             progressWindow.Step()
-                
-        #for entry in subscribers:
-        #    entry.Rebuild()
             
         for textData in patchFileReader.TextData.values():
             oldTextData = self.GetStrings()[textData.GetFileID()]
@@ -1607,30 +1559,17 @@ class FileHandler:
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(wems))
         progressWindow.Show()
         
-        subscribers = set()
-        
         for file in wems:
             progressWindow.SetText("Loading "+os.path.basename(file))
             fileID = self.GetFileNumberPrefix(os.path.basename(file))
             audio = self.GetAudioByID(fileID)
             if audio is not None:
-                for item in audio.Subscribers:
-                    subscribers.add(item)
                 with open(file, 'rb') as f:
                     audio.SetData(f.read())
                 progressWindow.Step()
         
         progressWindow.Destroy()
-        progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(subscribers))
-        progressWindow.Show()
-        progressWindow.SetText("Rebuilding soundbanks")
-        
-        #for entry in subscribers:
-        #    entry.Rebuild()
-        
-        progressWindow.Destroy()
-        
-        
+            
 class TableInfo:
 
     WEM = 0
@@ -1895,20 +1834,11 @@ class MainWindow:
         self.mainCanvas.delete("all")
         self.tableInfo = {}
         draw_y = 0
-        #streamDict = self.fileHandler.GetWwiseStreams()
-        #for key in streamDict.keys():
-        #    stream = streamDict[key]
-        #    name = str(stream.GetFileID()) + ".wem"
-        #    self.CreateTableRow(stream)
-        #    draw_y += 30
         bankDict = self.fileHandler.GetWwiseBanks()
         for key in bankDict.keys():
             bank = bankDict[key]
             self.CreateTableRow(bank)
             draw_y += ROW_HEIGHT
-            #for entry in bank.hierarchy.entries.values():
-            #    if entry.
-            #    self.CreateBankSubtableRow(
             for item in bank.GetContent(): #need a way to show the resource ID for the streams and the short ID for the bank data, for backwards compatibility. Maybe do both? No way to tell which I need from just the AudioSource. I'd like to avoid looking through the hierarchy
                 self.CreateBankSubtableRow(item, bank)
                 draw_y += ROW_HEIGHT
