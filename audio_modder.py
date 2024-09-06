@@ -448,6 +448,7 @@ class TrackInfo:
     def FromBytes(cls, bytes):
         t = TrackInfo()
         t.trackId, t.sourceId, t.eventId, t.playAt, t.beginTrimOffset, t.endTrimOffset, t.sourceDuration = struct.unpack("<IIIdddd", bytes)
+        return t
         
     def GetData(self):
         return struct.pack("<IIIdddd", self.trackId, self.sourceId, self.eventId, self.playAt, self.beginTrimOffset, self.endTrimOffset, self.sourceDuration)
@@ -615,7 +616,7 @@ class WwiseBank(Subscriber):
                         audio = audioSources[source.sourceId]
                     except KeyError:
                         continue
-                    trackInfo = entry.trackInfo[index]
+                    #trackInfo = entry.trackInfo[index]
                     if source.streamType == PREFETCH_STREAM:
                         dataArray.append(audio.GetData()[:source.memSize])
                         didxArray.append(struct.pack("<III", source.sourceId, offset, source.memSize))
