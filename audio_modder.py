@@ -12,7 +12,6 @@ from functools import partial
 import pyaudio
 import wave
 import subprocess
-import time
 import atexit
 from itertools import takewhile
 import copy
@@ -578,43 +577,58 @@ class WwiseBank(Subscriber):
         offset = 0
         
         #regenerate soundbank from the hierarchy information
+        maxProgress = 0
+        for entry in self.hierarchy.entries.values():
+            if entry.hType == SOUND:
+                maxProgress += 1
+            elif entry.hType == MUSIC_TRACK:
+                maxProgress += len(entry.sources)
+                    
+        
+        bankGeneration = ProgressWindow("Generating Soundbanks", maxProgress)
+        bankGeneration.Show()
+        bankGeneration.SetText(f"Generating {self.Dep.Data}")
+        
+        didxArray = []
+        dataArray = []
         
         for entry in self.hierarchy.entries.values():
             if entry.hType == SOUND:
                 source = entry.source
+                bankGeneration.Step()
                 try:
                     audio = audioSources[source.sourceId]
                 except KeyError:
                     continue
                 if source.streamType == PREFETCH_STREAM:
-                    dataSection += audio.GetData()[:source.memSize]
-                    didxSection += struct.pack("<III", source.sourceId, offset, source.memSize)
+                    dataArray.append(audio.GetData()[:source.memSize])
+                    didxArray.append(struct.pack("<III", source.sourceId, offset, source.memSize))
                     offset += source.memSize
                 elif source.streamType == BANK:
-                    didxSection += struct.pack("<III", source.sourceId, offset, audio.Size)
-                    dataSection += audio.GetData()
+                    dataArray.append(audio.GetData())
+                    didxArray.append(struct.pack("<III", source.sourceId, offset, audio.Size))
                     offset += audio.Size
             elif entry.hType == MUSIC_TRACK:
                 for index, source in enumerate(entry.sources):
+                    bankGeneration.Step()
                     try:
                         audio = audioSources[source.sourceId]
                     except KeyError:
                         continue
                     trackInfo = entry.trackInfo[index]
                     if source.streamType == PREFETCH_STREAM:
-                        dataSection += audio.GetData()[:source.memSize]
-                        didxSection += struct.pack("<III", source.sourceId, offset, source.memSize)
+                        dataArray.append(audio.GetData()[:source.memSize])
+                        didxArray.append(struct.pack("<III", source.sourceId, offset, source.memSize))
                         offset += source.memSize
                     elif source.streamType == BANK:
-                        didxSection += struct.pack("<III", source.sourceId, offset, audio.Size)
-                        dataSection += audio.GetData()
+                        dataArray.append(audio.GetData())
+                        didxArray.append(struct.pack("<III", source.sourceId, offset, audio.Size))
                         offset += audio.Size
-        if len(didxSection) > 0:                
-            didxSection = "DIDX".encode('utf-8') + len(didxSection).to_bytes(4, byteorder="little") + didxSection
-            dataSection = "DATA".encode('utf-8') + len(dataSection).to_bytes(4, byteorder="little") + dataSection
-        
-            data += didxSection
-            data += dataSection
+        if len(didxArray) > 0:
+            data += "DIDX".encode('utf-8') + (12*len(didxArray)).to_bytes(4, byteorder="little")
+            data += b"".join(didxArray)
+            data += "DATA".encode('utf-8') + sum([len(x) for x in dataArray]).to_bytes(4, byteorder="little")
+            data += b"".join(dataArray)
             
         hircSection = self.hierarchy.GetData()
         data += "HIRC".encode('utf-8') + len(hircSection).to_bytes(4, byteorder="little")
@@ -623,6 +637,7 @@ class WwiseBank(Subscriber):
         self.TocHeader.TocDataSize = len(data) + len(self.TocDataHeader)
         self.TocDataHeader[4:8] = len(data).to_bytes(4, byteorder="little")
         self.data = data
+        bankGeneration.Destroy()
                      
     def GetEntryIndex(self):
         try:
@@ -931,7 +946,7 @@ class FileReader:
             value.TocHeader.TocDataOffset = tocOffset
             streamOffset += _16ByteAlign(value.TocHeader.StreamSize)
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
-            
+        
         for key, value in self.WwiseBanks.items():
             value.Generate(self.AudioSources)
             value.TocHeader.TocDataOffset = tocOffset
@@ -1949,11 +1964,6 @@ class MainWindow:
     def RedrawTable(self):
         draw_y = 0
         draw_x = 0
-        #streamDict = self.fileHandler.GetWwiseStreams()
-        #for stream in streamDict.values():
-        #    draw_x = 0
-        #    self.DrawTableRow(stream, draw_x, draw_y)
-        #    if not self.tableInfo[stream.GetFileID()].hidden: draw_y += 30
         bankDict = self.fileHandler.GetWwiseBanks()
         for bank in bankDict.values():
             draw_x = 0
@@ -1980,7 +1990,6 @@ class MainWindow:
             item.hidden = True
         for audio in self.fileHandler.GetAudio().values():
             name = str(audio.GetFileID()) + ".wem"
-            #name2 = str(audio.GetShortId()) + ".wem"
             if name.startswith(text) or name.endswith(text):
                 for subscriber in audio.Subscribers:
                     self.UpdateTableEntry(subscriber, action="show")
