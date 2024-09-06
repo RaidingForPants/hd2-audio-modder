@@ -539,7 +539,6 @@ class WwiseBank(Subscriber):
   
     def GetContent(self):
         return self.Content
-        #return [entry.Content for entry in self.DataIndex.values()]
         
     def RaiseModified(self):
         self.Modified = True
