@@ -597,7 +597,7 @@ class WwiseBank(Subscriber):
                 source = entry.source
                 bankGeneration.Step()
                 try:
-                    audio = audioSources[source.sourceId]
+                    audio = audioSources[f"{self.GetFileID()}-{source.sourceId}"]
                 except KeyError:
                     continue
                 if source.streamType == PREFETCH_STREAM:
@@ -612,7 +612,7 @@ class WwiseBank(Subscriber):
                 for index, source in enumerate(entry.sources):
                     bankGeneration.Step()
                     try:
-                        audio = audioSources[source.sourceId]
+                        audio = audioSources[f"{self.GetFileID()}-{source.sourceId}"]
                     except KeyError:
                         continue
                     #trackInfo = entry.trackInfo[index]
@@ -1013,25 +1013,26 @@ class FileReader:
                 #-------------------------------------
                 #Add all bank sources to the source list
                 if "DIDX" in bank.Chunks.keys():
+                    bankId = entry.TocHeader.FileID
                     mediaIndex = MediaIndex()
                     mediaIndex.Load(bank.Chunks["DIDX"], bank.Chunks["DATA"])
                     for e in hirc.entries.values():
                         if e.hType == SOUND and e.source.pluginId == 0x00040001:
-                            if e.source.streamType == BANK and e.source.sourceId not in self.AudioSources:
+                            if e.source.streamType == BANK and f"{bankId}-{e.source.sourceId}" not in self.AudioSources:
                                 audio = AudioSource()
                                 audio.streamType = BANK
                                 audio.shortId = e.source.sourceId
                                 audio.SetData(mediaIndex.data[e.source.sourceId], setModified=False, notifySubscribers=False)
-                                self.AudioSources[e.source.sourceId] = audio
+                                self.AudioSources[f"{bankId}-{e.source.sourceId}"] = audio
                                 entry.AddContent(audio)
                         elif e.hType == MUSIC_TRACK:
                             for source in e.sources:
-                                if source.streamType == BANK and source.sourceId not in self.AudioSources:
+                                if source.streamType == BANK and f"{bankId}-{source.sourceId}" not in self.AudioSources:
                                     audio = AudioSource()
                                     audio.streamType = BANK
                                     audio.shortId = source.sourceId
                                     audio.SetData(mediaIndex.data[source.sourceId], setModified=False, notifySubscribers=False)
-                                    self.AudioSources[source.sourceId] = audio
+                                    self.AudioSources[f"{bankId}-{source.sourceId}"] = audio
                                     entry.AddContent(audio)
                 
                 entry.BankPostData = b''
@@ -1088,30 +1089,31 @@ class FileReader:
         for bank in self.WwiseBanks.values():
             for entry in bank.hierarchy.entries.values():
                 if entry.hType == SOUND:
-                    if entry.source.sourceId not in self.AudioSources and entry.source.streamType in [STREAM, PREFETCH_STREAM]:
+                    if f"{bank.GetFileID()}-{entry.source.sourceId}" not in self.AudioSources and entry.source.streamType in [STREAM, PREFETCH_STREAM]:
                         try:
                             streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(entry.source.sourceId)).encode('utf-8'))
                             audio = self.WwiseStreams[streamResourceId].Content
                             audio.shortId = entry.source.sourceId
-                            self.AudioSources[entry.source.sourceId] = audio
+                            self.AudioSources[f"{bank.GetFileID()}-{entry.source.sourceId}"] = audio
                             bank.AddContent(audio)
                         except KeyError:
                             pass
-                    elif entry.source.sourceId in self.AudioSources:
-                        self.AudioSources[entry.source.sourceId].resourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(entry.source.sourceId)).encode('utf-8'))
+                    elif f"{bank.GetFileID()}-{entry.source.sourceId}" in self.AudioSources:
+                        self.AudioSources[f"{bank.GetFileID()}-{entry.source.sourceId}"].resourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(entry.source.sourceId)).encode('utf-8'))
                 elif entry.hType == MUSIC_TRACK:
                     for source in entry.sources:
-                        if source.sourceId not in self.AudioSources and source.streamType in [STREAM, PREFETCH_STREAM]:
+                        if f"{bank.GetFileID()}-{source.sourceId}" not in self.AudioSources and source.streamType in [STREAM, PREFETCH_STREAM]:
                             try:
                                 streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
                                 audio = self.WwiseStreams[streamResourceId].Content
                                 audio.shortId = source.sourceId
-                                self.AudioSources[source.sourceId] = audio
+                                self.AudioSources[f"{bank.GetFileID()}-{source.sourceId}"] = audio
                                 bank.AddContent(audio)
                             except KeyError:
                                 pass
-                        elif source.sourceId in self.AudioSources:
-                            self.AudioSources[source.sourceId].resourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
+                        elif f"{bank.GetFileID()}-{source.sourceId}" in self.AudioSources:
+                            self.AudioSources[f"{bank.GetFileID()}-{source.sourceId}"].resourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
+                            
                             
         
     def LoadDeps(self):
@@ -1425,8 +1427,11 @@ class FileHandler:
         progressWindow.Show()
         
         if os.path.exists(folder):
-            for audio in self.FileReader.AudioSources.values():
-                savePath = os.path.join(folder, str(audio.GetFileID()))
+            for key, audio in self.FileReader.AudioSources.items():
+                subfolder = os.path.join(folder, os.path.basename(self.FileReader.WwiseBanks[int(key.split('-')[0])].Dep.Data.replace('\x00', '')))
+                if not os.path.exists(subfolder):
+                    os.mkdir(subfolder)
+                savePath = os.path.join(subfolder, key.split('-')[1])
                 progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wem")
                 with open(savePath+".wem", "wb") as f:
                     f.write(audio.GetData())
@@ -1443,8 +1448,11 @@ class FileHandler:
         progressWindow.Show()
         
         if os.path.exists(folder):
-            for audio in self.FileReader.AudioSources.values():
-                savePath = os.path.join(folder, str(audio.GetFileID()))
+            for key, audio in self.FileReader.AudioSources.items():
+                subfolder = os.path.join(folder, os.path.basename(self.FileReader.WwiseBanks[int(key.split('-')[0])].Dep.Data.replace('\x00', '')))
+                if not os.path.exists(subfolder):
+                    os.mkdir(subfolder)
+                savePath = os.path.join(subfolder, key.split('-')[1])
                 progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
                 with open(savePath+".wem", "wb") as f:
                     f.write(audio.GetData())
@@ -1473,11 +1481,16 @@ class FileHandler:
             
     def GetAudioByID(self, fileID):
         try:
-            return self.FileReader.AudioSources[fileID]
+            return self.FileReader.AudioSources[fileID] #str bank_resourceId-audio_shortId
         except KeyError:
-            for source in self.FileReader.AudioSources.values():
-                if source.resourceId == fileID:
-                    return source
+            pass
+        for source in self.FileReader.AudioSources.values():
+            fileID = str(fileID)
+            fileID = int(fileID.split("-")[-1])
+            if source.resourceId == fileID:
+                return source
+            elif source.shortId == fileID:
+                return source
         
     def GetWwiseStreams(self):
         return self.FileReader.WwiseStreams
@@ -1517,13 +1530,13 @@ class FileHandler:
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(patchFileReader.AudioSources))
         progressWindow.Show()
         
-        
-        for newAudio in patchFileReader.AudioSources.values():
-            progressWindow.SetText("Loading "+str(newAudio.GetFileID()))
-            oldAudio = self.GetAudioByID(newAudio.GetShortId())
-            oldAudio.SetData(newAudio.GetData())
-            progressWindow.Step()
-            
+        for bank in patchFileReader.WwiseBanks.values():
+            for newAudio in bank.GetContent():
+                progressWindow.SetText("Loading "+str(newAudio.GetFileID()))
+                oldAudio = self.GetAudioByID(f"{bank.GetFileID()}-{newAudio.GetShortId()}")
+                oldAudio.SetData(newAudio.GetData())
+                progressWindow.Step()
+
         for textData in patchFileReader.TextData.values():
             oldTextData = self.GetStrings()[textData.GetFileID()]
             for entry in textData.StringEntries.values():
@@ -1568,7 +1581,7 @@ class FileHandler:
             return False
         return True
 
-    def LoadWems(self): 
+    def LoadWems(self, bankId): 
         wems = filedialog.askopenfilenames(title="Choose .wem files to import")
         
         progressWindow = ProgressWindow(title="Loading Files", maxProgress=len(wems))
@@ -1577,7 +1590,7 @@ class FileHandler:
         for file in wems:
             progressWindow.SetText("Loading "+os.path.basename(file))
             fileID = self.GetFileNumberPrefix(os.path.basename(file))
-            audio = self.GetAudioByID(fileID)
+            audio = self.GetAudioByID(f"{bankId}-{fileID}")
             if audio is not None:
                 with open(file, 'rb') as f:
                     audio.SetData(f.read())
@@ -1632,9 +1645,6 @@ class MainWindow:
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
         self.rightClickMenu = Menu(self.root, tearoff=0)
-        self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
-        self.rightClickMenu.add_command(label="Dump As .wem", command=self.DumpAsWem)
-        self.rightClickMenu.add_command(label="Dump As .wav", command=self.DumpAsWav)
         self.rightClickID = 0
 
         self.menu = Menu(self.root, tearoff=0)
@@ -1644,7 +1654,10 @@ class MainWindow:
         self.fileMenu.add_command(label="Save Archive", command=self.SaveArchive)
         self.fileMenu.add_command(label="Write Patch", command=self.WritePatch)
         self.fileMenu.add_command(label="Import Patch File", command=self.LoadPatch)
-        self.fileMenu.add_command(label="Import .wems", command=self.LoadWems)
+        #self.fileMenu.add_command(label="Import .wems", command=self.LoadWems)
+        self.wemsMenu = Menu(self.fileMenu, tearoff=0)
+        self.fileMenu.add_cascade(label="Import .wems", menu=self.wemsMenu)
+        
         
         self.editMenu = Menu(self.menu, tearoff=0)
         self.editMenu.add_command(label="Revert All Changes", command=self.RevertAll)
@@ -1669,8 +1682,20 @@ class MainWindow:
     def _on_rightclick(self, event):
         try:
             canvas = event.widget
+            self.rightClickMenu.delete(0, "end")
             self.rightClickID = int(canvas.gettags("current")[0])
-            self.rightClickMenu.tk_popup(event.x_root, event.y_root)
+            if "bank" in canvas.gettags("current"):
+                self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
+                self.rightClickMenu.add_command(label="Import .wems to this bank", command=self.ImportToThisBank)
+                self.rightClickMenu.tk_popup(event.x_root, event.y_root)
+            elif "audio" in canvas.gettags("current"):
+                self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
+                self.rightClickMenu.add_command(label="Dump As .wem", command=self.DumpAsWem)
+                self.rightClickMenu.add_command(label="Dump As .wav", command=self.DumpAsWav)
+                self.rightClickMenu.tk_popup(event.x_root, event.y_root)
+            elif "text" in canvas.gettags("current"):
+                self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
+                self.rightClickMenu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
             pass
         finally:
@@ -1721,25 +1746,21 @@ class MainWindow:
     def CreateTableRow(self, tocEntry):
         
         info = TableInfo()
+        
+        if tocEntry.GetTypeID() == 6006249203084351385:
+            name = tocEntry.Dep.Data.split('/')[-1]
+            entryType = "bank"
+        elif tocEntry.GetTypeID() == 979299457696010195:
+            name = f"{tocEntry.GetFileID()}.text"
+            entryType = "text"
     
         fillColor = "lawn green" if tocEntry.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH, ROW_HEIGHT, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH, ROW_HEIGHT, fill=fillColor, tags=(tocEntry.GetFileID(), entryType)))
         #info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
         
-        name = str(tocEntry.GetFileID())
-        if tocEntry.GetTypeID() == 5785811756662211598:
-            name = name + ".wem"
-        elif tocEntry.GetTypeID() == 6006249203084351385:
-            name = name + ".bnk"
-        elif tocEntry.GetTypeID() == 979299457696010195:
-            name = name + ".text"
-        if tocEntry.GetTypeID() == 6006249203084351385:
-            try:
-                name = tocEntry.Dep.Data.split('/')[-1]
-            except:
-                pass
+        
 
-        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(tocEntry.GetFileID(), "name")))
+        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(tocEntry.GetFileID(), entryType)))
         #info.text.append(self.mainCanvas.create_text(0, 0, text=tocEntry.GetEntryIndex(), fill='black', font=('Arial', 16, 'bold'), anchor='nw', tag=tocEntry.GetFileID()))
         
         #create revert button
@@ -1805,16 +1826,16 @@ class MainWindow:
 
         self.tableInfo[tocEntry.GetFileID()] = info
         
-    def CreateBankSubtableRow(self, audioSource, parent):
+    def CreateBankSubtableRow(self, audioSource, bank):
     
         info = TableInfo()
         info.hidden = True
         info._type = TableInfo.BANK_WEM
     
         fillColor = "lawn green" if audioSource.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "rect")))
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "audio")))
         name = str(audioSource.GetFileID()) + ".wem"
-        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "name")))
+        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio")))
         
         #type (sound, music track)
         
@@ -1823,7 +1844,7 @@ class MainWindow:
         #little bit scared that two music tracks might include the same audio source
         
         #create revert button
-        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, audioSource.GetShortId()), image=self.fakeImage, compound='c', height=20, width=20)
+        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, f"{bank.GetFileID()}-{audioSource.GetShortId()}"), image=self.fakeImage, compound='c', height=20, width=20)
         
         info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=audioSource.GetFileID())
         info.buttons.append(info.revertButton)
@@ -1839,15 +1860,15 @@ class MainWindow:
                 button.configure(text= '\u23f9', fg='red')
             self.PlayAudio(fileID, callback)
             
-        play.configure(command=partial(pressButton, play, audioSource.GetShortId(), partial(resetButtonIcon, play)))
-        info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=audioSource.GetFileID()))
-        self.tableInfo[str(parent.GetFileID())+'-'+str(audioSource.GetShortId())] = info
+        play.configure(command=partial(pressButton, play, f"{bank.GetFileID()}-{audioSource.GetShortId()}", partial(resetButtonIcon, play)))
+        info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=f"{bank.GetFileID()}-{audioSource.GetShortId()}"))
+        self.tableInfo[f"{bank.GetFileID()}-{audioSource.GetShortId()}"] = info
             
     def CreateTable(self):
         for child in self.mainCanvas.winfo_children():
             child.destroy()
         self.mainCanvas.delete("all")
-        self.tableInfo = {}
+        self.tableInfo.clear()
         draw_y = 0
         bankDict = self.fileHandler.GetWwiseBanks()
         for key in bankDict.keys():
@@ -1877,7 +1898,7 @@ class MainWindow:
             info.hidden = True
             
     def UpdateBankSubtableEntry(self, bank, source, action="update"):
-        fileID = str(bank.GetFileID())+"-"+str(source.GetShortId())
+        fileID = f"{bank.GetFileID()}-{source.GetShortId()}"
         try:
             info = self.tableInfo[fileID]
         except:
@@ -1901,7 +1922,7 @@ class MainWindow:
                 
     def DrawBankSubtableRow(self, bank, source, x, y):
         try:
-            rowInfo = self.tableInfo[str(bank.GetFileID())+"-"+str(source.GetShortId())]
+            rowInfo = self.tableInfo[f"{bank.GetFileID()}-{source.GetShortId()}"]
         except:
             return
         if not rowInfo.hidden:
@@ -2013,19 +2034,28 @@ class MainWindow:
     def Update(self):
         self.RedrawTable()
         
+    def UpdateImportMenu(self):
+        self.wemsMenu.delete(0, "end")
+        for bank in self.fileHandler.GetWwiseBanks().values():
+            self.wemsMenu.add_command(label=bank.Dep.Data, command=partial(self.LoadWems, bank.GetFileID()))
+    
+    def ImportToThisBank(self):
+        self.LoadWems(self.rightClickID)
+    
     def LoadArchive(self):
         self.soundHandler.KillSound()
         if self.fileHandler.LoadArchiveFile():
             self.CreateTable()
             self.Update()
+            self.UpdateImportMenu()
         
     def SaveArchive(self):
         self.soundHandler.KillSound()
         self.fileHandler.SaveArchiveFile()
         
-    def LoadWems(self):
+    def LoadWems(self, targetBankId):
         self.soundHandler.KillSound()
-        self.fileHandler.LoadWems()
+        self.fileHandler.LoadWems(targetBankId)
         self.UpdateTableEntries()
         self.Update()
         
