@@ -1480,17 +1480,20 @@ class FileHandler:
             print("Invalid folder selected, aborting save")
             
     def GetAudioByID(self, fileID):
-        try:
-            return self.FileReader.AudioSources[fileID] #str bank_resourceId-audio_shortId
-        except KeyError:
-            pass
-        for source in self.FileReader.AudioSources.values():
-            fileID = str(fileID)
-            fileID = int(fileID.split("-")[-1])
-            if source.resourceId == fileID:
-                return source
-            elif source.shortId == fileID:
-                return source
+        includesBankId = (len(str(fileID).split("-")) == 2)
+        if includesBankId:
+            try:
+                return self.FileReader.AudioSources[fileID] #str bank_resourceId-audio_shortId
+            except KeyError:
+                pass
+        else:
+            for source in self.FileReader.AudioSources.values():
+                fileID = str(fileID)
+                fileID = int(fileID.split("-")[-1])
+                if source.resourceId == fileID:
+                    return source
+                elif source.shortId == fileID:
+                    return source
         
     def GetWwiseStreams(self):
         return self.FileReader.WwiseStreams
