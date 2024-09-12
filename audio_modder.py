@@ -1432,15 +1432,16 @@ class FileHandler:
         progressWindow.Show()
         
         if os.path.exists(folder):
-            for key, audio in self.FileReader.AudioSources.items():
-                subfolder = os.path.join(folder, os.path.basename(self.FileReader.WwiseBanks[int(key.split('-')[0])].Dep.Data.replace('\x00', '')))
+            for bank in self.FileReader.WwiseBanks.values():
+                subfolder = os.path.join(folder, os.path.basename(bank.Dep.Data.replace('\x00', '')))
                 if not os.path.exists(subfolder):
                     os.mkdir(subfolder)
-                savePath = os.path.join(subfolder, key.split('-')[1])
-                progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wem")
-                with open(savePath+".wem", "wb") as f:
-                    f.write(audio.GetData())
-                progressWindow.Step()
+                for audio in bank.GetContent():
+                    savePath = os.path.join(subfolder, f"{audio.GetFileID()}")
+                    progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wem")
+                    with open(savePath+".wem", "wb") as f:
+                        f.write(audio.GetData())
+                    progressWindow.Step()
         else:
             print("Invalid folder selected, aborting dump")
             
@@ -1453,17 +1454,18 @@ class FileHandler:
         progressWindow.Show()
         
         if os.path.exists(folder):
-            for key, audio in self.FileReader.AudioSources.items():
-                subfolder = os.path.join(folder, os.path.basename(self.FileReader.WwiseBanks[int(key.split('-')[0])].Dep.Data.replace('\x00', '')))
+            for bank in self.FileReader.WwiseBanks.values():
+                subfolder = os.path.join(folder, os.path.basename(bank.Dep.Data.replace('\x00', '')))
                 if not os.path.exists(subfolder):
                     os.mkdir(subfolder)
-                savePath = os.path.join(subfolder, key.split('-')[1])
-                progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
-                with open(savePath+".wem", "wb") as f:
-                    f.write(audio.GetData())
-                subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
-                os.remove(f"{savePath}.wem")
-                progressWindow.Step()
+                for audio in bank.GetContent():
+                    savePath = os.path.join(subfolder, f"{audio.GetFileID()}")
+                    progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
+                    with open(savePath+".wem", "wb") as f:
+                        f.write(audio.GetData())
+                    subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
+                    os.remove(f"{savePath}.wem")
+                    progressWindow.Step()
         else:
             print("Invalid folder selected, aborting dump")
             
@@ -1993,7 +1995,7 @@ class MainWindow:
                 draw_y += 30
             for item in bank.GetContent():
                 self.DrawBankSubtableRow(bank, item, draw_x, draw_y)
-                if not self.tableInfo[str(bank.GetFileID()) + "-" + str(item.GetShortId())].hidden:
+                if not self.tableInfo[f"{bank.GetFileID()}-{item.GetShortId()}"].hidden:
                     draw_y += 30
         for entry in self.fileHandler.GetStrings().values():
             self.DrawTableRow(entry, draw_x, draw_y)
