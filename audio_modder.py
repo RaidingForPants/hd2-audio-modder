@@ -1597,7 +1597,7 @@ class FileHandler:
             if audio is not None:
                 with open(file, 'rb') as f:
                     audio.SetData(f.read())
-                progressWindow.Step()
+            progressWindow.Step()
         
         progressWindow.Destroy()
             
@@ -1841,7 +1841,7 @@ class MainWindow:
         
         #type (sound, music track)
         
-        #if music track: also add duration, startTrim, endTrim?
+        #if music track: also add duration, startTrim, endTrim? Not all sources have accompanying trackInfo struct.
         #need function to update the hierarchy. Need some way to get hId tho (id of hirc entry), not the audio source's Id.
         #little bit scared that two music tracks might include the same audio source
         
