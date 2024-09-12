@@ -966,6 +966,17 @@ class FileReader:
         self.WwiseBanks = {}
         self.AudioSources = {}
         self.TextData = {}
+        
+        '''
+        How to do music:
+        1. Add self.TrackInfo dict
+        2. Loop through bank hierarchy. If a source has valid trackInfo and it is not a duplicate, add it to the dict
+        3. Have soundbanks load from the trackinfo dict on Generate
+        4. Check trackInfo when loading patch
+        5. Create UI to set trackInfo. Perhaps a pop-up window?
+        6. Show type in the UI (Sound vs Music Track)
+        '''
+        
         self.magic      = tocFile.uint32Read()
         if self.magic != 4026531857: return False
 
