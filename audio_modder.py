@@ -219,6 +219,9 @@ class Subscriber:
         
     def LowerModified(self):
         pass
+        
+class TrackEvent:
+    pass
     
 class AudioSource:
 
@@ -229,8 +232,10 @@ class AudioSource:
         self.shortId = 0
         self.Modified = False
         self.Data_OLD = b""
+        self.trackInfo_OLD = None
         self.Subscribers = set()
         self.streamType = 0
+        self.trackInfo = None
         
     def SetData(self, data, notifySubscribers=True, setModified=True):
         if not self.Modified and setModified:
@@ -250,6 +255,21 @@ class AudioSource:
             return self.GetShortId()
         else:
             return self.GetResourceId()
+            
+    def SetTrackInfo(self, trackInfo,  notifySubscribers=True, setModified=True):
+        if not self.Modified and setModified:
+            self.trackInfo_OLD = self.trackInfo
+        self.trackInfo = trackInfo
+        if notifySubscribers:
+            for item in self.Subscribers:
+                item.Update(self)
+                if not self.Modified:
+                    item.RaiseModified()
+        if setModified:
+            self.Modified = True
+            
+    def GetTrackInfo(self):
+        return self.trackInfo
         
     def GetData(self):
         return self.Data
@@ -263,8 +283,12 @@ class AudioSource:
     def RevertModifications(self, notifySubscribers=True):
         if self.Modified:
             self.Modified = False
-            self.Data = self.Data_OLD
-            self.Data_OLD = b""
+            if self.Data_OLD != b"":
+                self.Data = self.Data_OLD
+                self.Data_OLD = b""
+            if self.trackInfo_OLD is not None:
+                self.trackInfo = self.trackInfo_OLD
+                self.trackInfo_OLD = None
             self.Size = len(self.Data)
             if notifySubscribers:
                 for item in self.Subscribers:
@@ -609,13 +633,25 @@ class WwiseBank(Subscriber):
                     didxArray.append(struct.pack("<III", source.sourceId, offset, audio.Size))
                     offset += audio.Size
             elif entry.hType == MUSIC_TRACK:
-                for index, source in enumerate(entry.sources):
+                for source in entry.sources:
                     bankGeneration.Step()
                     try:
                         audio = audioSources[source.sourceId]
                     except KeyError:
                         continue
-                    #trackInfo = entry.trackInfo[index]
+                    try:
+                        count = 0
+                        for info in entry.trackInfo:
+                            if info.sourceId == source.sourceId:
+                                break
+                            count += 1
+                        if audio.GetTrackInfo() is not None:
+                            entry.trackInfo[count] = audio.GetTrackInfo()
+                        else:
+                            print(audio.GetFileID())
+                            print(entry.trackInfo[count])
+                    except: #exception because there may be no original track info struct
+                        pass
                     if source.streamType == PREFETCH_STREAM:
                         dataArray.append(audio.GetData()[:source.memSize])
                         didxArray.append(struct.pack("<III", source.sourceId, offset, source.memSize))
@@ -1121,6 +1157,7 @@ class FileReader:
         
 
         #construct list of audio sources in each bank
+        #add trackInfo to audio sources?
         for bank in self.WwiseBanks.values():
             for entry in bank.hierarchy.entries.values():
                 if entry.hType == SOUND and entry.source.pluginId == 0x00040001:
@@ -1130,7 +1167,17 @@ class FileReader:
                     for source in entry.sources:
                         if self.AudioSources[source.sourceId] not in bank.GetContent():
                             bank.AddContent(self.AudioSources[source.sourceId])
-                            
+                    for info in entry.trackInfo:
+                        if info.sourceId != 0:
+                            self.AudioSources[info.sourceId].SetTrackInfo(info, notifySubscribers=False, setModified=False)
+        '''                    
+        for bank in self.WwiseBanks.values():
+            for entry in bank.hierarchy.entries.values():
+                if entry.hType == MUSIC_TRACK:
+                    for info in entry.trackInfo:
+                        if info.sourceId != 0:
+                            print(f"{info.sourceDuration}")
+        '''
         
     def LoadDeps(self):
         if _GAME_FILE_LOCATION != "":
@@ -1409,6 +1456,63 @@ class PopupWindow:
     def Destroy(self):
         self.root.destroy()
         
+
+class TrackInfoWindow:
+
+    def __init__(self, audio):
+        self.audio = audio
+        self.trackInfo = audio.GetTrackInfo()
+        
+    def Show(self):
+        self.root = Tk()
+        self.root.title(f"Info for {self.audio.GetFileID()}")
+        self.root.configure(background="white")
+        #self.root.geometry("410x45")
+        self.root.attributes('-topmost', True)
+        
+        self.playAtTextVar = tkinter.StringVar(self.root)
+        self.durationTextVar = tkinter.StringVar(self.root)
+        self.startOffsetTextVar = tkinter.StringVar(self.root)
+        self.endOffsetTextVar = tkinter.StringVar(self.root)
+        
+        self.playAtLabel = Label(self.root, text="Play At (ms)", background="white", font=('Segoe UI', 12))
+        self.playAtText = Entry(self.root, textvariable=self.playAtTextVar, font=('Segoe UI', 12), width=50)
+        self.playAtText.insert(END, f"{self.trackInfo.playAt}")
+        
+        self.durationLabel = Label(self.root, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.durationText = Entry(self.root, textvariable=self.durationTextVar, font=('Segoe UI', 12), width=50)
+        self.durationText.insert(END, f"{self.trackInfo.sourceDuration}")
+        
+        self.startOffsetLabel = Label(self.root, text="Start Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.startOffsetText = Entry(self.root, textvariable=self.startOffsetTextVar, font=('Segoe UI', 12), width=50)
+        self.startOffsetText.insert(END, f"{self.trackInfo.beginTrimOffset}")
+        
+        self.endOffsetLabel = Label(self.root, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.endOffsetText = Entry(self.root, textvariable=self.endOffsetTextVar, font=('Segoe UI', 12), width=50)
+        self.endOffsetText.insert(END, f"{self.trackInfo.endTrimOffset}")
+        
+        self.button = ttk.Button(self.root, text="OK", command=self.Destroy)
+            
+        self.playAtLabel.pack()
+        self.playAtText.pack()
+        self.durationLabel.pack()
+        self.durationText.pack()
+        self.startOffsetLabel.pack()
+        self.startOffsetText.pack()
+        self.endOffsetLabel.pack()
+        self.endOffsetText.pack()
+        self.button.pack()
+        self.root.resizable(False, False)
+        
+    def Destroy(self):
+        newTrackInfo = copy.deepcopy(self.trackInfo)
+        newTrackInfo.playAt = float(self.playAtTextVar.get())
+        newTrackInfo.beginTrimOffset = float(self.startOffsetTextVar.get())
+        newTrackInfo.endTrimOffset = float(self.endOffsetTextVar.get())
+        newTrackInfo.sourceDuration = float(self.durationTextVar.get())
+        self.audio.SetTrackInfo(newTrackInfo)
+        self.root.destroy()
+     
 class FileHandler:
 
     def __init__(self):
@@ -1697,22 +1801,44 @@ class MainWindow:
         try:
             canvas = event.widget
             self.rightClickMenu.delete(0, "end")
-            self.rightClickID = int(canvas.gettags("current")[0])
-            if "bank" in canvas.gettags("current"):
+            tags = canvas.gettags("current")
+            self.rightClickID = int(tags[0])
+            if "bank" in tags:
                 self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
                 self.rightClickMenu.tk_popup(event.x_root, event.y_root)
-            elif "audio" in canvas.gettags("current"):
+            elif "audio" in tags:
                 self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
                 self.rightClickMenu.add_command(label="Dump As .wem", command=self.DumpAsWem)
                 self.rightClickMenu.add_command(label="Dump As .wav", command=self.DumpAsWav)
+                if "track" in tags:
+                    self.rightClickMenu.add_command(label="Change Track Info", command=self.CreateTrackInfoWindow)
                 self.rightClickMenu.tk_popup(event.x_root, event.y_root)
-            elif "text" in canvas.gettags("current"):
+            elif "text" in tags:
                 self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
                 self.rightClickMenu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
             pass
         finally:
             self.rightClickMenu.grab_release()
+            
+    def PrintTrackInfo(self):
+        audio = self.fileHandler.GetAudioByID(self.rightClickID)
+        info = audio.GetTrackInfo()
+        if info is not None:
+            print(f"Source ID: {info.sourceId}\nPlay At: {info.playAt}ms\nDuration: {info.sourceDuration}ms\nStart Offset: {info.beginTrimOffset}ms\nEnd Offset: {info.endTrimOffset}ms\n")
+        else:
+            print("No track info available\n")
+            
+    def SetTrackInfo(self):
+        pass
+        
+    def CreateTrackInfoWindow(self):
+        audio = self.fileHandler.GetAudioByID(self.rightClickID)
+        window = TrackInfoWindow(audio)
+        window.Show()
+        window.root.wait_window(window.root)
+        print("T")
+        self.UpdateTableEntries()
             
     def CopyID(self):
         self.root.clipboard_clear()
@@ -1846,11 +1972,25 @@ class MainWindow:
         info._type = TableInfo.BANK_WEM
     
         fillColor = "lawn green" if audioSource.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "audio")))
-        name = str(audioSource.GetFileID()) + ".wem"
-        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio")))
+        
+        if audioSource.GetTrackInfo() is not None:
+            info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT-300, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "audio", "track")))
+            name = str(audioSource.GetFileID()) + ".wem"
+            info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio", "track")))
+            
+            info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 300, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "audio", "track")))
+            info.text.append(self.mainCanvas.create_text(0, 0, text="Music Track", fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio", "track")))
+
+        else:
+            info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT-300, ROW_HEIGHT-100, fill=fillColor, tags=(audioSource.GetFileID(), "audio")))
+            name = str(audioSource.GetFileID()) + ".wem"
+            info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio")))
+            info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 300, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "audio")))
+            info.text.append(self.mainCanvas.create_text(0, 0, text="Sound", fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio")))
         
         #type (sound, music track)
+        #how to check if it is a sound or music track source???
+        
         
         #if music track: also add duration, startTrim, endTrim? Not all sources have accompanying trackInfo struct.
         #need function to update the hierarchy. Need some way to get hId tho (id of hirc entry), not the audio source's Id.
