@@ -448,7 +448,7 @@ class BankParser:
             size = reader.uint32Read()
             self.Chunks[tag] = reader.read(size)
             
-class BankSourceData:
+class BankSourceStruct:
 
     def __init__(self):
         self.pluginId = 0
@@ -456,21 +456,21 @@ class BankSourceData:
         
     @classmethod
     def FromBytes(cls, bytes):
-        b = BankSourceData()
+        b = BankSourceStruct()
         b.pluginId, b.streamType, b.sourceId, b.memSize, b.bitFlags = struct.unpack("<IBIIB", bytes)
         return b
         
     def GetData(self):
         return struct.pack("<IBIIB", self.pluginId, self.streamType, self.sourceId, self.memSize, self.bitFlags)
         
-class TrackInfo:
+class TrackInfoStruct:
     
     def __init__(self):
         self.trackId = self.sourceId = self.eventId = self.playAt = self.beginTrimOffset = self.endTrimOffset = self.sourceDuration = 0
         
     @classmethod
     def FromBytes(cls, bytes):
-        t = TrackInfo()
+        t = TrackInfoStruct()
         t.trackId, t.sourceId, t.eventId, t.playAt, t.beginTrimOffset, t.endTrimOffset, t.sourceDuration = struct.unpack("<IIIdddd", bytes)
         return t
         
@@ -495,29 +495,26 @@ class MusicTrack(HircEntry):
         entry.bitFlags = stream.uint8Read()
         numSources = stream.uint32Read()
         for _ in range(numSources):
-            source = BankSourceData.FromBytes(stream.read(14))
+            source = BankSourceStruct.FromBytes(stream.read(14))
             entry.sources.append(source)
         numTrackInfo = stream.uint32Read()
         for _ in range(numTrackInfo):
-            track = TrackInfo.FromBytes(stream.read(44))
+            track = TrackInfoStruct.FromBytes(stream.read(44))
             entry.trackInfo.append(track)
         entry.misc = stream.read(entry.size - (stream.tell()-startPosition))
         return entry
 
     def GetData(self):
-        b = b""
-        for source in self.sources:
-            b = b + source.GetData()
-        t = b""
-        for track in self.trackInfo:
-            t = t + track.GetData()
+        b = b"".join([source.GetData() for source in self.sources])
+        t = b"".join([track.GetData() for track in self.trackInfo])
         return struct.pack("<BIIBI", self.hType, self.size, self.hId, self.bitFlags, len(self.sources)) + b + len(self.trackInfo).to_bytes(4, byteorder="little") + t + self.misc
     
 class Sound(HircEntry):
     
     def __init__(self):
         super().__init__()
-        self.source = None
+        self.sources = []
+        self.trackInfo = [] #temp for reducing code size
     
     @classmethod
     def FromMemoryStream(cls, stream):
@@ -525,12 +522,12 @@ class Sound(HircEntry):
         entry.hType = stream.uint8Read()
         entry.size = stream.uint32Read()
         entry.hId = stream.uint32Read()
-        entry.source = BankSourceData.FromBytes(stream.read(14))
+        entry.sources.append(BankSourceStruct.FromBytes(stream.read(14)))
         entry.misc = stream.read(entry.size - 18)
         return entry
 
     def GetData(self):
-        return struct.pack(f"<BII14s{len(self.misc)}s", self.hType, self.size, self.hId, self.source.GetData(), self.misc)
+        return struct.pack(f"<BII14s{len(self.misc)}s", self.hType, self.size, self.hId, self.sources[0].GetData(), self.misc)
         
 class WwiseBank(Subscriber):
     
@@ -617,24 +614,10 @@ class WwiseBank(Subscriber):
         dataArray = []
         
         for entry in self.hierarchy.entries.values():
-            if entry.hType == SOUND:
-                source = entry.source
+            #didxArray = [struct.pack("<III", source.sourceId, offset, source.memSize) for source in entry.sources if source.pluginId == 0x00040001]
+            for source in entry.sources:
                 bankGeneration.Step()
-                try:
-                    audio = audioSources[source.sourceId]
-                except KeyError:
-                    continue
-                if source.streamType == PREFETCH_STREAM:
-                    dataArray.append(audio.GetData()[:source.memSize])
-                    didxArray.append(struct.pack("<III", source.sourceId, offset, source.memSize))
-                    offset += source.memSize
-                elif source.streamType == BANK:
-                    dataArray.append(audio.GetData())
-                    didxArray.append(struct.pack("<III", source.sourceId, offset, audio.Size))
-                    offset += audio.Size
-            elif entry.hType == MUSIC_TRACK:
-                for source in entry.sources:
-                    bankGeneration.Step()
+                if source.pluginId == 0x00040001:
                     try:
                         audio = audioSources[source.sourceId]
                     except KeyError:
@@ -848,7 +831,11 @@ class TextData:
 class FileReader:
     
     def __init__(self):
-        pass
+        self.WwiseStreams = {}
+        self.WwiseBanks = {}
+        self.AudioSources = {}
+        self.TextData = {}
+        self.TrackInfo = {}
         
     def FromFile(self, path):
         self.Name = os.path.basename(path)
@@ -998,10 +985,11 @@ class FileReader:
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
         
     def Load(self, tocFile, streamFile):
-        self.WwiseStreams = {}
-        self.WwiseBanks = {}
-        self.AudioSources = {}
-        self.TextData = {}
+        self.WwiseStreams.clear()
+        self.WwiseBanks.clear()
+        self.AudioSources.clear()
+        self.TextData.clear()
+        self.TrackInfo.clear()
         
         '''
         How to do music:
@@ -1064,21 +1052,13 @@ class FileReader:
                     mediaIndex = MediaIndex()
                     mediaIndex.Load(bank.Chunks["DIDX"], bank.Chunks["DATA"])
                     for e in hirc.entries.values():
-                        if e.hType == SOUND and e.source.pluginId == 0x00040001:
-                            if e.source.streamType == BANK and e.source.sourceId not in self.AudioSources:
+                        for source in e.sources:
+                            if source.pluginId == 0x00040001 and source.streamType == BANK and source.sourceId not in self.AudioSources:
                                 audio = AudioSource()
                                 audio.streamType = BANK
-                                audio.shortId = e.source.sourceId
-                                audio.SetData(mediaIndex.data[e.source.sourceId], setModified=False, notifySubscribers=False)
-                                self.AudioSources[e.source.sourceId] = audio
-                        elif e.hType == MUSIC_TRACK:
-                            for source in e.sources:
-                                if source.streamType == BANK and source.sourceId not in self.AudioSources:
-                                    audio = AudioSource()
-                                    audio.streamType = BANK
-                                    audio.shortId = source.sourceId
-                                    audio.SetData(mediaIndex.data[source.sourceId], setModified=False, notifySubscribers=False)
-                                    self.AudioSources[source.sourceId] = audio
+                                audio.shortId = source.sourceId
+                                audio.SetData(mediaIndex.data[source.sourceId], setModified=False, notifySubscribers=False)
+                                self.AudioSources[source.sourceId] = audio
                 
                 entry.BankPostData = b''
                 for chunk in bank.Chunks.keys():
@@ -1131,27 +1111,15 @@ class FileReader:
         #Add all stream entries to the AudioSource list, using their shortID (requires mapping via the Dep)
         for bank in self.WwiseBanks.values():
             for entry in bank.hierarchy.entries.values():
-                if entry.hType == SOUND and entry.source.pluginId == 0x00040001:
-                    if entry.source.streamType in [STREAM, PREFETCH_STREAM] and entry.source.sourceId not in self.AudioSources:
+                for source in entry.sources:
+                    if source.pluginId == 0x00040001 and source.streamType in [STREAM, PREFETCH_STREAM] and source.sourceId not in self.AudioSources:
                         try:
-                            streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(entry.source.sourceId)).encode('utf-8'))
+                            streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
                             audio = self.WwiseStreams[streamResourceId].Content
-                            audio.shortId = entry.source.sourceId
-                            self.AudioSources[entry.source.sourceId] = audio
+                            audio.shortId = source.sourceId
+                            self.AudioSources[source.sourceId] = audio
                         except KeyError:
                             pass
-                    #elif entry.source.sourceId in self.AudioSources:
-                    #    self.AudioSources[entry.source.sourceId].resourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(entry.source.sourceId)).encode('utf-8'))
-                elif entry.hType == MUSIC_TRACK:
-                    for source in entry.sources:
-                        if source.streamType in [STREAM, PREFETCH_STREAM] and source.sourceId not in self.AudioSources:
-                            try:
-                                streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
-                                audio = self.WwiseStreams[streamResourceId].Content
-                                audio.shortId = source.sourceId
-                                self.AudioSources[source.sourceId] = audio
-                            except KeyError:
-                                pass
                         #elif source.sourceId in self.AudioSources:
                         #    self.AudioSources[source.sourceId].resourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
         
@@ -1160,16 +1128,12 @@ class FileReader:
         #add trackInfo to audio sources?
         for bank in self.WwiseBanks.values():
             for entry in bank.hierarchy.entries.values():
-                if entry.hType == SOUND and entry.source.pluginId == 0x00040001:
-                    if self.AudioSources[entry.source.sourceId] not in bank.GetContent():
-                        bank.AddContent(self.AudioSources[entry.source.sourceId])
-                elif entry.hType == MUSIC_TRACK:
-                    for source in entry.sources:
-                        if self.AudioSources[source.sourceId] not in bank.GetContent():
-                            bank.AddContent(self.AudioSources[source.sourceId])
-                    for info in entry.trackInfo:
-                        if info.sourceId != 0:
-                            self.AudioSources[info.sourceId].SetTrackInfo(info, notifySubscribers=False, setModified=False)
+                for source in entry.sources:
+                    if source.pluginId == 0x00040001 and self.AudioSources[source.sourceId] not in bank.GetContent():
+                        bank.AddContent(self.AudioSources[source.sourceId])
+                for info in entry.trackInfo: #can improve speed here
+                    if info.sourceId != 0:
+                        self.AudioSources[info.sourceId].SetTrackInfo(info, notifySubscribers=False, setModified=False)
         '''                    
         for bank in self.WwiseBanks.values():
             for entry in bank.hierarchy.entries.values():
@@ -1290,25 +1254,16 @@ class FileReader:
         for key, bank in self.WwiseBanks.items():
             includeBank = False
             for hierEntry in bank.hierarchy.entries.values():
-                if hierEntry.hType == SOUND and hierEntry.source.pluginId == 0x00040001:
-                    if hierEntry.source.streamType in [STREAM, PREFETCH_STREAM]:
-                        streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(hierEntry.source.sourceId)).encode('utf-8'))
+                for source in hierEntry.sources:
+                    if source.pluginId == 0x00040001 and source.streamType in [STREAM, PREFETCH_STREAM]:
+                        streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
                         for stream in self.WwiseStreams.values():
                             if stream.GetFileID() == streamResourceId:
                                 includeBank = True
                                 tempBanks[key] = bank
                                 break
-                elif hierEntry.hType == MUSIC_TRACK:
-                    for source in hierEntry.sources:
-                        if source.streamType in [STREAM, PREFETCH_STREAM]:
-                            streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
-                            for stream in self.WwiseStreams.values():
-                                if stream.GetFileID() == streamResourceId:
-                                    includeBank = True
-                                    tempBanks[key] = bank
-                                    break
-                        if includeBank:
-                            break
+                    if includeBank:
+                        break
                 if includeBank:
                     break
         self.WwiseBanks = tempBanks
@@ -1756,8 +1711,11 @@ class MainWindow:
         self.scrollBar['command'] = self.mainCanvas.yview
         
         self.titleCanvas.pack(side="top")
-        self.scrollBar.pack(side="right", fill="y")
-        self.mainCanvas.pack(side="left")
+        #self.scrollBar.pack(side="right", fill="y")
+        #self.mainCanvas.pack(side="left")
+        
+        self.treeView = ttk.Treeview(self.root)
+        self.treeView.pack()
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
