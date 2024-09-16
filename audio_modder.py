@@ -696,11 +696,11 @@ class StringEntry:
 
     def __init__(self):
         self.Text = ""
-        self.Offset = 0
+        #self.Offset = 0
         self.FileID = 0
-        self.TextVariable = None
+        #self.TextVariable = None
         self.Modified = False
-        self.Parent = None
+        self.Language = 0
         
     def GetFileID(self):
         return self.FileID
@@ -711,85 +711,87 @@ class StringEntry:
     def GetOffset(self):
         return self.Offset
         
-    def UpdateText(self):
-        self.Modified = True
-        textLen = len(self.Text)
-        self.Text = self.TextVariable.get()
-        sizeDifference = len(self.Text) - textLen
-        self.Parent.Rebuild(self.FileID, sizeDifference)
+    #def UpdateText(self):
+    #    self.Modified = True
+    #    textLen = len(self.Text)
+    #    self.Text = self.TextVariable.get()
+    #    sizeDifference = len(self.Text) - textLen
         
     def SetText(self, text):
         self.Modified = True
-        textLen = len(self.Text)
+        #textLen = len(self.Text)
         self.Text = text
-        sizeDifference = len(self.Text) - textLen
-        self.TextVariable.set(text)
-        self.Parent.Rebuild(self.FileID, sizeDifference)
+        #sizeDifference = len(self.Text) - textLen
+        #self.TextVariable.set(text)
         
     def __deepcopy__(self, memo):
         newEntry = StringEntry()
         newEntry.Text = self.Text
-        newEntry.Offset = self.Offset
+        #newEntry.Offset = self.Offset
         newEntry.FileID = self.FileID
-        newEntry.TextVariable = self.TextVariable
+        #newEntry.TextVariable = self.TextVariable
         newEntry.Modified = self.Modified
-        newEntry.Parent = self.Parent
+        #newEntry.Parent = self.Parent
         return newEntry
         
-class TextData:
+class TextBank:
     
     def __init__(self):
         self.TocHeader = None
         self.Data = b''
-        self.StringEntries = {}
-        self.Language = ""
+        self.StringIds = []
+        self.Language = 0
         self.Modified = False
         
     def SetData(self, data):
-        self.StringEntries.clear()
+        self.StringIds.clear()
         numEntries = int.from_bytes(data[8:12], byteorder='little')
-        self.Language = "English(US)"
         idStart = 16
         offsetStart = idStart + 4 * numEntries
         dataStart = offsetStart + 4 * numEntries
         ids = data[idStart:offsetStart]
         offsets = data[offsetStart:dataStart]
         for n in range(numEntries):
-            entry = StringEntry()
+            #entry = StringEntry()
             stringID = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
-            stringOffset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
-            entry.FileID = stringID
-            entry.Offset = stringOffset
-            stopIndex = stringOffset + 1
-            while data[stopIndex] != 0:
-                stopIndex += 1
-            entry.Text = data[stringOffset:stopIndex].decode('utf-8')
-            entry.Parent = self
-            self.StringEntries[stringID] = entry
+            self.StringIds.append(stringID)
+            #stringOffset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
+            #entry.FileID = stringID
+            #entry.Offset = stringOffset
+            #stopIndex = stringOffset + 1
+            #while data[stopIndex] != 0:
+            #    stopIndex += 1
+            #entry.Text = data[stringOffset:stopIndex].decode('utf-8')
+            #entry.Parent = self
+            #self.StringEntries[stringID] = entry
             
     def Update(self):
         self.TocHeader.TocData = self.GetData()
         self.TocHeader.TocDataSize = len(self.TocHeader.TocData)
         
-    def GetData(self):
+    def GetData(self, stringEntries, language):
+        entries = stringEntries[language]
         stream = MemoryStream()
         stream.write(b'\xae\xf3\x85\x3e\x01\x00\x00\x00')
-        stream.write(len(self.StringEntries).to_bytes(4, byteorder="little"))
-        stream.write(b'\x57\x7B\xf9\x03') #Language code
-        for entry in self.StringEntries.values():
-            stream.write(entry.FileID.to_bytes(4, byteorder="little"))
-        for entry in self.StringEntries.values():
-            stream.write(entry.Offset.to_bytes(4, byteorder="little"))
-        for entry in self.StringEntries.values():
-            stream.seek(entry.Offset)
-            stream.write(entry.Text.encode('utf-8') + b'\x00')
+        stream.write(len(self.StringIds).to_bytes(4, byteorder="little"))
+        stream.write(language.to_bytes(4, byteorder="little")) #Language code
+        offset = 16 + 8*len(self.StringIds)
+        for i in self.StringIds:
+            stream.write(entries[i].FileID.to_bytes(4, byteorder="little"))
+        for i in self.StringIds:
+            stream.write(offset.to_bytes(4, byteorder="little"))
+            offset += len(entries[i].Text) + 1
+        for i in self.StringIds:
+            stream.seek(entries[i].Offset)
+            stream.write(entries[i].Text.encode('utf-8') + b'\x00')
         return stream.Data
         
     def Rebuild(self, stringID, offsetDifference):
-        modifiedEntry = self.StringEntries[stringID]
-        for entry in self.StringEntries.values():
-            if entry.Offset > modifiedEntry.Offset:
-                entry.Offset += offsetDifference
+        pass
+        #modifiedEntry = self.StringEntries[stringID]
+        #for entry in self.StringEntries.values():
+        #    if entry.Offset > modifiedEntry.Offset:
+        #        entry.Offset += offsetDifference
         
     def GetFileID(self):
         try:
@@ -812,7 +814,7 @@ class TextData:
 class FileReader:
     
     def __init__(self):
-        pass
+        self.StringEntries = {}
         
     def FromFile(self, path):
         self.Name = os.path.basename(path)
@@ -829,11 +831,11 @@ class FileReader:
     def ToFile(self, path):
         tocFile = MemoryStream()
         streamFile = MemoryStream()
-        self.numFiles = len(self.WwiseStreams) + 2*len(self.WwiseBanks) + len(self.TextData)
+        self.numFiles = len(self.WwiseStreams) + 2*len(self.WwiseBanks) + len(self.TextBanks)
         self.numTypes = 0
         if len(self.WwiseStreams) > 0: self.numTypes += 1
         if len(self.WwiseBanks) > 0: self.numTypes += 2
-        if len(self.TextData) > 0: self.numTypes += 1
+        if len(self.TextBanks) > 0: self.numTypes += 1
         
         tocFile.write(self.magic.to_bytes(4, byteorder="little"))
         
@@ -878,12 +880,12 @@ class FileReader:
             unk = 64
             tocFile.write(unk.to_bytes(4, byteorder='little'))
             
-        if len(self.TextData) > 0:
+        if len(self.TextBanks) > 0:
             unk = 0
             tocFile.write(unk.to_bytes(8, byteorder='little'))
             unk = 979299457696010195
             tocFile.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.TextData)
+            unk = len(self.TextBanks)
             tocFile.write(unk.to_bytes(8, byteorder='little'))
             unk = 16
             tocFile.write(unk.to_bytes(4, byteorder='little'))
@@ -917,13 +919,13 @@ class FileReader:
             tocFile.seek(bank.Dep.TocHeader.TocDataOffset)
             tocFile.write(PadTo16ByteAlign(bank.Dep.GetData()))
             
-        for key in self.TextData.keys():
+        for key in self.TextBanks.keys():
             tocFile.seek(tocPosition)
             tocPosition += 80
-            entry = self.TextData[key]
+            entry = self.TextBanks[key]
             tocFile.write(entry.TocHeader.GetData())
             tocFile.seek(entry.TocHeader.TocDataOffset)
-            tocFile.write(PadTo16ByteAlign(entry.GetData()))
+            tocFile.write(PadTo16ByteAlign(entry.GetData(language=66681687, stringEntries=self.StringEntries))) #temporarily English (US) only
             
             
         with open(os.path.join(path, self.Name), 'w+b') as f:
@@ -937,8 +939,8 @@ class FileReader:
         self.numTypes = 0
         if len(self.WwiseStreams) > 0: self.numTypes += 1
         if len(self.WwiseBanks) > 0: self.numTypes += 2
-        if len(self.TextData) > 0: self.numTypes += 1
-        self.numFiles = len(self.WwiseStreams) + 2*len(self.WwiseBanks) + len(self.TextData)
+        if len(self.TextBanks) > 0: self.numTypes += 1
+        self.numFiles = len(self.WwiseStreams) + 2*len(self.WwiseBanks) + len(self.TextBanks)
         streamOffset = 0
         tocOffset = 80 + self.numTypes * 32 + 80 * self.numFiles
         for key, value in self.WwiseStreams.items():
@@ -956,7 +958,7 @@ class FileReader:
             value.Dep.TocHeader.TocDataOffset = tocOffset
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
             
-        for key, value in self.TextData.items():
+        for key, value in self.TextBanks.items():
             value.Update()
             value.TocHeader.TocDataOffset = tocOffset
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
@@ -965,7 +967,8 @@ class FileReader:
         self.WwiseStreams = {}
         self.WwiseBanks = {}
         self.AudioSources = {}
-        self.TextData = {}
+        self.TextBanks = {}
+        self.StringEntries.clear()
         self.magic      = tocFile.uint32Read()
         if self.magic != 4026531857: return False
 
@@ -1051,11 +1054,32 @@ class FileReader:
             elif tocHeader.TypeID == 979299457696010195: #stringEntry
                 tocFile.seek(tocHeader.TocDataOffset)
                 data = tocFile.read(tocHeader.TocDataSize)
-                if int.from_bytes(data[12:16], byteorder='little') == 66681687: #English (US)
-                    entry = TextData()
-                    entry.TocHeader = tocHeader
-                    entry.SetData(data)
-                    self.TextData[entry.GetFileID()] = entry
+                numEntries = int.from_bytes(data[8:12], byteorder='little')
+                language = int.from_bytes(data[12:16], byteorder='little')
+                if language not in self.StringEntries:
+                    self.StringEntries[language] = {}
+                idStart = 16
+                offsetStart = idStart + 4 * numEntries
+                dataStart = offsetStart + 4 * numEntries
+                ids = data[idStart:offsetStart]
+                offsets = data[offsetStart:dataStart]
+                textBank = TextBank()
+                textBank.TocHeader = tocHeader
+                textBank.Language = language
+                for n in range(numEntries):
+                    entry = StringEntry()
+                    stringID = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
+                    textBank.StringIds.append(stringID)
+                    stringOffset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
+                    entry.FileID = stringID
+                    stopIndex = stringOffset + 1
+                    while data[stopIndex] != 0:
+                        stopIndex += 1
+                    entry.Text = data[stringOffset:stopIndex].decode('utf-8')
+                    self.StringEntries[language][stringID] = entry
+
+                #if int.from_bytes(data[12:16], byteorder='little') == 66681687: #English (US)
+                self.TextBanks[textBank.GetFileID()] = textBank
         
         
         #check that all banks have valid Dep here, and ask for more data if does not?
@@ -1066,7 +1090,7 @@ class FileReader:
                     print("Failed to load")
                     self.WwiseStreams.clear()
                     self.WwiseBanks.clear()
-                    self.TextData.clear()
+                    self.TextBanks.clear()
                     self.AudioSources.clear()
                     return
                 break
@@ -1077,7 +1101,7 @@ class FileReader:
                 print("Failed to load")
                 self.WwiseStreams.clear()
                 self.WwiseBanks.clear()
-                self.TextData.clear()
+                self.TextBanks.clear()
                 self.AudioSources.clear()
                 return
         
@@ -1505,7 +1529,7 @@ class FileHandler:
         return self.FileReader.AudioSources
         
     def GetStrings(self):
-        return self.FileReader.TextData
+        return self.FileReader.StringEntries
         
     def LoadArchiveFile(self):
         archiveFile = askopenfilename(title="Select archive")
@@ -1540,10 +1564,11 @@ class FileHandler:
                 oldAudio.SetData(newAudio.GetData())
                 progressWindow.Step()
 
-        for textData in patchFileReader.TextData.values():
-            oldTextData = self.GetStrings()[textData.GetFileID()]
-            for entry in textData.StringEntries.values():
-                oldTextData.StringEntries[entry.GetFileID()].SetText(entry.GetText())
+        for textData in patchFileReader.TextBanks.values():
+            for stringId in textData.StringIds:
+                newTextData = patchFileReader.StringEntries[66681687][stringId]
+                oldTextData = self.FileReader.StringEntries[66681687][stringId]
+                oldTextData.SetText(newTextData.GetText())
         
         progressWindow.Destroy()
         return True
@@ -1561,7 +1586,7 @@ class FileHandler:
             patchedFileReader.AudioSources = self.FileReader.AudioSources
             patchedFileReader.WwiseBanks = {}
             patchedFileReader.WwiseStreams = {}
-            patchedFileReader.TextData = {}
+            patchedFileReader.TextBanks = {}
             
             for key, value in self.FileReader.WwiseStreams.items():
                 if value.Content.Modified:
@@ -1571,10 +1596,10 @@ class FileHandler:
                 if value.Modified:
                     patchedFileReader.WwiseBanks[key] = copy.deepcopy(value)
                     
-            for key, value in self.FileReader.TextData.items():
-                for entry in value.StringEntries.values():
-                    if entry.Modified:
-                        patchedFileReader.TextData[key] = copy.deepcopy(value)
+            for key, value in self.FileReader.TextBanks.items():
+                for stringId in value.StringIds:
+                    if self.FileReader.StringEntries[66681687][stringId].Modified:
+                        patchedFileReader.TextBanks[key] = copy.deepcopy(value)
                         break
      
             patchedFileReader.RebuildHeaders()
