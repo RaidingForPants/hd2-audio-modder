@@ -1670,8 +1670,60 @@ class PopupWindow:
         self.root.destroy()
         
 class StringEntryWindow:
-    pass
     
+    def __init__(self, parent):
+        self.frame = Frame(parent)
+        self.text = tkinter.StringVar(self.frame)
+        self.textBox = Entry(self.frame, width=50, textvariable=self.text, font=('Arial', 8))
+        self.stringEntry = None
+        #textBox.insert(END, stringEntry.GetText())
+        
+        #create revert button
+        self.revert = Button(self.frame, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        
+        #create apply button
+        apply = Button(self.mainCanvas, text="\u2713", fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20, command=self.ApplyChanges)
+        
+    def SetStringEntry(self, stringEntry):
+        self.stringEntry = stringEntry
+        self.textBox.delete(0, END)
+        self.textBox.insert(END, stringEntry.GetText())
+        
+    def ApplyChanges(self):
+        if self.stringEntry is not None:
+            self.stringEntry.SetText(self.text.get())
+    
+    def Revert(self):
+        if self.stringEntry is not None:
+            self.stringEntry.RevertModifications()
+        
+    '''
+    info = TableInfo()
+        info.hidden = True
+        info._type = TableInfo.BANK_WEM
+    
+        fillColor = "white"
+        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT, ROW_HEIGHT, fill=fillColor))
+        self.tableInfo[stringEntry.GetFileID()] = info
+        text = tkinter.StringVar(self.mainCanvas)
+        textBox = Entry(self.mainCanvas, width=50, textvariable=text, font=('Arial', 8))
+        stringEntry.TextVariable = text
+        textBox.insert(END, stringEntry.GetText())
+        info.text.append(self.mainCanvas.create_window(0, 0, window=textBox, anchor='nw'))
+        
+        #create revert button
+        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        
+        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw')
+        info.buttons.append(info.revertButton)
+        
+        #create apply button
+        apply = Button(self.mainCanvas, text="\u2713", fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        def applyText(entry):
+            entry.UpdateText()
+        apply.configure(command=partial(applyText, stringEntry))
+        info.buttons.append(self.mainCanvas.create_window(0, 0, window=apply, anchor='nw'))
+    '''
 class AudioSourceWindow:
     
     def __init__(self, parent, revertFunc, playFunc):
@@ -1884,6 +1936,7 @@ class MainWindow:
         
         self.audioInfoWindow = AudioSourceWindow(self.entryInfoPanel, self.RevertAudio, self.PlayAudio)
         self.eventInfoWindow = EventWindow(self.entryInfoPanel)
+        self.stringInfoWindow = StringEntryWindow(self.entryInfoPanel)
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -1961,7 +2014,8 @@ class MainWindow:
         for child in self.entryInfoPanel.winfo_children():
             child.forget()
         if _type == "String":
-            pass
+            self.stringInfoWindow.SetStringEntry(self.fileHandler.GetStringEntryByID(self.treeview.item(self.treeview.selection())['tags'][0])
+            self.stringInfoWindow.frame.pack()
         elif _type == "Audio Source":
             self.audioInfoWindow.SetAudio(self.fileHandler.GetAudioByID(self.treeview.item(self.treeview.selection())['tags'][0]))
             self.audioInfoWindow.frame.pack()
