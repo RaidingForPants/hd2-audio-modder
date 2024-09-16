@@ -250,7 +250,7 @@ class AudioSource:
         if setModified:
             self.Modified = True
             
-    def GetFileID(self): #for backwards compatibility
+    def GetId(self): #for backwards compatibility
         if self.streamType == BANK:
             return self.GetShortId()
         else:
@@ -381,6 +381,8 @@ class HircEntry:
     
     def __init__(self):
         self.size = self.hType = self.hId = self.misc = 0
+        self.sources = []
+        self.trackInfo = []
     
     @classmethod
     def FromMemoryStream(cls, stream):
@@ -474,6 +476,12 @@ class TrackInfoStruct:
         t.trackId, t.sourceId, t.eventId, t.playAt, t.beginTrimOffset, t.endTrimOffset, t.sourceDuration = struct.unpack("<IIIdddd", bytes)
         return t
         
+    def GetId(self):
+        if self.sourceId != 0:
+            return self.sourceId
+        else:
+            return self.eventId
+        
     def GetData(self):
         return struct.pack("<IIIdddd", self.trackId, self.sourceId, self.eventId, self.playAt, self.beginTrimOffset, self.endTrimOffset, self.sourceDuration)
             
@@ -481,8 +489,6 @@ class MusicTrack(HircEntry):
     
     def __init__(self):
         super().__init__()
-        self.sources = []
-        self.trackInfo = []
         self.bitFlags = 0
         
     @classmethod
@@ -513,8 +519,6 @@ class Sound(HircEntry):
     
     def __init__(self):
         super().__init__()
-        self.sources = []
-        self.trackInfo = [] #temp for reducing code size
     
     @classmethod
     def FromMemoryStream(cls, stream):
@@ -574,7 +578,7 @@ class WwiseBank(Subscriber):
     def GetName(self):
         return self.Dep.Data
         
-    def GetFileID(self):
+    def GetId(self):
         try:
             return self.TocHeader.FileID
         except:
@@ -631,7 +635,7 @@ class WwiseBank(Subscriber):
                         if audio.GetTrackInfo() is not None:
                             entry.trackInfo[count] = audio.GetTrackInfo()
                         else:
-                            print(audio.GetFileID())
+                            print(audio.GetId())
                             print(entry.trackInfo[count])
                     except: #exception because there may be no original track info struct
                         pass
@@ -690,7 +694,7 @@ class WwiseStream(Subscriber):
     def LowerModified(self):
         self.Modified = False
         
-    def GetFileID(self):
+    def GetId(self):
         try:
             return self.TocHeader.FileID
         except:
@@ -721,7 +725,7 @@ class StringEntry:
         self.Modified = False
         self.Parent = None
         
-    def GetFileID(self):
+    def GetId(self):
         return self.FileID
         
     def GetText(self):
@@ -810,7 +814,7 @@ class TextData:
             if entry.Offset > modifiedEntry.Offset:
                 entry.Offset += offsetDifference
         
-    def GetFileID(self):
+    def GetId(self):
         try:
             return self.TocHeader.FileID
         except:
@@ -835,7 +839,7 @@ class FileReader:
         self.WwiseBanks = {}
         self.AudioSources = {}
         self.TextData = {}
-        self.TrackInfo = {}
+        self.TrackEvents = {}
         
     def FromFile(self, path):
         self.Name = os.path.basename(path)
@@ -989,7 +993,7 @@ class FileReader:
         self.WwiseBanks.clear()
         self.AudioSources.clear()
         self.TextData.clear()
-        self.TrackInfo.clear()
+        self.TrackEvents.clear()
         
         '''
         How to do music:
@@ -1026,7 +1030,7 @@ class FileReader:
                 audio.SetData(streamFile.read(tocHeader.StreamSize), notifySubscribers=False, setModified=False)
                 audio.resourceId = tocHeader.FileID
                 entry.SetContent(audio)
-                self.WwiseStreams[entry.GetFileID()] = entry
+                self.WwiseStreams[entry.GetId()] = entry
             elif tocHeader.TypeID == 6006249203084351385:
                 entry = WwiseBank()
                 entry.TocHeader = tocHeader
@@ -1065,7 +1069,7 @@ class FileReader:
                     if chunk not in ["BKHD", "DATA", "DIDX", "HIRC"]:
                         entry.BankPostData = entry.BankPostData + chunk.encode('utf-8') + len(bank.Chunks[chunk]).to_bytes(4, byteorder='little') + bank.Chunks[chunk]
                         
-                self.WwiseBanks[entry.GetFileID()] = entry
+                self.WwiseBanks[entry.GetId()] = entry
             elif tocHeader.TypeID == 12624162998411505776: #wwise dep
                 dep = WwiseDep()
                 dep.TocHeader = tocHeader
@@ -1082,7 +1086,7 @@ class FileReader:
                     entry = TextData()
                     entry.TocHeader = tocHeader
                     entry.SetData(data)
-                    self.TextData[entry.GetFileID()] = entry
+                    self.TextData[entry.GetId()] = entry
         
         
         #check that all banks have valid Dep here, and ask for more data if does not?
@@ -1122,6 +1126,9 @@ class FileReader:
                             pass
                         #elif source.sourceId in self.AudioSources:
                         #    self.AudioSources[source.sourceId].resourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
+                for info in entry.trackInfo:
+                    if info.eventId != 0:
+                        self.TrackEvents[info.eventId] = info
         
 
         #construct list of audio sources in each bank
@@ -1238,7 +1245,7 @@ class FileReader:
                     if chunk not in ["BKHD", "DATA", "DIDX", "HIRC"]:
                         entry.BankPostData = entry.BankPostData + chunk.encode('utf-8') + len(bank.Chunks[chunk]).to_bytes(4, byteorder='little') + bank.Chunks[chunk]
                         
-                self.WwiseBanks[entry.GetFileID()] = entry
+                self.WwiseBanks[entry.GetId()] = entry
             elif tocHeader.TypeID == 12624162998411505776: #wwise dep
                 dep = WwiseDep()
                 dep.TocHeader = tocHeader
@@ -1258,7 +1265,7 @@ class FileReader:
                     if source.pluginId == 0x00040001 and source.streamType in [STREAM, PREFETCH_STREAM]:
                         streamResourceId = murmur64Hash((os.path.dirname(bank.Dep.Data) + "/" + str(source.sourceId)).encode('utf-8'))
                         for stream in self.WwiseStreams.values():
-                            if stream.GetFileID() == streamResourceId:
+                            if stream.GetId() == streamResourceId:
                                 includeBank = True
                                 tempBanks[key] = bank
                                 break
@@ -1358,115 +1365,6 @@ class SoundHandler:
                 stereoArr[index][1] = int(0.374107*frame[1] + 0.529067*frame[2] + 0.458186*frame[4] + 0.264534*frame[3] + 0.374107*frame[5])
         
         return stereoArr.tobytes()
-
-class ProgressWindow:
-    def __init__(self, title, maxProgress):
-        self.title = title
-        self.maxProgress = maxProgress
-        
-    def Show(self):
-        self.root = Tk()
-        self.root.title(self.title)
-        self.root.configure(background="white")
-        self.root.geometry("410x45")
-        self.root.attributes('-topmost', True)
-        self.progressBar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.maxProgress)
-        self.progressBarText = Text(self.root)
-        self.progressBarText.configure(background="white")
-        self.progressBar.pack()
-        self.progressBarText.pack()
-        self.root.resizable(False, False)
-        
-    def Step(self):
-        self.progressBar.step()
-        self.root.update_idletasks()
-        self.root.update()
-        
-    def SetText(self, s):
-        self.progressBarText.delete('1.0', END)
-        self.progressBarText.insert(INSERT, s)
-        self.root.update_idletasks()
-        self.root.update()
-        
-    def Destroy(self):
-        self.root.destroy()
-        
-class PopupWindow:
-    def __init__(self, message, title="Missing Data!"):
-        self.message = message
-        self.title = title
-        
-    def Show(self):
-        self.root = Tk()
-        self.root.title(self.title)
-        self.root.configure(background="white")
-        #self.root.geometry("410x45")
-        self.root.attributes('-topmost', True)
-        self.text = ttk.Label(self.root, text=self.message, background="white", font=('Segoe UI', 12), wraplength=500, justify="left")
-        self.button = ttk.Button(self.root, text="OK", command=self.Destroy)
-        self.text.pack(padx=20, pady=0)
-        self.button.pack(pady=20)
-        self.root.resizable(False, False)
-        
-    def Destroy(self):
-        self.root.destroy()
-        
-
-class TrackInfoWindow:
-
-    def __init__(self, audio):
-        self.audio = audio
-        self.trackInfo = audio.GetTrackInfo()
-        
-    def Show(self):
-        self.root = Tk()
-        self.root.title(f"Info for {self.audio.GetFileID()}")
-        self.root.configure(background="white")
-        #self.root.geometry("410x45")
-        self.root.attributes('-topmost', True)
-        
-        self.playAtTextVar = tkinter.StringVar(self.root)
-        self.durationTextVar = tkinter.StringVar(self.root)
-        self.startOffsetTextVar = tkinter.StringVar(self.root)
-        self.endOffsetTextVar = tkinter.StringVar(self.root)
-        
-        self.playAtLabel = Label(self.root, text="Play At (ms)", background="white", font=('Segoe UI', 12))
-        self.playAtText = Entry(self.root, textvariable=self.playAtTextVar, font=('Segoe UI', 12), width=50)
-        self.playAtText.insert(END, f"{self.trackInfo.playAt}")
-        
-        self.durationLabel = Label(self.root, text="Duration (ms)", background="white", font=('Segoe UI', 12))
-        self.durationText = Entry(self.root, textvariable=self.durationTextVar, font=('Segoe UI', 12), width=50)
-        self.durationText.insert(END, f"{self.trackInfo.sourceDuration}")
-        
-        self.startOffsetLabel = Label(self.root, text="Start Trim (ms)", background="white", font=('Segoe UI', 12))
-        self.startOffsetText = Entry(self.root, textvariable=self.startOffsetTextVar, font=('Segoe UI', 12), width=50)
-        self.startOffsetText.insert(END, f"{self.trackInfo.beginTrimOffset}")
-        
-        self.endOffsetLabel = Label(self.root, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
-        self.endOffsetText = Entry(self.root, textvariable=self.endOffsetTextVar, font=('Segoe UI', 12), width=50)
-        self.endOffsetText.insert(END, f"{self.trackInfo.endTrimOffset}")
-        
-        self.button = ttk.Button(self.root, text="OK", command=self.Destroy)
-            
-        self.playAtLabel.pack()
-        self.playAtText.pack()
-        self.durationLabel.pack()
-        self.durationText.pack()
-        self.startOffsetLabel.pack()
-        self.startOffsetText.pack()
-        self.endOffsetLabel.pack()
-        self.endOffsetText.pack()
-        self.button.pack()
-        self.root.resizable(False, False)
-        
-    def Destroy(self):
-        newTrackInfo = copy.deepcopy(self.trackInfo)
-        newTrackInfo.playAt = float(self.playAtTextVar.get())
-        newTrackInfo.beginTrimOffset = float(self.startOffsetTextVar.get())
-        newTrackInfo.endTrimOffset = float(self.endOffsetTextVar.get())
-        newTrackInfo.sourceDuration = float(self.durationTextVar.get())
-        self.audio.SetTrackInfo(newTrackInfo)
-        self.root.destroy()
      
 class FileHandler:
 
@@ -1507,7 +1405,7 @@ class FileHandler:
                 if not os.path.exists(subfolder):
                     os.mkdir(subfolder)
                 for audio in bank.GetContent():
-                    savePath = os.path.join(subfolder, f"{audio.GetFileID()}")
+                    savePath = os.path.join(subfolder, f"{audio.GetId()}")
                     progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wem")
                     with open(savePath+".wem", "wb") as f:
                         f.write(audio.GetData())
@@ -1529,7 +1427,7 @@ class FileHandler:
                 if not os.path.exists(subfolder):
                     os.mkdir(subfolder)
                 for audio in bank.GetContent():
-                    savePath = os.path.join(subfolder, f"{audio.GetFileID()}")
+                    savePath = os.path.join(subfolder, f"{audio.GetId()}")
                     progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wav")
                     with open(savePath+".wem", "wb") as f:
                         f.write(audio.GetData())
@@ -1564,6 +1462,12 @@ class FileHandler:
         for source in self.FileReader.AudioSources.values(): #resourceId
             if source.resourceId == fileID:
                 return source
+                
+    def GetEventByID(self, eventId):
+        try:
+            return self.FileReader.TrackEvents[eventId]
+        except:
+            pass
         
     def GetWwiseStreams(self):
         return self.FileReader.WwiseStreams
@@ -1605,15 +1509,15 @@ class FileHandler:
         
         for bank in patchFileReader.WwiseBanks.values():
             for newAudio in bank.GetContent():
-                progressWindow.SetText(f"Loading {newAudio.GetFileID()}")
+                progressWindow.SetText(f"Loading {newAudio.GetId()}")
                 oldAudio = self.GetAudioByID(newAudio.GetShortId())
                 oldAudio.SetData(newAudio.GetData())
                 progressWindow.Step()
 
         for textData in patchFileReader.TextData.values():
-            oldTextData = self.GetStrings()[textData.GetFileID()]
+            oldTextData = self.GetStrings()[textData.GetId()]
             for entry in textData.StringEntries.values():
-                oldTextData.StringEntries[entry.GetFileID()].SetText(entry.GetText())
+                oldTextData.StringEntries[entry.GetId()].SetText(entry.GetText())
         
         progressWindow.Destroy()
         return True
@@ -1670,22 +1574,213 @@ class FileHandler:
             progressWindow.Step()
         
         progressWindow.Destroy()
-            
-class TableInfo:
+      
+class ProgressWindow:
+    def __init__(self, title, maxProgress):
+        self.title = title
+        self.maxProgress = maxProgress
+        
+    def Show(self):
+        self.root = Tk()
+        self.root.title(self.title)
+        self.root.configure(background="white")
+        self.root.geometry("410x45")
+        self.root.attributes('-topmost', True)
+        self.progressBar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.maxProgress)
+        self.progressBarText = Text(self.root)
+        self.progressBarText.configure(background="white")
+        self.progressBar.pack()
+        self.progressBarText.pack()
+        self.root.resizable(False, False)
+        
+    def Step(self):
+        self.progressBar.step()
+        self.root.update_idletasks()
+        self.root.update()
+        
+    def SetText(self, s):
+        self.progressBarText.delete('1.0', END)
+        self.progressBarText.insert(INSERT, s)
+        self.root.update_idletasks()
+        self.root.update()
+        
+    def Destroy(self):
+        self.root.destroy()
+        
+class PopupWindow:
+    def __init__(self, message, title="Missing Data!"):
+        self.message = message
+        self.title = title
+        
+    def Show(self):
+        self.root = Tk()
+        self.root.title(self.title)
+        self.root.configure(background="white")
+        #self.root.geometry("410x45")
+        self.root.attributes('-topmost', True)
+        self.text = ttk.Label(self.root, text=self.message, background="white", font=('Segoe UI', 12), wraplength=500, justify="left")
+        self.button = ttk.Button(self.root, text="OK", command=self.Destroy)
+        self.text.pack(padx=20, pady=0)
+        self.button.pack(pady=20)
+        self.root.resizable(False, False)
+        
+    def Destroy(self):
+        self.root.destroy()
+        
+class StringEntryWindow:
+    pass
+    
+class AudioSourceWindow:
+    
+    def __init__(self, parent, revertFunc, playFunc):
+        self.frame = Frame(parent)
+        self.frame.configure(background="white")
+        self.fakeImage = tkinter.PhotoImage(width=1, height=1)
+        self.RevertFunc = revertFunc
+        self.PlayFunc = playFunc
+        self.titleLabel = Label(self.frame, background="white", font=('Segoe UI', 14))
+        self.revertButton = Button(self.frame, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        self.playButton = Button(self.frame, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        self.playAtTextVar = tkinter.StringVar(self.frame)
+        self.durationTextVar = tkinter.StringVar(self.frame)
+        self.startOffsetTextVar = tkinter.StringVar(self.frame)
+        self.endOffsetTextVar = tkinter.StringVar(self.frame)
+        
+        self.playAtLabel = Label(self.frame, text="Play At (ms)", background="white", font=('Segoe UI', 12))
+        self.playAtText = Entry(self.frame, textvariable=self.playAtTextVar, font=('Segoe UI', 12), width=50)
+        
+        
+        self.durationLabel = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.durationText = Entry(self.frame, textvariable=self.durationTextVar, font=('Segoe UI', 12), width=50)
+        
+        
+        self.startOffsetLabel = Label(self.frame, text="Start Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.startOffsetText = Entry(self.frame, textvariable=self.startOffsetTextVar, font=('Segoe UI', 12), width=50)
+        
+        
+        self.endOffsetLabel = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.endOffsetText = Entry(self.frame, textvariable=self.endOffsetTextVar, font=('Segoe UI', 12), width=50)
 
-    WEM = 0
-    BANK = 1
-    EXPANDED_BANK = 2
-    BANK_WEM = 3
+        self.button = ttk.Button(self.frame, text="Apply", command=self.ApplyChanges)
+        
+        self.titleLabel.pack()
+        self.revertButton.pack()
+        self.playButton.pack()
+       
+        
+    def SetAudio(self, audio):
+        self.audio = audio
+        self.trackInfo = audio.GetTrackInfo()
+        self.titleLabel.configure(text=f"Info for {audio.GetId()}.wem")
+        self.revertButton.configure(command=partial(self.RevertFunc, audio.GetShortId()))
+        self.playButton.configure(text= '\u23f5', fg='green')
+        def resetButtonIcon(button):
+            button.configure(text= '\u23f5', fg='green')
+        def pressButton(button, fileID, callback):
+            if button['text'] == '\u23f9':
+                button.configure(text= '\u23f5', fg='green')
+            else:
+                button.configure(text= '\u23f9', fg='red')
+            self.PlayFunc(fileID, callback)
+        self.playButton.configure(command=partial(pressButton, self.playButton, audio.GetShortId(), partial(resetButtonIcon, self.playButton)))
+        if self.trackInfo is not None:
+            self.playAtText.delete(0, 'end')
+            self.durationText.delete(0, 'end')
+            self.startOffsetText.delete(0, 'end')
+            self.endOffsetText.delete(0, 'end')
+            self.playAtText.insert(END, f"{self.trackInfo.playAt}")
+            self.durationText.insert(END, f"{self.trackInfo.sourceDuration}")
+            self.startOffsetText.insert(END, f"{self.trackInfo.beginTrimOffset}")
+            self.endOffsetText.insert(END, f"{self.trackInfo.endTrimOffset}")
+            self.playAtLabel.pack()
+            self.playAtText.pack()
+            self.durationLabel.pack()
+            self.durationText.pack()
+            self.startOffsetLabel.pack()
+            self.startOffsetText.pack()
+            self.endOffsetLabel.pack()
+            self.endOffsetText.pack()
+            self.button.pack()
+        else:
+            self.playAtLabel.forget()
+            self.playAtText.forget()
+            self.durationLabel.forget()
+            self.durationText.forget()
+            self.startOffsetLabel.forget()
+            self.startOffsetText.forget()
+            self.endOffsetLabel.forget()
+            self.endOffsetText.forget()
+            self.button.forget()
+        
+    def ApplyChanges(self):
+        newTrackInfo = copy.deepcopy(self.trackInfo)
+        newTrackInfo.playAt = float(self.playAtTextVar.get())
+        newTrackInfo.beginTrimOffset = float(self.startOffsetTextVar.get())
+        newTrackInfo.endTrimOffset = float(self.endOffsetTextVar.get())
+        newTrackInfo.sourceDuration = float(self.durationTextVar.get())
+        self.audio.SetTrackInfo(newTrackInfo)
+        self.trackInfo = newTrackInfo
+        
+class EventWindow:
 
-    def __init__(self):
-        self._type = 0
-        self.modified = False
-        self.hidden = False
-        self.rectangles = []
-        self.buttons = []
-        self.revertButton = None
-        self.text = []
+    def __init__(self, parent):
+        self.frame = Frame(parent)
+        #self.frame.title(f"Info for {self.audio.GetId()}")
+        self.frame.configure(background="white")
+        
+        #self.frame.geometry("410x45")
+        #self.frame.attributes('-topmost', True)
+        
+        self.titleLabel = Label(self.frame, background="white", font=('Segoe UI', 14))
+        
+        self.playAtTextVar = tkinter.StringVar(self.frame)
+        self.durationTextVar = tkinter.StringVar(self.frame)
+        self.startOffsetTextVar = tkinter.StringVar(self.frame)
+        self.endOffsetTextVar = tkinter.StringVar(self.frame)
+        
+        self.playAtLabel = Label(self.frame, text="Play At (ms)", background="white", font=('Segoe UI', 12))
+        self.playAtText = Entry(self.frame, textvariable=self.playAtTextVar, font=('Segoe UI', 12), width=50)
+        
+        self.durationLabel = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.durationText = Entry(self.frame, textvariable=self.durationTextVar, font=('Segoe UI', 12), width=50)
+        
+        self.startOffsetLabel = Label(self.frame, text="Start Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.startOffsetText = Entry(self.frame, textvariable=self.startOffsetTextVar, font=('Segoe UI', 12), width=50)
+        
+        self.endOffsetLabel = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.endOffsetText = Entry(self.frame, textvariable=self.endOffsetTextVar, font=('Segoe UI', 12), width=50)
+        
+        self.button = ttk.Button(self.frame, text="Apply", command=self.ApplyChanges)
+        
+        self.titleLabel.pack()
+        
+        self.playAtLabel.pack()
+        self.playAtText.pack()
+        self.durationLabel.pack()
+        self.durationText.pack()
+        self.startOffsetLabel.pack()
+        self.startOffsetText.pack()
+        self.endOffsetLabel.pack()
+        self.endOffsetText.pack()
+        self.button.pack()
+        
+    def SetTrackInfo(self, trackInfo):
+        self.titleLabel.configure(text=f"Info for Event {trackInfo.GetId()}")
+        self.trackInfo = trackInfo
+        self.playAtText.delete(0, 'end')
+        self.durationText.delete(0, 'end')
+        self.startOffsetText.delete(0, 'end')
+        self.endOffsetText.delete(0, 'end')
+        self.playAtText.insert(END, f"{self.trackInfo.playAt}")
+        self.durationText.insert(END, f"{self.trackInfo.sourceDuration}")
+        self.startOffsetText.insert(END, f"{self.trackInfo.beginTrimOffset}")
+        self.endOffsetText.insert(END, f"{self.trackInfo.endTrimOffset}")
+        
+    def ApplyChanges(self):
+        self.trackInfo.playAt = float(self.playAtTextVar.get())
+        self.trackInfo.beginTrimOffset = float(self.startOffsetTextVar.get())
+        self.trackInfo.endTrimOffset = float(self.endOffsetTextVar.get())
+        self.trackInfo.sourceDuration = float(self.durationTextVar.get())
 
 class MainWindow:
 
@@ -1693,6 +1788,12 @@ class MainWindow:
         self.fileHandler = fileHandler
         self.soundHandler = soundHandler
         self.tableInfo = {}
+        self.bankItems = {}
+        self.audioItems = {}
+        self.musicTrackItems = {}
+        self.eventItems = {}
+        self.stringItems = {}
+        self.stringFileItems = {}
         
         self.root = Tk()
         
@@ -1707,15 +1808,30 @@ class MainWindow:
         self.titleCanvas.create_window(WINDOW_WIDTH-250, 3, window=self.searchBar, anchor='nw')
 
         self.scrollBar = Scrollbar(self.root, orient=VERTICAL)
-        self.mainCanvas = Canvas(self.root, width=WINDOW_WIDTH, height=WINDOW_HEIGHT, yscrollcommand=self.scrollBar.set)
-        self.scrollBar['command'] = self.mainCanvas.yview
+        self.mainCanvas = Canvas(self.root, width=WINDOW_WIDTH, height=WINDOW_HEIGHT)
         
         self.titleCanvas.pack(side="top")
-        #self.scrollBar.pack(side="right", fill="y")
         #self.mainCanvas.pack(side="left")
         
-        self.treeView = ttk.Treeview(self.root)
-        self.treeView.pack()
+        self.detached_items = []
+        
+        self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
+        self.treeview.pack(side="left")
+        self.scrollBar.pack(side="left", fill="y")
+        self.treeview.heading("#0", text="File")
+        self.treeview.column("#0", width=300)
+        self.treeview.column("type", width=200)
+        self.treeview.heading("type", text="Type")
+        self.treeview.configure(yscrollcommand=self.scrollBar.set)
+        self.treeview.bind("<<TreeviewSelect>>", self.ShowInfoWindow)
+        #self.treeview.bind("<Double-Button-1>", self.ShowInfoWindow)
+        self.scrollBar['command'] = self.treeview.yview
+        
+        self.entryInfoPanel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
+        self.entryInfoPanel.pack(side="right", fill="y")
+        
+        self.audioInfoWindow = AudioSourceWindow(self.entryInfoPanel, self.RevertAudio, self.PlayAudio)
+        self.eventInfoWindow = EventWindow(self.entryInfoPanel)
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -1724,6 +1840,11 @@ class MainWindow:
         self.rightClickID = 0
 
         self.menu = Menu(self.root, tearoff=0)
+        
+        self.viewMenu = Menu(self.menu, tearoff=0)
+        self.viewMenu.add_radiobutton(label="Sources", command=self.CreateSourceView)
+        self.viewMenu.add_radiobutton(label="Hierarchy", command=self.CreateHierarchyView)
+        self.currentView = "SourceView"
         
         self.fileMenu = Menu(self.menu, tearoff=0)
         self.fileMenu.add_command(label="Load Archive", command=self.LoadArchive)
@@ -1745,15 +1866,41 @@ class MainWindow:
         self.menu.add_cascade(label="File", menu=self.fileMenu)
         self.menu.add_cascade(label="Edit", menu=self.editMenu)
         self.menu.add_cascade(label="Dump", menu=self.dumpMenu)
+        self.menu.add_cascade(label="View", menu=self.viewMenu)
         self.root.config(menu=self.menu)
         self.root.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.mainCanvas.bind_all("<Button-3>", self._on_rightclick)
+        #self.mainCanvas.bind_all("<Button-3>", self._on_rightclick)
         self.searchBar.bind("<Return>", self._on_enter)
         self.root.resizable(False, False)
         self.root.mainloop()
         
     def _on_enter(self, event):
         self.Search()
+        
+    def print_element(self, event):
+        if len(self.treeview.selection()) == 1:
+            print(self.treeview.item(self.treeview.selection()))
+            
+    def SetSourceView(self):
+        pass
+        
+    def SetHierarchyView(self):
+        pass
+            
+    def ShowInfoWindow(self, event):
+        _type = self.treeview.item(self.treeview.selection())['values'][0]
+        for child in self.entryInfoPanel.winfo_children():
+            child.forget()
+        if _type == "String":
+            pass
+        elif _type == "Audio Source":
+            self.audioInfoWindow.SetAudio(self.fileHandler.GetAudioByID(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.audioInfoWindow.frame.pack()
+        elif _type == "Event":
+            self.eventInfoWindow.SetTrackInfo(self.fileHandler.GetEventByID(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.eventInfoWindow.frame.pack()
+        elif _type == "Music Track":
+            pass
         
     def _on_rightclick(self, event):
         try:
@@ -1812,344 +1959,109 @@ class MainWindow:
     def _on_mousewheel(self, event):
         self.mainCanvas.yview_scroll(int(-1*(event.delta/120)), 'units')
         
-    def CreateStringSubtableRow(self, stringEntry):
+    def CreateTableRow(self, entry, parentItem=""):
+        treeEntry = self.treeview.insert(parentItem, END, tag=entry.GetId())
+        if isinstance(entry, WwiseBank):
+            name = entry.Dep.Data.split('/')[-1]
+            self.bankItems[entry.GetId()] = treeEntry
+            _type = "Sound Bank"
+        elif isinstance(entry, TextData):
+            name = f"{entry.GetId()}.text"
+            self.stringFileItems[entry.GetId()] = treeEntry
+            _type = "Text Bank"
+        elif isinstance(entry, AudioSource):
+            name = f"{entry.GetId()}.wem"
+            _type = "Audio Source"
+        elif isinstance(entry, TrackInfoStruct):
+            name = f"Event {entry.GetId()}"
+            _type = "Event"
+        elif isinstance(entry, StringEntry):
+            _type = "String"
+            name = entry.GetText()[:20]
+            self.stringItems[entry.GetId()] = treeEntry
+        elif isinstance(entry, MusicTrack):
+            _type = "Music Track"
+            name = f"Track {entry.GetId()}"
+        self.treeview.item(treeEntry, text=name)
+        self.treeview.item(treeEntry, values=(_type,))
+        return treeEntry
             
-        info = TableInfo()
-        info.hidden = True
-        info._type = TableInfo.BANK_WEM
-    
-        fillColor = "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT, ROW_HEIGHT, fill=fillColor))
-        self.tableInfo[stringEntry.GetFileID()] = info
-        text = tkinter.StringVar(self.mainCanvas)
-        textBox = Entry(self.mainCanvas, width=50, textvariable=text, font=('Arial', 8))
-        stringEntry.TextVariable = text
-        textBox.insert(END, stringEntry.GetText())
-        info.text.append(self.mainCanvas.create_window(0, 0, window=textBox, anchor='nw'))
-        
-        #create revert button
-        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
-        
-        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw')
-        info.buttons.append(info.revertButton)
-        
-        #create apply button
-        apply = Button(self.mainCanvas, text="\u2713", fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
-        def applyText(entry):
-            entry.UpdateText()
-        apply.configure(command=partial(applyText, stringEntry))
-        info.buttons.append(self.mainCanvas.create_window(0, 0, window=apply, anchor='nw'))
-        
-    def CreateTableRow(self, tocEntry):
-        
-        info = TableInfo()
-        
-        if tocEntry.GetTypeID() == 6006249203084351385:
-            name = tocEntry.Dep.Data.split('/')[-1]
-            entryType = "bank"
-        elif tocEntry.GetTypeID() == 979299457696010195:
-            name = f"{tocEntry.GetFileID()}.text"
-            entryType = "text"
-    
-        fillColor = "lawn green" if tocEntry.Modified else "white"
-        info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH, ROW_HEIGHT, fill=fillColor, tags=(tocEntry.GetFileID(), entryType)))
-        #info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 80, 30, fill=fillColor, tags=(tocEntry.GetFileID(), "rect")))
-        
-        
-
-        info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(tocEntry.GetFileID(), entryType)))
-        #info.text.append(self.mainCanvas.create_text(0, 0, text=tocEntry.GetEntryIndex(), fill='black', font=('Arial', 16, 'bold'), anchor='nw', tag=tocEntry.GetFileID()))
-        
-        #create revert button
-        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, tocEntry.GetFileID()), image=self.fakeImage, compound='c', height=20, width=20)
-        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=tocEntry.GetFileID())
-        info.buttons.append(info.revertButton)
-        
-        if tocEntry.GetTypeID() == 5785811756662211598:
-            info._type = TableInfo.WEM
-            #create play button
-            play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
-            def resetButtonIcon(button):
-                button.configure(text= '\u23f5', fg='green')
-            def pressButton(button, fileID, callback):
-                if button['text'] == '\u23f9':
-                    button.configure(text= '\u23f5', fg='green')
-                else:
-                    button.configure(text= '\u23f9', fg='red')
-                self.PlayAudio(fileID, callback)
-            play.configure(command=partial(pressButton, play, tocEntry.GetFileID(), partial(resetButtonIcon, play)))
-            info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=tocEntry.GetFileID()))
-        elif tocEntry.GetTypeID() == 6006249203084351385:
-            def revertBank(bankId):
-                for audio in self.fileHandler.GetWwiseBanks()[bankId].GetContent():
-                    audio.RevertModifications()
-                self.UpdateTableEntries()
-                self.Update()
-            revert.configure(command=partial(revertBank, tocEntry.GetFileID()))        
-            info._type = TableInfo.BANK
-            #create expand button
-            def pressButton(button, bank):
-                if button['text'] == "v":
-                    button.configure(text=">")
-                    #hide
-                    for source in bank.GetContent():
-                        self.UpdateBankSubtableEntry(bank, source, action="hide")
-                else:
-                    button.configure(text="v")
-                    #show
-                    for source in bank.GetContent():
-                        self.UpdateBankSubtableEntry(bank, source, action="show")
-                self.Update()
-            expand = Button(self.mainCanvas, text=">", font=('Arial', 14, 'bold'), height=20, width=20, image=self.fakeImage, compound='c')
-            expand.configure(command=partial(pressButton, expand, tocEntry))
-            info.buttons.append(self.mainCanvas.create_window(0, 0, window=expand, anchor='nw', tag=tocEntry.GetFileID()))
-        elif tocEntry.GetTypeID() == 979299457696010195:
-            #create expand button
-            def pressButton(button, textId):
-                if button['text'] == "v":
-                    button.configure(text=">")
-                    #hide
-                    for entry in self.fileHandler.GetStrings()[textId].StringEntries.values():
-                        self.UpdateTableEntry(entry, action="hide")
-                else:
-                    button.configure(text="v")
-                    #show
-                    for entry in self.fileHandler.GetStrings()[textId].StringEntries.values():
-                        self.UpdateTableEntry(entry, action="show")
-                self.Update()
-            expand = Button(self.mainCanvas, text=">", font=('Arial', 14, 'bold'), height=20, width=20, image=self.fakeImage, compound='c')
-            expand.configure(command=partial(pressButton, expand, tocEntry.GetFileID()))
-            info.buttons.append(self.mainCanvas.create_window(0, 0, window=expand, anchor='nw', tag=tocEntry.GetFileID()))
-
-        self.tableInfo[tocEntry.GetFileID()] = info
-        
-    def CreateBankSubtableRow(self, audioSource, bank):
-    
-        info = TableInfo()
-        info.hidden = True
-        info._type = TableInfo.BANK_WEM
-    
-        fillColor = "lawn green" if audioSource.Modified else "white"
-        
-        if audioSource.GetTrackInfo() is not None:
-            info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT-300, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "audio", "track")))
-            name = str(audioSource.GetFileID()) + ".wem"
-            info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio", "track")))
-            
-            info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 300, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "audio", "track")))
-            info.text.append(self.mainCanvas.create_text(0, 0, text="Music Track", fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio", "track")))
-
-        else:
-            info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, ROW_WIDTH-SUBROW_INDENT-300, ROW_HEIGHT-100, fill=fillColor, tags=(audioSource.GetFileID(), "audio")))
-            name = str(audioSource.GetFileID()) + ".wem"
-            info.text.append(self.mainCanvas.create_text(0, 0, text=name, fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio")))
-            info.rectangles.append(self.mainCanvas.create_rectangle(0, 0, 300, ROW_HEIGHT, fill=fillColor, tags=(audioSource.GetFileID(), "audio")))
-            info.text.append(self.mainCanvas.create_text(0, 0, text="Sound", fill='black', font=('Arial', 16, 'bold'), anchor='nw', tags=(audioSource.GetFileID(), "audio")))
-        
-        #type (sound, music track)
-        #how to check if it is a sound or music track source???
-        
-        
-        #if music track: also add duration, startTrim, endTrim? Not all sources have accompanying trackInfo struct.
-        #need function to update the hierarchy. Need some way to get hId tho (id of hirc entry), not the audio source's Id.
-        #little bit scared that two music tracks might include the same audio source
-        
-        #create revert button
-        revert = Button(self.mainCanvas, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), command=partial(self.RevertAudio, audioSource.GetShortId()), image=self.fakeImage, compound='c', height=20, width=20)
-        
-        info.revertButton = self.mainCanvas.create_window(0, 0, window=revert, anchor='nw', tag=audioSource.GetFileID())
-        info.buttons.append(info.revertButton)
-        
-        #create play button
-        play = Button(self.mainCanvas, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
-        def resetButtonIcon(button):
-            button.configure(text= '\u23f5', fg='green')
-        def pressButton(button, fileID, callback):
-            if button['text'] == '\u23f9':
-                button.configure(text= '\u23f5', fg='green')
-            else:
-                button.configure(text= '\u23f9', fg='red')
-            self.PlayAudio(fileID, callback)
-            
-        play.configure(command=partial(pressButton, play, audioSource.GetShortId(), partial(resetButtonIcon, play)))
-        info.buttons.append(self.mainCanvas.create_window(0, 0, window=play, anchor='nw', tag=audioSource.GetShortId()))
-        self.tableInfo[f"{bank.GetFileID()}-{audioSource.GetShortId()}"] = info
-            
-    def CreateTable(self):
-        for child in self.mainCanvas.winfo_children():
-            child.destroy()
-        self.mainCanvas.delete("all")
-        self.tableInfo.clear()
-        draw_y = 0
+    def CreateHierarchyView(self):
+        self.currentView = "HierarchyView"
+        self.treeview.delete(*self.treeview.get_children())
         bankDict = self.fileHandler.GetWwiseBanks()
-        for key in bankDict.keys():
-            bank = bankDict[key]
-            self.CreateTableRow(bank)
-            draw_y += ROW_HEIGHT
-            for item in bank.GetContent(): #need a way to show the resource ID for the streams and the short ID for the bank data, for backwards compatibility. Maybe do both? No way to tell which I need from just the AudioSource. I'd like to avoid looking through the hierarchy
-                self.CreateBankSubtableRow(item, bank)
-                draw_y += ROW_HEIGHT
+        for bank in bankDict.values():
+            bankEntry = self.CreateTableRow(bank)
+            for hierEntry in bank.hierarchy.entries.values():
+                if isinstance(hierEntry, MusicTrack):
+                    trackEntry = self.CreateTableRow(hierEntry, bankEntry)
+                    for source in hierEntry.sources:
+                        if source.pluginId == 0x00040001:
+                            self.CreateTableRow(self.fileHandler.GetAudioByID(source.sourceId), trackEntry)
+                    for info in hierEntry.trackInfo:
+                        if info.eventId != 0:
+                            self.CreateTableRow(info, trackEntry)
+                elif isinstance(hierEntry, Sound):
+                    if hierEntry.sources[0].pluginId == 0x00040001:
+                        self.CreateTableRow(self.fileHandler.GetAudioByID(hierEntry.sources[0].sourceId), bankEntry)
         for entry in self.fileHandler.GetStrings().values():
-            self.CreateTableRow(entry)
+            e = self.CreateTableRow(entry)
             for stringEntry in entry.StringEntries.values():
-                self.CreateStringSubtableRow(stringEntry)
-        self.mainCanvas.configure(scrollregion=(0,0,500,draw_y + 5))
-    
-    def UpdateTableEntry(self, item, action="update"):
-        fileID = item.GetFileID()
-        try:
-            info = self.tableInfo[fileID]
-        except:
-            return
-        if action == "update":
-            info.modified = item.Modified
-        elif action == "show":
-            info.hidden = False
-        elif action == "hide":
-            info.hidden = True
-            
-    def UpdateBankSubtableEntry(self, bank, source, action="update"):
-        fileID = f"{bank.GetFileID()}-{source.GetShortId()}"
-        try:
-            info = self.tableInfo[fileID]
-        except:
-            return
-        if action == "update":
-            info.modified = source.Modified
-        elif action == "show":
-            info.hidden = False
-        elif action == "hide":
-            info.hidden = True
-            
-    def UpdateTableEntries(self):
-        streamDict = self.fileHandler.GetWwiseStreams()
-        for stream in streamDict.values():
-            self.UpdateTableEntry(stream)
-        bankDict = self.fileHandler.GetWwiseBanks()
-        for bank in bankDict.values():
-            self.UpdateTableEntry(bank)
-            for source in bank.GetContent():
-                self.UpdateBankSubtableEntry(bank, source)
+                self.CreateTableRow(stringEntry, e)
                 
-    def DrawBankSubtableRow(self, bank, source, x, y):
-        try:
-            rowInfo = self.tableInfo[f"{bank.GetFileID()}-{source.GetShortId()}"]
-        except:
-            return
-        if not rowInfo.hidden:
-            x += SUBROW_INDENT
-            for button in rowInfo.buttons:
-                self.mainCanvas.moveto(button, x, y+3)
-                x += 30
-            for index, rect in enumerate(rowInfo.rectangles):
-                if rowInfo.modified:
-                    self.mainCanvas.itemconfigure(rect, fill="lawn green")
-                else:
-                    self.mainCanvas.itemconfigure(rect, fill="white")
-                self.mainCanvas.moveto(rect, x, y)
-                self.mainCanvas.moveto(rowInfo.text[index], x + 5, y+5)
-                x += (self.mainCanvas.coords(rect)[2]-self.mainCanvas.coords(rect)[0])
-            if not rowInfo.modified:
-                try:
-                    self.mainCanvas.moveto(rowInfo.revertButton, -1000, -1000)
-                except:
-                    pass
-        else:
-            for button in rowInfo.buttons:
-                self.mainCanvas.moveto(button, -1000, -1000)
-            for rect in rowInfo.rectangles:
-                self.mainCanvas.moveto(rect, -1000, -1000)
-            for text in rowInfo.text:
-                self.mainCanvas.moveto(text, -1000, -1000)
-            
-    def DrawTableRow(self, item, x, y):
-        try:
-            rowInfo = self.tableInfo[item.GetFileID()]
-        except:
-            return
-        if not rowInfo.hidden:
-            if rowInfo._type == TableInfo.BANK_WEM: x += SUBROW_INDENT
-            for button in rowInfo.buttons:
-                self.mainCanvas.moveto(button, x, y+3)
-                x += 30
-            for index, rect in enumerate(rowInfo.rectangles):
-                if rowInfo.modified:
-                    self.mainCanvas.itemconfigure(rect, fill="lawn green")
-                else:
-                    self.mainCanvas.itemconfigure(rect, fill="white")
-                self.mainCanvas.moveto(rect, x, y)
-                self.mainCanvas.moveto(rowInfo.text[index], x + 5, y+5)
-                x += (self.mainCanvas.coords(rect)[2]-self.mainCanvas.coords(rect)[0])
-            if not rowInfo.modified:
-                try:
-                    self.mainCanvas.moveto(rowInfo.revertButton, -1000, -1000)
-                except:
-                    pass
-        else:
-            for button in rowInfo.buttons:
-                self.mainCanvas.moveto(button, -1000, -1000)
-            for rect in rowInfo.rectangles:
-                self.mainCanvas.moveto(rect, -1000, -1000)
-            for text in rowInfo.text:
-                self.mainCanvas.moveto(text, -1000, -1000)
-        
-    def RedrawTable(self):
-        draw_y = 0
-        draw_x = 0
+    def CreateSourceView(self):
+        self.currentView = "SourceView"
+        self.treeview.delete(*self.treeview.get_children())
         bankDict = self.fileHandler.GetWwiseBanks()
         for bank in bankDict.values():
-            draw_x = 0
-            self.DrawTableRow(bank, draw_x, draw_y)
-            if not self.tableInfo[bank.GetFileID()].hidden:
-                draw_y += 30
-            for item in bank.GetContent():
-                self.DrawBankSubtableRow(bank, item, draw_x, draw_y)
-                if not self.tableInfo[f"{bank.GetFileID()}-{item.GetShortId()}"].hidden:
-                    draw_y += 30
+            bankEntry = self.CreateTableRow(bank)
+            for hierEntry in bank.hierarchy.entries.values():
+                for source in hierEntry.sources:
+                    if source.pluginId == 0x00040001:
+                        self.CreateTableRow(self.fileHandler.GetAudioByID(source.sourceId), bankEntry)
         for entry in self.fileHandler.GetStrings().values():
-            self.DrawTableRow(entry, draw_x, draw_y)
-            if not self.tableInfo[entry.GetFileID()].hidden: draw_y += 30
-            for item in entry.StringEntries.values():
-                self.DrawTableRow(item, draw_x, draw_y)
-                if not self.tableInfo[item.GetFileID()].hidden:
-                    draw_y += 30
-        self.mainCanvas.configure(scrollregion=(0,0,1280,draw_y + 5))
-        
+            e = self.CreateTableRow(entry)
+            for stringEntry in entry.StringEntries.values():
+                self.CreateTableRow(stringEntry, e)
+                
+    def RecurSearch(self, searchText, item):
+        s = self.treeview.item(item)['text']
+        match = s.startswith(searchText) or s.endswith(searchText)
+        children = self.treeview.get_children(item)
+        if len(children) == 0:
+            if not match:
+                self.detached_items.append((item, self.treeview.parent(item), self.treeview.index(item)))
+                self.treeview.detach(item)
+            return match
+        else:
+            for child in children:
+                match = self.RecurSearch(searchText, child) or match
+            if match:
+                return True
+            self.detached_items.append((item, self.treeview.parent(item), self.treeview.index(item)))
+            self.treeview.detach(item)
+            return False
 
     def Search(self):
+        #if self.currentView == "SourceView":
+        #    self.CreateSourceView()
+        #else:
+        #    self.CreateHierarchyView()
+        for tup in reversed(self.detached_items):
+            self.treeview.reattach(tup[0], tup[1], tup[2])
+        self.detached_items.clear()
         text = self.searchText.get()
-        for item in self.tableInfo.values():
-            item.hidden = True
-        for audio in self.fileHandler.GetAudio().values():
-            name = str(audio.GetFileID()) + ".wem"
-            if name.startswith(text) or name.endswith(text):
-                for subscriber in audio.Subscribers:
-                    self.UpdateTableEntry(subscriber, action="show")
-                    self.UpdateBankSubtableEntry(subscriber, audio, action="show")
-        bankDict = self.fileHandler.GetWwiseBanks()
-        for bank in bankDict.values():
-            name = str(bank.GetFileID()) + ".bnk"
-            if name.startswith(text) or name.endswith(text):
-                self.UpdateTableEntry(bank, action="show")
-        for item in self.fileHandler.GetStrings().values():
-            name = str(item.GetFileID()) + ".text"
-            if name.startswith(text) or name.endswith(text):
-                self.UpdateTableEntry(item, action="show")
-            for entry in item.StringEntries.values():
-                name = entry.TextVariable.get()
-                if text in name:
-                    self.UpdateTableEntry(entry, action="show")
-                    self.UpdateTableEntry(entry.Parent, action="show")
-        self.RedrawTable()
-    
-    def Update(self):
-        self.RedrawTable()
+        for child in self.treeview.get_children():
+            self.RecurSearch(text, child)
 
     def LoadArchive(self):
         self.soundHandler.KillSound()
         if self.fileHandler.LoadArchiveFile():
-            self.CreateTable()
-            self.Update()
+            if self.currentView == "SourceView":
+                self.CreateSourceView()
+            else:
+                self.CreateHierarchyView()
+            #self.Update()
         
     def SaveArchive(self):
         self.soundHandler.KillSound()
@@ -2158,8 +2070,8 @@ class MainWindow:
     def LoadWems(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadWems()
-        self.UpdateTableEntries()
-        self.Update()
+        #self.UpdateTableEntries()
+        #self.Update()
         
     def DumpAllAsWem(self):
         self.soundHandler.KillSound()
@@ -2175,14 +2087,14 @@ class MainWindow:
     def RevertAudio(self, fileID):
         self.soundHandler.KillSound()
         self.fileHandler.RevertAudio(fileID)
-        self.UpdateTableEntries()
-        self.Update()
+        #self.UpdateTableEntries()
+        #self.Update()
         
     def RevertAll(self):
         self.soundHandler.KillSound()
         self.fileHandler.RevertAll()
-        self.UpdateTableEntries()
-        self.Update()
+        #self.UpdateTableEntries()
+        #self.Update()
         
     def WritePatch(self):
         self.soundHandler.KillSound()
@@ -2191,8 +2103,9 @@ class MainWindow:
     def LoadPatch(self):
         self.soundHandler.KillSound()
         if self.fileHandler.LoadPatch():
-            self.UpdateTableEntries()
-            self.Update()
+            pass
+            #self.UpdateTableEntries()
+            #self.Update()
     
 def exitHandler():
     soundHandler.audio.terminate()
