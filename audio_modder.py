@@ -1983,6 +1983,7 @@ class MainWindow:
         self.stringFileItems = {}
         
         self.root = Tk()
+        self.root.configure(bg="white")
         
         self.fakeImage = tkinter.PhotoImage(width=1, height=1)
         
@@ -2023,7 +2024,7 @@ class MainWindow:
         self.scrollBar['command'] = self.treeview.yview
         
         self.entryInfoPanel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
-        self.entryInfoPanel.pack(side="right", fill="y")
+        self.entryInfoPanel.pack(side="left", fill="both")
         
         self.audioInfoWindow = AudioSourceWindow(self.entryInfoPanel, self.RevertAudio, self.PlayAudio)
         self.eventInfoWindow = EventWindow(self.entryInfoPanel)
@@ -2143,7 +2144,6 @@ class MainWindow:
             types = {self.treeview.item(i)['values'][0] for i in self.treeview.selection()}
             self.rightClickMenu.delete(0, "end")
             self.rightClickID = self.treeview.item(self.treeview.selection()[-1])['tags'][0]
-            print(self.rightClickID)
             self.rightClickMenu.add_command(label="Copy File ID" if len(self.treeview.selection()) == 1 else "Copy File IDs", command=self.CopyID)
             if "Audio Source" in types:
                 self.rightClickMenu.add_command(label="Dump As .wem" if len(self.treeview.selection()) == 1 else "Dump Selected As .wem", command=self.DumpAsWem)
