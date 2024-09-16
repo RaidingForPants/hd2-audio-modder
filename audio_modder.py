@@ -26,10 +26,12 @@ STREAM = 2
 ROW_HEIGHT = 30
 ROW_WIDTH = 800
 SUBROW_INDENT = 30
-WINDOW_WIDTH = 900
+WINDOW_WIDTH = 700
 WINDOW_HEIGHT = 720
 _GAME_FILE_LOCATION = ""
 _DRIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_LANGUAGE = 66681687
+_LANGUAGE_MAPPING = {}
 
 def LookForSteamInstallWindows():
     path = "C:\\Program Files (x86)\\steam\\steamapps\\common\\Helldivers 2\\data"
@@ -40,6 +42,13 @@ def LookForSteamInstallWindows():
         if os.path.exists(path):
             return path
     return ""
+    
+def LoadLanguageMapping():
+    _LANGUAGE_MAPPING["English (US)"] = 0x03f97b57
+    _LANGUAGE_MAPPING["English (UK)"] = 0x6f4515cb 
+    
+def LanguageLookup(langString):
+    return _LANGUAGE_MAPPING[langString]
     
 def StripPatchIndex(filename):
     split = filename.split(".")
@@ -469,6 +478,8 @@ class TrackInfoStruct:
     
     def __init__(self):
         self.trackId = self.sourceId = self.eventId = self.playAt = self.beginTrimOffset = self.endTrimOffset = self.sourceDuration = 0
+        self.playAt_OLD = self.beginTrimOffset_OLD = self.endTrimOffset_OLD = self.sourceDuration_OLD = 0
+        self.modified = False
         
     @classmethod
     def FromBytes(cls, bytes):
@@ -481,6 +492,26 @@ class TrackInfoStruct:
             return self.sourceId
         else:
             return self.eventId
+            
+    def SetData(self, playAt=None, beginTrimOffset=None, endTrimOffset=None, sourceDuration=None):
+        if not self.modified:
+            self.playAt_OLD = self.playAt
+            self.beginTrimOffset_OLD = self.beginTrimOffset
+            self.endTrimOffset_OLD = self.endTrimOffset
+            self.sourceDuration_OLD = self.sourceDuration
+        if playAt is not None: self.playAt = playAt
+        if beginTrimOffset is not None: self.beginTrimOffset = beginTrimOffset
+        if endTrimOffset is not None: self.endTrimOffset = endTrimOffset
+        if sourceDuration is not None: self.sourceDuration = sourceDuration
+        self.modified = True
+        
+    def RevertModifications(self):
+        if self.modified:
+            self.playAt = self.playAt_OLD
+            self.beginTrimOffset = self.beginTrimOffset_OLD
+            self.endTrimOffset = self.endTrimOffset_OLD
+            self.sourceDuration = self.sourceDuration_OLD
+            self.modified = False
         
     def GetData(self):
         return struct.pack("<IIIdddd", self.trackId, self.sourceId, self.eventId, self.playAt, self.beginTrimOffset, self.endTrimOffset, self.sourceDuration)
@@ -593,7 +624,7 @@ class WwiseBank(Subscriber):
     def GetData(self):
         return self.data
             
-    def Generate(self, audioSources):
+    def Generate(self, audioSources, eventTrackInfo):
         data = bytearray()
         data += self.BankHeader
         
@@ -619,6 +650,9 @@ class WwiseBank(Subscriber):
         
         for entry in self.hierarchy.entries.values():
             #didxArray = [struct.pack("<III", source.sourceId, offset, source.memSize) for source in entry.sources if source.pluginId == 0x00040001]
+            for index, info in enumerate(entry.trackInfo):
+                if info.eventId != 0:
+                    entry.trackInfo[index] = eventTrackInfo[info.eventId]
             for source in entry.sources:
                 bankGeneration.Step()
                 if source.pluginId == 0x00040001:
@@ -635,8 +669,9 @@ class WwiseBank(Subscriber):
                         if audio.GetTrackInfo() is not None:
                             entry.trackInfo[count] = audio.GetTrackInfo()
                         else:
-                            print(audio.GetId())
-                            print(entry.trackInfo[count])
+                            pass
+                            #print(audio.GetId())
+                            #print(entry.trackInfo[count])
                     except: #exception because there may be no original track info struct
                         pass
                     if source.streamType == PREFETCH_STREAM:
@@ -719,42 +754,32 @@ class StringEntry:
 
     def __init__(self):
         self.Text = ""
-        #self.Offset = 0
+        self.Text_OLD = ""
         self.FileID = 0
-        #self.TextVariable = None
         self.Modified = False
-        self.Language = 0
         
     def GetId(self):
         return self.FileID
         
     def GetText(self):
         return self.Text
-    
-    def GetOffset(self):
-        return self.Offset
-        
-    #def UpdateText(self):
-    #    self.Modified = True
-    #    textLen = len(self.Text)
-    #    self.Text = self.TextVariable.get()
-    #    sizeDifference = len(self.Text) - textLen
         
     def SetText(self, text):
+        if not self.Modified:
+            self.Text_OLD = self.Text
         self.Modified = True
-        #textLen = len(self.Text)
         self.Text = text
-        #sizeDifference = len(self.Text) - textLen
-        #self.TextVariable.set(text)
+        
+    def RevertModifications(self):
+        if self.Modified:
+            self.Text = self.Text_OLD
+            self.Modified = False
         
     def __deepcopy__(self, memo):
         newEntry = StringEntry()
         newEntry.Text = self.Text
-        #newEntry.Offset = self.Offset
         newEntry.FileID = self.FileID
-        #newEntry.TextVariable = self.TextVariable
         newEntry.Modified = self.Modified
-        #newEntry.Parent = self.Parent
         return newEntry
         
 class TextBank:
@@ -775,39 +800,35 @@ class TextBank:
         ids = data[idStart:offsetStart]
         offsets = data[offsetStart:dataStart]
         for n in range(numEntries):
-            #entry = StringEntry()
             stringID = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
             self.StringIds.append(stringID)
-            #stringOffset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
-            #entry.FileID = stringID
-            #entry.Offset = stringOffset
-            #stopIndex = stringOffset + 1
-            #while data[stopIndex] != 0:
-            #    stopIndex += 1
-            #entry.Text = data[stringOffset:stopIndex].decode('utf-8')
-            #entry.Parent = self
-            #self.StringEntries[stringID] = entry
             
     def Update(self):
-        self.TocHeader.TocData = self.GetData()
-        self.TocHeader.TocDataSize = len(self.TocHeader.TocData)
+        pass
+        #self.TocHeader.TocData = self.GetData()
+        #self.TocHeader.TocDataSize = len(self.TocHeader.TocData)
         
-    def GetData(self, stringEntries, language):
-        entries = stringEntries[language]
+    def GetData(self):
+        return self.Data
+        
+    def Generate(self, stringEntries):
+        entries = stringEntries[self.Language]
         stream = MemoryStream()
         stream.write(b'\xae\xf3\x85\x3e\x01\x00\x00\x00')
         stream.write(len(self.StringIds).to_bytes(4, byteorder="little"))
-        stream.write(language.to_bytes(4, byteorder="little")) #Language code
+        stream.write(self.Language.to_bytes(4, byteorder="little"))
         offset = 16 + 8*len(self.StringIds)
         for i in self.StringIds:
             stream.write(entries[i].FileID.to_bytes(4, byteorder="little"))
         for i in self.StringIds:
             stream.write(offset.to_bytes(4, byteorder="little"))
-            offset += len(entries[i].Text) + 1
-        for i in self.StringIds:
-            stream.seek(entries[i].Offset)
+            initialPos = stream.tell()
+            stream.seek(offset)
             stream.write(entries[i].Text.encode('utf-8') + b'\x00')
-        return stream.Data
+            offset += len(entries[i].Text) + 1
+            stream.seek(initialPos)
+        self.Data = stream.Data
+        self.TocHeader.TocDataSize = len(self.Data)
         
     def Rebuild(self, stringID, offsetDifference):
         pass
@@ -840,7 +861,7 @@ class FileReader:
         self.WwiseStreams = {}
         self.WwiseBanks = {}
         self.AudioSources = {}
-        self.TextData = {}
+        self.TextBanks = {}
         self.TrackEvents = {}
         self.StringEntries = {}
         
@@ -953,7 +974,7 @@ class FileReader:
             entry = self.TextBanks[key]
             tocFile.write(entry.TocHeader.GetData())
             tocFile.seek(entry.TocHeader.TocDataOffset)
-            tocFile.write(PadTo16ByteAlign(entry.GetData(language=66681687, stringEntries=self.StringEntries))) #temporarily English (US) only
+            tocFile.write(PadTo16ByteAlign(entry.GetData())) #temporarily English (US) only
             
             
         with open(os.path.join(path, self.Name), 'w+b') as f:
@@ -978,7 +999,9 @@ class FileReader:
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
         
         for key, value in self.WwiseBanks.items():
-            value.Generate(self.AudioSources)
+            print(3070152700 in self.TrackEvents.keys())
+            value.Generate(self.AudioSources, self.TrackEvents)
+            
             value.TocHeader.TocDataOffset = tocOffset
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
             
@@ -987,7 +1010,7 @@ class FileReader:
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
             
         for key, value in self.TextBanks.items():
-            value.Update()
+            value.Generate(stringEntries=self.StringEntries)
             value.TocHeader.TocDataOffset = tocOffset
             tocOffset += _16ByteAlign(value.TocHeader.TocDataSize)
         
@@ -995,7 +1018,7 @@ class FileReader:
         self.WwiseStreams.clear()
         self.WwiseBanks.clear()
         self.AudioSources.clear()
-        self.TextData.clear()
+        self.TextBanks.clear()
         self.TrackEvents.clear()
         self.StringEntries.clear()
         '''
@@ -1110,8 +1133,8 @@ class FileReader:
                     entry.Text = data[stringOffset:stopIndex].decode('utf-8')
                     self.StringEntries[language][stringID] = entry
 
-                #if int.from_bytes(data[12:16], byteorder='little') == 66681687: #English (US)
-                self.TextBanks[textBank.GetFileID()] = textBank
+                #if int.from_bytes(data[12:16], byteorder='little') == _LANGUAGE: #English (US)
+                self.TextBanks[textBank.GetId()] = textBank
         
         
         #check that all banks have valid Dep here, and ask for more data if does not?
@@ -1161,19 +1184,19 @@ class FileReader:
         for bank in self.WwiseBanks.values():
             for entry in bank.hierarchy.entries.values():
                 for source in entry.sources:
-                    if source.pluginId == 0x00040001 and self.AudioSources[source.sourceId] not in bank.GetContent():
-                        bank.AddContent(self.AudioSources[source.sourceId])
+                    try:
+                        if source.pluginId == 0x00040001 and self.AudioSources[source.sourceId] not in bank.GetContent(): #may be missing streamed audio if the patch didn't change it
+                            bank.AddContent(self.AudioSources[source.sourceId])
+                    except:
+                        continue
                 for info in entry.trackInfo: #can improve speed here
-                    if info.sourceId != 0:
-                        self.AudioSources[info.sourceId].SetTrackInfo(info, notifySubscribers=False, setModified=False)
-        '''                    
-        for bank in self.WwiseBanks.values():
-            for entry in bank.hierarchy.entries.values():
-                if entry.hType == MUSIC_TRACK:
-                    for info in entry.trackInfo:
+                    try:
                         if info.sourceId != 0:
-                            print(f"{info.sourceDuration}")
-        '''
+                            self.AudioSources[info.sourceId].SetTrackInfo(info, notifySubscribers=False, setModified=False)
+                    except:
+                        continue
+                
+
         
     def LoadDeps(self):
         if _GAME_FILE_LOCATION != "":
@@ -1399,6 +1422,11 @@ class FileHandler:
     def RevertAll(self):
         for audio in self.FileReader.AudioSources.values():
             audio.RevertModifications()
+        for language in self.FileReader.StringEntries.values():
+            for string in language:
+                string.RevertModifications()
+        for trackInfo in self.FileReader.TrackEvents.values():
+            trackInfo.RevertModifications()
         
     def RevertAudio(self, fileID):
         audio = self.GetAudioByID(fileID)
@@ -1535,6 +1563,12 @@ class FileHandler:
             return self.FileReader.TrackEvents[eventId]
         except:
             pass
+            
+    def GetStringEntryByID(self, stringId):
+        try:
+            return self.FileReader.StringEntries[_LANGUAGE][stringId]
+        except:
+            pass
         
     def GetWwiseStreams(self):
         return self.FileReader.WwiseStreams
@@ -1583,8 +1617,8 @@ class FileHandler:
 
         for textData in patchFileReader.TextBanks.values():
             for stringId in textData.StringIds:
-                newTextData = patchFileReader.StringEntries[66681687][stringId]
-                oldTextData = self.FileReader.StringEntries[66681687][stringId]
+                newTextData = patchFileReader.StringEntries[_LANGUAGE][stringId]
+                oldTextData = self.FileReader.StringEntries[_LANGUAGE][stringId]
                 oldTextData.SetText(newTextData.GetText())
         
         progressWindow.Destroy()
@@ -1601,6 +1635,8 @@ class FileHandler:
             patchedFileReader.unknown = self.FileReader.unknown
             patchedFileReader.unk4Data = self.FileReader.unk4Data
             patchedFileReader.AudioSources = self.FileReader.AudioSources
+            patchedFileReader.StringEntries = self.FileReader.StringEntries
+            patchedFileReader.TrackEvents = self.FileReader.TrackEvents
             patchedFileReader.WwiseBanks = {}
             patchedFileReader.WwiseStreams = {}
             patchedFileReader.TextBanks = {}
@@ -1615,7 +1651,7 @@ class FileHandler:
                     
             for key, value in self.FileReader.TextBanks.items():
                 for stringId in value.StringIds:
-                    if self.FileReader.StringEntries[66681687][stringId].Modified:
+                    if self.FileReader.StringEntries[value.Language][stringId].Modified:
                         patchedFileReader.TextBanks[key] = copy.deepcopy(value)
                         break
      
@@ -1699,29 +1735,35 @@ class StringEntryWindow:
     
     def __init__(self, parent):
         self.frame = Frame(parent)
-        self.text = tkinter.StringVar(self.frame)
-        self.textBox = Entry(self.frame, width=50, textvariable=self.text, font=('Arial', 8))
+        #self.text = tkinter.StringVar(self.frame)
+        self.textBox = Text(self.frame, width=50, font=('Arial', 8), wrap=WORD)
         self.stringEntry = None
+        self.fakeImage = tkinter.PhotoImage(width=1, height=1)
         #textBox.insert(END, stringEntry.GetText())
         
         #create revert button
-        self.revert = Button(self.frame, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        self.revertButton = ttk.Button(self.frame, text="Revert", command=self.Revert)
         
         #create apply button
-        apply = Button(self.mainCanvas, text="\u2713", fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20, command=self.ApplyChanges)
+        self.applyButton = ttk.Button(self.frame, text="Apply", command=self.ApplyChanges)
+        self.textBox.pack()
+        self.revertButton.pack(side="left")
+        self.applyButton.pack(side="left")
         
     def SetStringEntry(self, stringEntry):
         self.stringEntry = stringEntry
-        self.textBox.delete(0, END)
+        self.textBox.delete("1.0", END)
         self.textBox.insert(END, stringEntry.GetText())
         
     def ApplyChanges(self):
         if self.stringEntry is not None:
-            self.stringEntry.SetText(self.text.get())
+            self.stringEntry.SetText(self.textBox.get("1.0", "end-1c"))
     
     def Revert(self):
         if self.stringEntry is not None:
             self.stringEntry.RevertModifications()
+            self.textBox.delete("1.0", END)
+            self.textBox.insert(END, self.stringEntry.GetText())
         
     '''
     info = TableInfo()
@@ -1760,7 +1802,7 @@ class AudioSourceWindow:
         self.PlayFunc = playFunc
         self.titleLabel = Label(self.frame, background="white", font=('Segoe UI', 14))
         #self.revertButton = ttk.Button(self.frame, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
-        self.revertButton = ttk.Button(self.frame, text='\u21b6', image=self.fakeImage, compound='c', width=2)
+        self.revertButton = ttk.Button(self.frame, text='\u21b6', image=self.fakeImage, compound='c', width=2, command=self.Revert)
         #self.playButton = Button(self.frame, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
         self.playButton = ttk.Button(self.frame, text= '\u23f5', image=self.fakeImage, compound='c', width=2)
         self.playAtTextVar = tkinter.StringVar(self.frame)
@@ -1783,19 +1825,20 @@ class AudioSourceWindow:
         self.endOffsetLabel = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
         self.endOffsetText = Entry(self.frame, textvariable=self.endOffsetTextVar, font=('Segoe UI', 12), width=50)
 
-        self.button = ttk.Button(self.frame, text="Apply", command=self.ApplyChanges)
+        self.applyButton = ttk.Button(self.frame, text="Apply", command=self.ApplyChanges)
         
         self.titleLabel.pack()
-        self.revertButton.pack()
-        self.playButton.pack()
        
         
     def SetAudio(self, audio):
         self.audio = audio
         self.trackInfo = audio.GetTrackInfo()
         self.titleLabel.configure(text=f"Info for {audio.GetId()}.wem")
-        self.revertButton.configure(command=partial(self.RevertFunc, audio.GetShortId()))
+        #self.revertButton.configure(command=partial(self.RevertFunc, audio.GetShortId()))
         self.playButton.configure(text= '\u23f5')
+        self.revertButton.pack_forget()
+        self.playButton.pack_forget()
+        self.applyButton.pack_forget()
         def resetButtonIcon(button):
             button.configure(text= '\u23f5')
         def pressButton(button, fileID, callback):
@@ -1822,7 +1865,10 @@ class AudioSourceWindow:
             self.startOffsetText.pack()
             self.endOffsetLabel.pack()
             self.endOffsetText.pack()
-            self.button.pack()
+        self.revertButton.pack(side="left")
+        self.playButton.pack(side="left")
+        if self.trackInfo is not None:
+            self.applyButton.pack(side="left")
         else:
             self.playAtLabel.forget()
             self.playAtText.forget()
@@ -1832,14 +1878,24 @@ class AudioSourceWindow:
             self.startOffsetText.forget()
             self.endOffsetLabel.forget()
             self.endOffsetText.forget()
-            self.button.forget()
+            self.applyButton.forget()
+            
+    def Revert(self):
+        self.audio.RevertModifications()
+        self.trackInfo.RevertModifications()
+        if self.trackInfo is not None:
+            self.playAtText.delete(0, 'end')
+            self.durationText.delete(0, 'end')
+            self.startOffsetText.delete(0, 'end')
+            self.endOffsetText.delete(0, 'end')
+            self.playAtText.insert(END, f"{self.trackInfo.playAt}")
+            self.durationText.insert(END, f"{self.trackInfo.sourceDuration}")
+            self.startOffsetText.insert(END, f"{self.trackInfo.beginTrimOffset}")
+            self.endOffsetText.insert(END, f"{self.trackInfo.endTrimOffset}")
         
     def ApplyChanges(self):
         newTrackInfo = copy.deepcopy(self.trackInfo)
-        newTrackInfo.playAt = float(self.playAtTextVar.get())
-        newTrackInfo.beginTrimOffset = float(self.startOffsetTextVar.get())
-        newTrackInfo.endTrimOffset = float(self.endOffsetTextVar.get())
-        newTrackInfo.sourceDuration = float(self.durationTextVar.get())
+        newTrackInfo.SetData(playAt=float(self.playAtTextVar.get()), beginTrimOffset=float(self.startOffsetTextVar.get()), endTrimOffset=float(self.endOffsetTextVar.get()), sourceDuration=float(self.durationTextVar.get()))
         self.audio.SetTrackInfo(newTrackInfo)
         self.trackInfo = newTrackInfo
         
@@ -1871,8 +1927,8 @@ class EventWindow:
         
         self.endOffsetLabel = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
         self.endOffsetText = Entry(self.frame, textvariable=self.endOffsetTextVar, font=('Segoe UI', 12), width=50)
-        
-        self.button = ttk.Button(self.frame, text="Apply", command=self.ApplyChanges)
+        self.revertButton = ttk.Button(self.frame, text="Revert", command=self.Revert)
+        self.applyButton = ttk.Button(self.frame, text="Apply", command=self.ApplyChanges)
         
         self.titleLabel.pack()
         
@@ -1884,7 +1940,8 @@ class EventWindow:
         self.startOffsetText.pack()
         self.endOffsetLabel.pack()
         self.endOffsetText.pack()
-        self.button.pack()
+        self.revertButton.pack(side="left")
+        self.applyButton.pack(side="left")
         
     def SetTrackInfo(self, trackInfo):
         self.titleLabel.configure(text=f"Info for Event {trackInfo.GetId()}")
@@ -1898,11 +1955,19 @@ class EventWindow:
         self.startOffsetText.insert(END, f"{self.trackInfo.beginTrimOffset}")
         self.endOffsetText.insert(END, f"{self.trackInfo.endTrimOffset}")
         
+    def Revert(self):
+        self.trackInfo.RevertModifications()
+        self.playAtText.delete(0, 'end')
+        self.durationText.delete(0, 'end')
+        self.startOffsetText.delete(0, 'end')
+        self.endOffsetText.delete(0, 'end')
+        self.playAtText.insert(END, f"{self.trackInfo.playAt}")
+        self.durationText.insert(END, f"{self.trackInfo.sourceDuration}")
+        self.startOffsetText.insert(END, f"{self.trackInfo.beginTrimOffset}")
+        self.endOffsetText.insert(END, f"{self.trackInfo.endTrimOffset}")
+        
     def ApplyChanges(self):
-        self.trackInfo.playAt = float(self.playAtTextVar.get())
-        self.trackInfo.beginTrimOffset = float(self.startOffsetTextVar.get())
-        self.trackInfo.endTrimOffset = float(self.endOffsetTextVar.get())
-        self.trackInfo.sourceDuration = float(self.durationTextVar.get())
+        self.trackInfo.SetData(playAt=float(self.playAtTextVar.get()), beginTrimOffset=float(self.startOffsetTextVar.get()), endTrimOffset=float(self.endOffsetTextVar.get()), sourceDuration=float(self.durationTextVar.get()))
 
 class MainWindow:
 
@@ -1978,6 +2043,13 @@ class MainWindow:
         self.viewMenu.add_radiobutton(label="Sources", variable=self.currentView, value="SourceView", command=self.CreateSourceView)
         self.viewMenu.add_radiobutton(label="Hierarchy", variable=self.currentView, value="HierarchyView", command=self.CreateHierarchyView)
         
+        self.currentLanguage = StringVar()
+        self.currentLanguage.set("English (US)")
+        self.optionsMenu = Menu(self.menu, tearoff=0)
+        self.languageMenu = Menu(self.optionsMenu, tearoff=0)
+        self.optionsMenu.add_cascade(label="Game Text Language", menu=self.languageMenu)
+        for language in _LANGUAGE_MAPPING:
+            self.languageMenu.add_radiobutton(label=language, variable=self.currentLanguage, value=language, command=self.SetLanguage)
         
         self.fileMenu = Menu(self.menu, tearoff=0)
         self.fileMenu.add_command(label="Load Archive", command=self.LoadArchive)
@@ -1998,6 +2070,7 @@ class MainWindow:
         self.menu.add_cascade(label="Edit", menu=self.editMenu)
         self.menu.add_cascade(label="Dump", menu=self.dumpMenu)
         self.menu.add_cascade(label="View", menu=self.viewMenu)
+        self.menu.add_cascade(label="Options", menu=self.optionsMenu)
         self.root.config(menu=self.menu)
         self.treeview.bind_all("<Button-3>", self._on_rightclick)
         self.searchBar.bind("<Return>", self._on_enter)
@@ -2014,6 +2087,16 @@ class MainWindow:
     def PlayAudioDoubleClick(self, event):
         if len(self.treeview.selection()) == 1 and self.treeview.item(self.treeview.selection())['values'][0] == "Audio Source":
             self.PlayAudio(self.treeview.item(self.treeview.selection())['tags'][0])
+            
+    def SetLanguage(self):
+        global _LANGUAGE
+        oldLanguage = _LANGUAGE
+        _LANGUAGE = LanguageLookup(self.currentLanguage.get())
+        if _LANGUAGE != oldLanguage:
+            if self.currentView.get() == "SourceView":
+                self.CreateSourceView()
+            else:
+                self.CreateHierarchyView()
     
     def SearchDown(self):
         if len(self.searchResults) > 0:
@@ -2040,7 +2123,7 @@ class MainWindow:
         for child in self.entryInfoPanel.winfo_children():
             child.forget()
         if _type == "String":
-            self.stringInfoWindow.SetStringEntry(self.fileHandler.GetStringEntryByID(self.treeview.item(self.treeview.selection())['tags'][0])
+            self.stringInfoWindow.SetStringEntry(self.fileHandler.GetStringEntryByID(self.treeview.item(self.treeview.selection())['tags'][0]))
             self.stringInfoWindow.frame.pack()
         elif _type == "Audio Source":
             self.audioInfoWindow.SetAudio(self.fileHandler.GetAudioByID(self.treeview.item(self.treeview.selection())['tags'][0]))
@@ -2097,12 +2180,13 @@ class MainWindow:
             self.fileHandler.DumpMultipleAsWav([self.treeview.item(i)['tags'][0] for i in self.treeview.selection()])
         
     def CreateTableRow(self, entry, parentItem=""):
+        if entry is None: return
         treeEntry = self.treeview.insert(parentItem, END, tag=entry.GetId())
         if isinstance(entry, WwiseBank):
             name = entry.Dep.Data.split('/')[-1]
             self.bankItems[entry.GetId()] = treeEntry
             _type = "Sound Bank"
-        elif isinstance(entry, TextData):
+        elif isinstance(entry, TextBank):
             name = f"{entry.GetId()}.text"
             self.stringFileItems[entry.GetId()] = treeEntry
             _type = "Text Bank"
@@ -2147,10 +2231,11 @@ class MainWindow:
                 elif isinstance(hierEntry, Sound):
                     if hierEntry.sources[0].pluginId == 0x00040001:
                         self.CreateTableRow(self.fileHandler.GetAudioByID(hierEntry.sources[0].sourceId), bankEntry)
-        for entry in self.fileHandler.GetStrings().values():
-            e = self.CreateTableRow(entry)
-            for stringEntry in entry.StringEntries.values():
-                self.CreateTableRow(stringEntry, e)
+        for entry in self.fileHandler.FileReader.TextBanks.values():
+            if entry.Language == _LANGUAGE:
+                e = self.CreateTableRow(entry)
+                for stringId in entry.StringIds:
+                    self.CreateTableRow(self.fileHandler.FileReader.StringEntries[_LANGUAGE][stringId], e)
                 
     def CreateSourceView(self):
         self.ClearSearch()
@@ -2162,10 +2247,11 @@ class MainWindow:
                 for source in hierEntry.sources:
                     if source.pluginId == 0x00040001:
                         self.CreateTableRow(self.fileHandler.GetAudioByID(source.sourceId), bankEntry)
-        for entry in self.fileHandler.GetStrings().values():
-            e = self.CreateTableRow(entry)
-            for stringEntry in entry.StringEntries.values():
-                self.CreateTableRow(stringEntry, e)
+        for entry in self.fileHandler.FileReader.TextBanks.values():
+            if entry.Language == _LANGUAGE:
+                e = self.CreateTableRow(entry)
+                for stringId in entry.StringIds:
+                    self.CreateTableRow(self.fileHandler.FileReader.StringEntries[_LANGUAGE][stringId], e)
                 
     def RecurSearch(self, searchText, item):
         s = self.treeview.item(item)['text']
@@ -2255,4 +2341,6 @@ if __name__ == "__main__":
     soundHandler = SoundHandler()
     fileHandler = FileHandler()
     atexit.register(exitHandler)
+    LoadLanguageMapping()
     window = MainWindow(fileHandler, soundHandler)
+    window.SetLanguage()
