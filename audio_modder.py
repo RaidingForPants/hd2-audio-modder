@@ -1392,6 +1392,48 @@ class FileHandler:
             f.write(self.GetAudioByID(fileID).GetData())
         subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
         os.remove(f"{savePath}.wem")
+        
+    def DumpMultipleAsWem(self, fileIDs):
+        folder = filedialog.askdirectory(title="Select folder to save files to")
+        
+        progressWindow = ProgressWindow(title="Dumping Files", maxProgress=len(fileIDs))
+        progressWindow.Show()
+        
+        if os.path.exists(folder):
+            for fileID in fileIDs:
+                audio = self.GetAudioByID(fileID)
+                if audio is not None:
+                    savePath = os.path.join(folder, f"{audio.GetId()}")
+                    progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wem")
+                    with open(savePath+".wem", "wb") as f:
+                        f.write(audio.GetData())
+                progressWindow.Step()
+        else:
+            print("Invalid folder selected, aborting dump")
+            
+        progressWindow.Destroy()
+        
+    def DumpMultipleAsWav(self, fileIDs):
+        folder = filedialog.askdirectory(title="Select folder to save files to")
+        
+        progressWindow = ProgressWindow(title="Dumping Files", maxProgress=len(fileIDs))
+        progressWindow.Show()
+        
+        if os.path.exists(folder):
+            for fileID in fileIDs:
+                audio = self.GetAudioByID(fileID)
+                if audio is not None:
+                    savePath = os.path.join(folder, f"{audio.GetId()}")
+                    progressWindow.SetText("Dumping " + os.path.basename(savePath) + ".wem")
+                    with open(savePath+".wem", "wb") as f:
+                        f.write(audio.GetData())
+                    subprocess.run(["vgmstream-win64/vgmstream-cli.exe", "-o", f"{savePath}.wav", f"{savePath}.wem"], stdout=subprocess.DEVNULL)
+                    os.remove(f"{savePath}.wem")
+                progressWindow.Step()
+        else:
+            print("Invalid folder selected, aborting dump")
+            
+        progressWindow.Destroy()
 
     def DumpAllAsWem(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
@@ -1639,8 +1681,10 @@ class AudioSourceWindow:
         self.RevertFunc = revertFunc
         self.PlayFunc = playFunc
         self.titleLabel = Label(self.frame, background="white", font=('Segoe UI', 14))
-        self.revertButton = Button(self.frame, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
-        self.playButton = Button(self.frame, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        #self.revertButton = ttk.Button(self.frame, text='\u21b6', fg='black', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        self.revertButton = ttk.Button(self.frame, text='\u21b6', image=self.fakeImage, compound='c', width=2)
+        #self.playButton = Button(self.frame, text= '\u23f5', fg='green', font=('Arial', 14, 'bold'), image=self.fakeImage, compound='c', height=20, width=20)
+        self.playButton = ttk.Button(self.frame, text= '\u23f5', image=self.fakeImage, compound='c', width=2)
         self.playAtTextVar = tkinter.StringVar(self.frame)
         self.durationTextVar = tkinter.StringVar(self.frame)
         self.startOffsetTextVar = tkinter.StringVar(self.frame)
@@ -1673,14 +1717,14 @@ class AudioSourceWindow:
         self.trackInfo = audio.GetTrackInfo()
         self.titleLabel.configure(text=f"Info for {audio.GetId()}.wem")
         self.revertButton.configure(command=partial(self.RevertFunc, audio.GetShortId()))
-        self.playButton.configure(text= '\u23f5', fg='green')
+        self.playButton.configure(text= '\u23f5')
         def resetButtonIcon(button):
-            button.configure(text= '\u23f5', fg='green')
+            button.configure(text= '\u23f5')
         def pressButton(button, fileID, callback):
             if button['text'] == '\u23f9':
-                button.configure(text= '\u23f5', fg='green')
+                button.configure(text= '\u23f5')
             else:
-                button.configure(text= '\u23f9', fg='red')
+                button.configure(text= '\u23f9')
             self.PlayFunc(fileID, callback)
         self.playButton.configure(command=partial(pressButton, self.playButton, audio.GetShortId(), partial(resetButtonIcon, self.playButton)))
         if self.trackInfo is not None:
@@ -1804,27 +1848,35 @@ class MainWindow:
         self.searchBar = Entry(self.titleCanvas, textvariable=self.searchText, font=('Arial', 16))
         self.titleCanvas.pack(side="top")
         
-        self.titleCanvas.create_text(WINDOW_WIDTH-275, 0, text="\u2315", fill='gray', font=('Arial', 20), anchor='nw')
-        self.titleCanvas.create_window(WINDOW_WIDTH-250, 3, window=self.searchBar, anchor='nw')
+        self.upButton = ttk.Button(self.titleCanvas, text='^', image=self.fakeImage, compound='c', width=2, command=self.SearchUp)
+        self.downButton = ttk.Button(self.titleCanvas, text='v', image=self.fakeImage, compound='c', width=2, command=self.SearchDown)
+        
+        self.searchLabel = ttk.Label(self.titleCanvas, background="white", width=10, font=('Segoe UI', 12), justify="center")
+        
+        self.titleCanvas.create_text(WINDOW_WIDTH-425, 0, text="\u2315", fill='gray', font=('Arial', 20), anchor='nw')
+        self.titleCanvas.create_window(WINDOW_WIDTH-350, 3, window=self.searchBar, anchor='nw')
+        self.titleCanvas.create_window(WINDOW_WIDTH-375, 5, window=self.upButton, anchor='nw')
+        self.titleCanvas.create_window(WINDOW_WIDTH-400, 5, window=self.downButton, anchor='nw')
+        self.titleCanvas.create_window(WINDOW_WIDTH-100, 5, window=self.searchLabel, anchor='nw')
 
         self.scrollBar = Scrollbar(self.root, orient=VERTICAL)
-        self.mainCanvas = Canvas(self.root, width=WINDOW_WIDTH, height=WINDOW_HEIGHT)
         
         self.titleCanvas.pack(side="top")
-        #self.mainCanvas.pack(side="left")
         
         self.detached_items = []
+        self.searchResults = []
+        self.searchResultIndex = 0
         
         self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
         self.treeview.pack(side="left")
         self.scrollBar.pack(side="left", fill="y")
         self.treeview.heading("#0", text="File")
-        self.treeview.column("#0", width=300)
-        self.treeview.column("type", width=200)
+        self.treeview.column("#0", width=250)
+        self.treeview.column("type", width=100)
         self.treeview.heading("type", text="Type")
         self.treeview.configure(yscrollcommand=self.scrollBar.set)
         self.treeview.bind("<<TreeviewSelect>>", self.ShowInfoWindow)
-        #self.treeview.bind("<Double-Button-1>", self.ShowInfoWindow)
+        self.treeview.bind("<Double-Button-1>", self.PlayAudioDoubleClick)
         self.scrollBar['command'] = self.treeview.yview
         
         self.entryInfoPanel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
@@ -1841,10 +1893,12 @@ class MainWindow:
 
         self.menu = Menu(self.root, tearoff=0)
         
+        self.currentView = StringVar()
+        self.currentView.set("SourceView")
         self.viewMenu = Menu(self.menu, tearoff=0)
-        self.viewMenu.add_radiobutton(label="Sources", command=self.CreateSourceView)
-        self.viewMenu.add_radiobutton(label="Hierarchy", command=self.CreateHierarchyView)
-        self.currentView = "SourceView"
+        self.viewMenu.add_radiobutton(label="Sources", variable=self.currentView, value="SourceView", command=self.CreateSourceView)
+        self.viewMenu.add_radiobutton(label="Hierarchy", variable=self.currentView, value="HierarchyView", command=self.CreateHierarchyView)
+        
         
         self.fileMenu = Menu(self.menu, tearoff=0)
         self.fileMenu.add_command(label="Load Archive", command=self.LoadArchive)
@@ -1852,8 +1906,6 @@ class MainWindow:
         self.fileMenu.add_command(label="Write Patch", command=self.WritePatch)
         self.fileMenu.add_command(label="Import Patch File", command=self.LoadPatch)
         self.fileMenu.add_command(label="Import .wems", command=self.LoadWems)
-        #self.wemsMenu = Menu(self.fileMenu, tearoff=0)
-        #self.fileMenu.add_cascade(label="Import .wems", menu=self.wemsMenu)
         
         
         self.editMenu = Menu(self.menu, tearoff=0)
@@ -1868,8 +1920,7 @@ class MainWindow:
         self.menu.add_cascade(label="Dump", menu=self.dumpMenu)
         self.menu.add_cascade(label="View", menu=self.viewMenu)
         self.root.config(menu=self.menu)
-        self.root.bind_all("<MouseWheel>", self._on_mousewheel)
-        #self.mainCanvas.bind_all("<Button-3>", self._on_rightclick)
+        self.treeview.bind_all("<Button-3>", self._on_rightclick)
         self.searchBar.bind("<Return>", self._on_enter)
         self.root.resizable(False, False)
         self.root.mainloop()
@@ -1881,13 +1932,31 @@ class MainWindow:
         if len(self.treeview.selection()) == 1:
             print(self.treeview.item(self.treeview.selection()))
             
-    def SetSourceView(self):
-        pass
-        
-    def SetHierarchyView(self):
-        pass
-            
+    def PlayAudioDoubleClick(self, event):
+        if len(self.treeview.selection()) == 1 and self.treeview.item(self.treeview.selection())['values'][0] == "Audio Source":
+            self.PlayAudio(self.treeview.item(self.treeview.selection())['tags'][0])
+    
+    def SearchDown(self):
+        if len(self.searchResults) > 0:
+            self.searchResultIndex += 1
+            if self.searchResultIndex == len(self.searchResults):
+                self.searchResultIndex = 0
+            self.treeview.selection_set(self.searchResults[self.searchResultIndex])
+            self.treeview.see(self.searchResults[self.searchResultIndex])
+            self.searchLabel['text'] = f"{self.searchResultIndex+1}/{len(self.searchResults)}"
+
+    def SearchUp(self):
+        if len(self.searchResults) > 0:
+            self.searchResultIndex -= 1
+            if self.searchResultIndex == -1:
+                self.searchResultIndex = len(self.searchResults)-1
+            self.treeview.selection_set(self.searchResults[self.searchResultIndex])
+            self.treeview.see(self.searchResults[self.searchResultIndex])
+            self.searchLabel['text'] = f"{self.searchResultIndex+1}/{len(self.searchResults)}"
+
     def ShowInfoWindow(self, event):
+        if len(self.treeview.selection()) != 1:
+            return
         _type = self.treeview.item(self.treeview.selection())['values'][0]
         for child in self.entryInfoPanel.winfo_children():
             child.forget()
@@ -1901,26 +1970,22 @@ class MainWindow:
             self.eventInfoWindow.frame.pack()
         elif _type == "Music Track":
             pass
+        elif _type == "Sound Bank":
+            pass
+        elif _type == "Text Bank":
+            pass
         
     def _on_rightclick(self, event):
         try:
-            canvas = event.widget
+            types = {self.treeview.item(i)['values'][0] for i in self.treeview.selection()}
             self.rightClickMenu.delete(0, "end")
-            tags = canvas.gettags("current")
-            self.rightClickID = int(tags[0])
-            if "bank" in tags:
-                self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
-                self.rightClickMenu.tk_popup(event.x_root, event.y_root)
-            elif "audio" in tags:
-                self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
-                self.rightClickMenu.add_command(label="Dump As .wem", command=self.DumpAsWem)
-                self.rightClickMenu.add_command(label="Dump As .wav", command=self.DumpAsWav)
-                if "track" in tags:
-                    self.rightClickMenu.add_command(label="Change Track Info", command=self.CreateTrackInfoWindow)
-                self.rightClickMenu.tk_popup(event.x_root, event.y_root)
-            elif "text" in tags:
-                self.rightClickMenu.add_command(label="Copy File ID", command=self.CopyID)
-                self.rightClickMenu.tk_popup(event.x_root, event.y_root)
+            self.rightClickID = self.treeview.item(self.treeview.selection()[-1])['tags'][0]
+            print(self.rightClickID)
+            self.rightClickMenu.add_command(label="Copy File ID" if len(self.treeview.selection()) == 1 else "Copy File IDs", command=self.CopyID)
+            if "Audio Source" in types:
+                self.rightClickMenu.add_command(label="Dump As .wem" if len(self.treeview.selection()) == 1 else "Dump Selected As .wem", command=self.DumpAsWem)
+                self.rightClickMenu.add_command(label="Dump As .wav" if len(self.treeview.selection()) == 1 else "Dump Selected As .wav", command=self.DumpAsWav)
+            self.rightClickMenu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
             pass
         finally:
@@ -1934,30 +1999,22 @@ class MainWindow:
         else:
             print("No track info available\n")
             
-    def SetTrackInfo(self):
-        pass
-        
-    def CreateTrackInfoWindow(self):
-        audio = self.fileHandler.GetAudioByID(self.rightClickID)
-        window = TrackInfoWindow(audio)
-        window.Show()
-        window.root.wait_window(window.root)
-        print("T")
-        self.UpdateTableEntries()
-            
     def CopyID(self):
         self.root.clipboard_clear()
-        self.root.clipboard_append(self.rightClickID)
+        self.root.clipboard_append("\n".join([f"{self.treeview.item(i)['tags'][0]}" for i in self.treeview.selection()]))
         self.root.update()
         
     def DumpAsWem(self):
-        self.fileHandler.DumpAsWem(self.rightClickID)
+        if len(self.treeview.selection()) == 1:
+            self.fileHandler.DumpAsWem(self.rightClickID)
+        else:
+            self.fileHandler.DumpMultipleAsWem([self.treeview.item(i)['tags'][0] for i in self.treeview.selection()])
         
     def DumpAsWav(self):
-        self.fileHandler.DumpAsWav(self.rightClickID)
-        
-    def _on_mousewheel(self, event):
-        self.mainCanvas.yview_scroll(int(-1*(event.delta/120)), 'units')
+        if len(self.treeview.selection()) == 1:
+            self.fileHandler.DumpAsWav(self.rightClickID)
+        else:
+            self.fileHandler.DumpMultipleAsWav([self.treeview.item(i)['tags'][0] for i in self.treeview.selection()])
         
     def CreateTableRow(self, entry, parentItem=""):
         treeEntry = self.treeview.insert(parentItem, END, tag=entry.GetId())
@@ -1985,9 +2042,15 @@ class MainWindow:
         self.treeview.item(treeEntry, text=name)
         self.treeview.item(treeEntry, values=(_type,))
         return treeEntry
+        
+    def ClearSearch(self):
+        self.searchResultIndex = 0
+        self.searchResults.clear()
+        self.searchLabel['text'] = ""
+        self.searchText.set("")
             
     def CreateHierarchyView(self):
-        self.currentView = "HierarchyView"
+        self.ClearSearch()
         self.treeview.delete(*self.treeview.get_children())
         bankDict = self.fileHandler.GetWwiseBanks()
         for bank in bankDict.values():
@@ -2010,7 +2073,7 @@ class MainWindow:
                 self.CreateTableRow(stringEntry, e)
                 
     def CreateSourceView(self):
-        self.currentView = "SourceView"
+        self.ClearSearch()
         self.treeview.delete(*self.treeview.get_children())
         bankDict = self.fileHandler.GetWwiseBanks()
         for bank in bankDict.values():
@@ -2028,39 +2091,42 @@ class MainWindow:
         s = self.treeview.item(item)['text']
         match = s.startswith(searchText) or s.endswith(searchText)
         children = self.treeview.get_children(item)
+        if match: self.searchResults.append(item)
         if len(children) == 0:
-            if not match:
-                self.detached_items.append((item, self.treeview.parent(item), self.treeview.index(item)))
-                self.treeview.detach(item)
             return match
         else:
             for child in children:
                 match = self.RecurSearch(searchText, child) or match
             if match:
                 return True
-            self.detached_items.append((item, self.treeview.parent(item), self.treeview.index(item)))
-            self.treeview.detach(item)
             return False
 
     def Search(self):
-        #if self.currentView == "SourceView":
-        #    self.CreateSourceView()
-        #else:
-        #    self.CreateHierarchyView()
-        for tup in reversed(self.detached_items):
-            self.treeview.reattach(tup[0], tup[1], tup[2])
-        self.detached_items.clear()
+        self.searchResults.clear()
+        self.searchResultIndex = 0
         text = self.searchText.get()
-        for child in self.treeview.get_children():
-            self.RecurSearch(text, child)
+        if text != "":
+            for child in self.treeview.get_children():
+                self.RecurSearch(text, child)
+            if len(self.searchResults) > 0:
+                self.treeview.selection_set(self.searchResults[self.searchResultIndex])
+                self.treeview.see(self.searchResults[self.searchResultIndex])
+                self.searchLabel['text'] = f"1/{len(self.searchResults)}"
+            else:
+                self.searchLabel['text'] = "0/0"
+        else:
+            self.searchLabel['text'] = ""
 
     def LoadArchive(self):
         self.soundHandler.KillSound()
         if self.fileHandler.LoadArchiveFile():
-            if self.currentView == "SourceView":
+            self.ClearSearch()
+            if self.currentView.get() == "SourceView":
                 self.CreateSourceView()
             else:
                 self.CreateHierarchyView()
+            for child in self.entryInfoPanel.winfo_children():
+                child.forget()
             #self.Update()
         
     def SaveArchive(self):
@@ -2070,8 +2136,6 @@ class MainWindow:
     def LoadWems(self):
         self.soundHandler.KillSound()
         self.fileHandler.LoadWems()
-        #self.UpdateTableEntries()
-        #self.Update()
         
     def DumpAllAsWem(self):
         self.soundHandler.KillSound()
@@ -2081,20 +2145,16 @@ class MainWindow:
         self.soundHandler.KillSound()
         self.fileHandler.DumpAllAsWav()
         
-    def PlayAudio(self, fileID, callback):
-        self.soundHandler.PlayAudio(fileID, self.fileHandler.GetAudioByID(fileID).GetData(), callback)
+    def PlayAudio(self, fileID, callback=None):
+        audio = self.fileHandler.GetAudioByID(fileID)
+        self.soundHandler.PlayAudio(audio.GetShortId(), audio.GetData(), callback)
         
     def RevertAudio(self, fileID):
-        self.soundHandler.KillSound()
         self.fileHandler.RevertAudio(fileID)
-        #self.UpdateTableEntries()
-        #self.Update()
         
     def RevertAll(self):
         self.soundHandler.KillSound()
         self.fileHandler.RevertAll()
-        #self.UpdateTableEntries()
-        #self.Update()
         
     def WritePatch(self):
         self.soundHandler.KillSound()
@@ -2104,8 +2164,6 @@ class MainWindow:
         self.soundHandler.KillSound()
         if self.fileHandler.LoadPatch():
             pass
-            #self.UpdateTableEntries()
-            #self.Update()
     
 def exitHandler():
     soundHandler.audio.terminate()
