@@ -30,9 +30,12 @@ WWISE_BANK = 6006249203084351385
 WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
 STRING = 979299457696010195
+LANGUAGE_MAPPING = ({
+    "English (US)" : 0x03f97b57,
+    "English (UK)" : 0x6f4515cb
+})
 
 #"constants" (set once on runtime)
-LANGUAGE_MAPPING = {}
 GAME_FILE_LOCATION = ""
 VGMSTREAM = ""
 
@@ -49,10 +52,6 @@ def look_for_steam_install_windows():
         if os.path.exists(path):
             return path
     return ""
-    
-def load_language_mapping():
-    LANGUAGE_MAPPING["English (US)"] = 0x03f97b57
-    LANGUAGE_MAPPING["English (UK)"] = 0x6f4515cb 
     
 def language_lookup(langString):
     return LANGUAGE_MAPPING[langString]
@@ -1996,7 +1995,7 @@ class MainWindow:
             self.language_menu.add_radiobutton(label=language, variable=self.selected_language, value=language, command=self.set_language)
         
         self.file_menu = Menu(self.menu, tearoff=0)
-        self.file_menu.add_command(label="load Archive", command=self.load_archive)
+        self.file_menu.add_command(label="Load Archive", command=self.load_archive)
         self.file_menu.add_command(label="Save Archive", command=self.save_archive)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Import Patch File", command=self.load_patch)
@@ -2252,8 +2251,6 @@ class MainWindow:
         self.sound_handler.kill_sound()
         if self.file_handler.load_patch():
             pass
-    
-load_language_mapping()
 
 if __name__ == "__main__":
     system = platform.system()
