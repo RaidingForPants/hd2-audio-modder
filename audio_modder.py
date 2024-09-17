@@ -2090,7 +2090,7 @@ class MainWindow:
             pass
         elif selection_type == "Sound Bank":
             pass
-        elif selection_type == "text Bank":
+        elif selection_type == "Text Bank":
             pass
 
     def copy_id(self):
@@ -2118,7 +2118,7 @@ class MainWindow:
             entryType = "Sound Bank"
         elif isinstance(entry, TextBank):
             name = f"{entry.get_id()}.text"
-            entryType = "text Bank"
+            entryType = "Text Bank"
         elif isinstance(entry, AudioSource):
             name = f"{entry.get_id()}.wem"
             entryType = "Audio Source"
@@ -2264,6 +2264,7 @@ if __name__ == "__main__":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
     elif system == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
+    language = language_lookup("English (US)")
     sound_handler = SoundHandler()
     file_handler = FileHandler()
     window = MainWindow(file_handler, sound_handler)
