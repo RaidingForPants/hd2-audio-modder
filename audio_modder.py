@@ -2256,7 +2256,8 @@ class MainWindow:
 load_language_mapping()
 
 if __name__ == "__main__":
-    if "Windows" in platform.platform():
+    system = platform.system()
+    if system == "Windows":
         GAME_FILE_LOCATION = look_for_steam_install_windows()
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
     sound_handler = SoundHandler()
