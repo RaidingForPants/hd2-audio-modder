@@ -1122,7 +1122,7 @@ class FileReader:
                     string_id = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
                     text_bank.string_ids.append(string_id)
                     string_offset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
-                    entry.file_id = string_id
+                    entry.string_id = string_id
                     stopIndex = string_offset + 1
                     while data[stopIndex] != 0:
                         stopIndex += 1
@@ -1413,7 +1413,7 @@ class FileHandler:
         for audio in self.file_reader.audio_sources.values():
             audio.revert_modifications()
         for language in self.file_reader.string_entries.values():
-            for string in language:
+            for string in language.values():
                 string.revert_modifications()
         for track_info in self.file_reader.music_track_events.values():
             track_info.revert_modifications()
@@ -1729,7 +1729,7 @@ class StringEntryWindow:
         self.string_entry = None
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         
-        self.revert_button = ttk.Button(self.frame, text="revert", command=self.revert)
+        self.revert_button = ttk.Button(self.frame, text="Revert", command=self.revert)
         
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         self.text_box.pack()
@@ -1878,7 +1878,7 @@ class EventWindow:
         
         self.end_offset_label = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
         self.end_offset_text = Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=50)
-        self.revert_button = ttk.Button(self.frame, text="revert", command=self.revert)
+        self.revert_button = ttk.Button(self.frame, text="Revert", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack()
@@ -2004,7 +2004,7 @@ class MainWindow:
         
         
         self.edit_menu = Menu(self.menu, tearoff=0)
-        self.edit_menu.add_command(label="revert All Changes", command=self.revert_all)
+        self.edit_menu.add_command(label="Revert All Changes", command=self.revert_all)
         
         self.dump_menu = Menu(self.menu, tearoff=0)
         self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
