@@ -241,8 +241,8 @@ class AudioSource:
     def __init__(self):
         self.data = b""
         self.size = 0
-        self.resourceId = 0
-        self.shortId = 0
+        self.resource_id = 0
+        self.short_id = 0
         self.modified = False
         self.data_OLD = b""
         self.track_info_old = None
@@ -291,10 +291,10 @@ class AudioSource:
         return self.data
         
     def get_resource_id(self):
-        return self.resourceId
+        return self.resource_id
         
     def get_short_id(self):
-        return self.shortId
+        return self.short_id
         
     def revert_modifications(self, notify_subscribers=True):
         if self.modified:
@@ -1051,7 +1051,7 @@ class FileReader:
                 entry.TocData = toc_file.read(toc_header.toc_data_size)
                 stream_file.seek(toc_header.stream_file_offset)
                 audio.set_data(stream_file.read(toc_header.stream_size), notify_subscribers=False, set_modified=False)
-                audio.resourceId = toc_header.file_id
+                audio.resource_id = toc_header.file_id
                 entry.set_content(audio)
                 self.wwise_streams[entry.get_id()] = entry
             elif toc_header.type_id == WWISE_BANK:
@@ -1083,7 +1083,7 @@ class FileReader:
                             if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
                                 audio = AudioSource()
                                 audio.stream_type = BANK
-                                audio.shortId = source.source_id
+                                audio.short_id = source.source_id
                                 audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
                                 self.audio_sources[source.source_id] = audio
                 
@@ -1132,7 +1132,7 @@ class FileReader:
         
         
         #checks for backwards compatibility with patches created in older version(s) of the tool
-        #that didn't save data needed for computing resourceId hashes
+        #that didn't save data needed for computing resource_id hashes
         for bank in self.wwise_banks.values():
             if bank.dep == None: #can be None because older versions didn't save the dep along with the bank
                 if not self.load_deps():
@@ -1153,7 +1153,7 @@ class FileReader:
                 self.audio_sources.clear()
                 return
         
-        #Add all stream entries to the AudioSource list, using their shortId (requires mapping via the dep)
+        #Add all stream entries to the AudioSource list, using their short_id (requires mapping via the dep)
         for bank in self.wwise_banks.values():
             for entry in bank.hierarchy.entries.values():
                 for source in entry.sources:
@@ -1161,7 +1161,7 @@ class FileReader:
                         try:
                             stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
                             audio = self.wwise_streams[stream_resource_id].content
-                            audio.shortId = source.source_id
+                            audio.short_id = source.source_id
                             self.audio_sources[source.source_id] = audio
                         except KeyError:
                             pass
@@ -1541,11 +1541,11 @@ class FileHandler:
             
     def get_audio_by_id(self, file_id):
         try:
-            return self.file_reader.audio_sources[file_id] #shortId
+            return self.file_reader.audio_sources[file_id] #short_id
         except KeyError:
             pass
-        for source in self.file_reader.audio_sources.values(): #resourceId
-            if source.resourceId == file_id:
+        for source in self.file_reader.audio_sources.values(): #resource_id
+            if source.resource_id == file_id:
                 return source
                 
     def get_event_by_id(self, event_id):
