@@ -2260,6 +2260,10 @@ if __name__ == "__main__":
     if system == "Windows":
         GAME_FILE_LOCATION = look_for_steam_install_windows()
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
+    elif system == "Linux":
+        VGMSTREAM = "vgmstream-linux/vgmstream-cli"
+    elif system == "Darwin":
+        VGMSTREAM = "vgmstream-macos/vgmstream-cli"
     sound_handler = SoundHandler()
     file_handler = FileHandler()
     window = MainWindow(file_handler, sound_handler)
