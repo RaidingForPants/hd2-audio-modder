@@ -1335,20 +1335,20 @@ class SoundHandler:
                 pass
             self.audio_process = None
         
-    def play_audio(self, soundId, soundData, callback=None):
+    def play_audio(self, sound_id, sound_data, callback=None):
         self.kill_sound()
         self.callback = callback
-        if self.audio_id == soundId:
+        if self.audio_id == sound_id:
             self.audio_id = -1
             return
-        filename = f"temp{soundId}"
+        filename = f"temp{sound_id}"
         if not os.path.isfile(f"{filename}.wav"):
             with open(f'{filename}.wem', 'wb') as f:
-                f.write(soundData)
+                f.write(sound_data)
             subprocess.run([VGMSTREAM, "-o", f"{filename}.wav", f"{filename}.wem"], stdout=subprocess.DEVNULL)
             os.remove(f"{filename}.wem")
             
-        self.audio_id = soundId
+        self.audio_id = sound_id
         self.wave_file = wave.open(f"{filename}.wav")
         self.audio_file = f"{filename}.wav"
         self.frame_count = 0
