@@ -4,7 +4,6 @@ from tkinter import filedialog
 import os
 import struct
 from math import ceil
-from pathlib import Path
 import tkinter
 from tkinter.filedialog import askdirectory
 from tkinter.filedialog import askopenfilename
@@ -12,7 +11,6 @@ from functools import partial
 import pyaudio
 import wave
 import subprocess
-import atexit
 from itertools import takewhile
 import copy
 import numpy
@@ -2255,9 +2253,7 @@ class MainWindow:
         if self.file_handler.load_patch():
             pass
     
-def exit_handler():
-    sound_handler.audio.terminate()
-    
+load_language_mapping()
 
 if __name__ == "__main__":
     if "Windows" in platform.platform():
@@ -2265,7 +2261,5 @@ if __name__ == "__main__":
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
     sound_handler = SoundHandler()
     file_handler = FileHandler()
-    atexit.register(exit_handler)
-    load_language_mapping()
     window = MainWindow(file_handler, sound_handler)
     window.set_language()
