@@ -271,11 +271,7 @@ class AudioSource:
         else:
             return self.get_resource_id()
             
-<<<<<<< HEAD
     def is_modified(self):
-=======
-    def is_modified(self);
->>>>>>> 1193968354c7010fe274c3adccb3771fad674860
         return self.modified
             
     def set_track_info(self, track_info,  notify_subscribers=True, set_modified=True):
@@ -1687,11 +1683,7 @@ class ProgressWindow:
         self.root.geometry("410x45")
         self.root.attributes('-topmost', True)
         self.progress_bar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.max_progress)
-<<<<<<< HEAD
         self.progress_bar_text = Text(self.root)
-=======
-        self.progress_bar_text = text(self.root)
->>>>>>> 1193968354c7010fe274c3adccb3771fad674860
         self.progress_bar_text.configure(background="white")
         self.progress_bar.pack()
         self.progress_bar_text.pack()
@@ -1979,11 +1971,7 @@ class MainWindow:
         self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
         self.entry_info_panel.pack(side="left", fill="both")
         
-<<<<<<< HEAD
         self.audio_info_panel = AudioSourceWindow(self.entry_info_panel, self.play_audio)
-=======
-        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel, self.revert_audio, self.play_audio)
->>>>>>> 1193968354c7010fe274c3adccb3771fad674860
         self.event_info_panel = EventWindow(self.entry_info_panel)
         self.string_info_panel = StringEntryWindow(self.entry_info_panel)
         
