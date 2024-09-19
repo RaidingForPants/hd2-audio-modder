@@ -414,6 +414,46 @@ class HircEntry:
     def get_data(self):
         return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
         
+class MusicRandomSequence(HircEntry):
+    
+    def __init__(self):
+        super().__init__()
+    
+    @classmethod
+    def from_memory_stream(cls, stream):
+        entry = MusicRandomSequence()
+        entry.hierarchy_type = stream.uint8_read()
+        entry.size = stream.uint32_read()
+        entry.hierarchy_id = stream.uint32_read()
+        return entry
+        
+    def get_data(self):
+        pass
+    
+class MusicSegment(HircEntry):
+
+    def __init__(self):
+        super().__init__()
+    
+    @classmethod
+    def from_memory_stream(cls, stream):
+        entry = MusicSegment()
+        entry.hierarchy_type = stream.uint8_read()
+        entry.size = stream.uint32_read()
+        start_position = stream.tell()
+        entry.hierarchy_id = stream.uint32_read()
+        stream.read(15)
+        n = stream.uint8_read()
+        stream.seek(stream.tell()+ n*9)
+        n = stream.uint8_read()
+        stream.seek(stream.tell()+ n*9)
+        stream.seek(stream.tell()+12)
+        
+        return entry
+        
+    def get_data(self):
+        pass
+        
 class HircEntryFactory:
     
     @classmethod
@@ -2028,7 +2068,7 @@ class MainWindow:
             types = {self.treeview.item(i)['values'][0] for i in self.treeview.selection()}
             self.right_click_menu.delete(0, "end")
             self.right_click_id = self.treeview.item(self.treeview.selection()[-1])['tags'][0]
-            self.right_click_menu.add_command(label="Copy File Id" if len(self.treeview.selection()) == 1 else "Copy File Ids", command=self.copy_id)
+            self.right_click_menu.add_command(label="Copy File ID" if len(self.treeview.selection()) == 1 else "Copy File IDs", command=self.copy_id)
             if "Audio Source" in types:
                 self.right_click_menu.add_command(label="Dump As .wem" if len(self.treeview.selection()) == 1 else "Dump Selected As .wem", command=self.dump_as_wem)
                 self.right_click_menu.add_command(label="Dump As .wav" if len(self.treeview.selection()) == 1 else "Dump Selected As .wav", command=self.dump_as_wav)
@@ -2181,8 +2221,12 @@ class MainWindow:
                     self.create_treeveiw_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
                 
     def recursive_match(self, search_text_var, item):
-        s = self.treeview.item(item)['text']
-        match = s.startswith(search_text_var) or s.endswith(search_text_var)
+        if self.treeview.item(item)['values'][0] == "String":
+            string_entry = self.file_handler.get_string_by_id(self.treeview.item(item)['tags'][0])
+            match = search_text_var in string_entry.get_text()
+        else:
+            s = self.treeview.item(item)['text']
+            match = s.startswith(search_text_var) or s.endswith(search_text_var)
         children = self.treeview.get_children(item)
         if match: self.search_results.append(item)
         if len(children) > 0:
