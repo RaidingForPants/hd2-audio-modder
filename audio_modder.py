@@ -1877,7 +1877,7 @@ class StringEntryWindow:
         self.string_entry = None
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         
-        self.revert_button = ttk.Button(self.frame, text="Revert", command=self.revert)
+        self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         self.text_box.pack()
@@ -2021,7 +2021,7 @@ class MusicSegmentWindow:
         
         self.fade_out_label = Label(self.frame, text="Start fade-out (ms)", background="white", font=('Segoe UI', 12))
         self.fade_out_text = Entry(self.frame, textvariable=self.fade_out_text_var, font=('Segoe UI', 12), width=50)
-        self.revert_button = ttk.Button(self.frame, text="Revert", command=self.revert)
+        self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack()
@@ -2083,7 +2083,7 @@ class EventWindow:
         
         self.end_offset_label = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
         self.end_offset_text = Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=50)
-        self.revert_button = ttk.Button(self.frame, text="Revert", command=self.revert)
+        self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack()
