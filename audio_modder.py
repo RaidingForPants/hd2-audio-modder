@@ -505,8 +505,8 @@ class MusicSegment(HircEntry):
     def set_data(self, duration=None, entry_marker=None, exit_marker=None):
         if not self.modified:
             self.duration_old = self.duration
-            self.entry_marker_old = self.entry_marker
-            self.exit_marker_old = self.exit_marker
+            self.entry_marker_old = self.entry_marker[1]
+            self.exit_marker_old = self.exit_marker[1]
         if duration is not None: self.duration = duration
         if entry_marker is not None: self.entry_marker[1] = entry_marker
         if exit_marker is not None: self.exit_marker[1] = exit_marker
@@ -1740,11 +1740,14 @@ class FileHandler:
                 old_audio = self.get_audio_by_id(new_audio.get_short_id())
                 if old_audio is not None:
                     old_audio.set_data(new_audio.get_data())
-                    old_audio.set_track_info(new_audio.get_track_info())
+                    if old_audio.get_track_info() is not None:
+                        new_track_info = new_audio.get_track_info()
+                        old_audio.get_track_info().set_data(play_at=new_track_info.play_at, begin_trim_offset=new_track_info.begin_trim_offset, end_trim_offset=new_track_info.end_trim_offset, source_duration=new_track_info.source_duration)
+                        old_audio.set_track_info(old_audio.get_track_info())
                 progress_window.step()
             
         for key, music_segment in patch_file_reader.music_segments.items():
-            self.file_reader.music_segments[key] = music_segment
+            self.file_reader.music_segments[key].set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
 
         for text_data in patch_file_reader.text_banks.values():
             for string_id in text_data.string_ids:
