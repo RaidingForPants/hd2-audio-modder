@@ -2373,13 +2373,15 @@ class MainWindow:
                 
     def create_source_view(self):
         self.clear_search()
+        existing_sources = set()
         self.treeview.delete(*self.treeview.get_children())
         bank_dict = self.file_handler.get_wwise_banks()
         for bank in bank_dict.values():
             bank_entry = self.create_treeview_entry(bank)
             for hierarchy_entry in bank.hierarchy.entries.values():
                 for source in hierarchy_entry.sources:
-                    if source.plugin_id == VORBIS:
+                    if source.plugin_id == VORBIS and source.source_id not in existing_sources:
+                        existing_sources.add(source.source_id)
                         self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), bank_entry)
         for entry in self.file_handler.file_reader.text_banks.values():
             if entry.language == language:
