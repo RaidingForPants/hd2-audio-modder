@@ -32,7 +32,21 @@ WWISE_STREAM = 5785811756662211598
 STRING = 979299457696010195
 LANGUAGE_MAPPING = ({
     "English (US)" : 0x03f97b57,
-    "English (UK)" : 0x6f4515cb
+    "English (UK)" : 0x6f4515cb,
+    "Français" : 4271961631,
+    "Português 1": 1861586415,
+    "Português 2": 1244441033,
+    "Polski": 260593578,
+    "日本語": 2427891497,
+    "中文（繁體）": 2663028010,
+    "中文（简体）": 2189905090,
+    "Nederlands": 291057413,
+    "한국어": 3151476177,
+    "Español 1": 830498882,
+    "Español 2": 3854981686,
+    "Deutsch": 3124347884,
+    "Italiano": 3808107213,
+    "Русский": 3317373165
 })
 
 #"constants" (set once on runtime)
@@ -41,6 +55,7 @@ VGMSTREAM = ""
 
 #global variables
 language = 0
+num_segments = 0
 
 
 def look_for_steam_install_windows():
@@ -53,8 +68,11 @@ def look_for_steam_install_windows():
             return path
     return ""
     
-def language_lookup(langString):
-    return LANGUAGE_MAPPING[langString]
+def language_lookup(lang_string):
+    try:
+        return LANGUAGE_MAPPING[lang_string]
+    except:
+        return int(lang_string)
     
 def strip_patch_index(filename):
     split = filename.split(".")
@@ -319,7 +337,7 @@ class TocHeader:
         self.file_id             = stream.uint64_read()
         self.type_id             = stream.uint64_read()
         self.toc_data_offset     = stream.uint64_read()
-        self.stream_file_offset       = stream.uint64_read()
+        self.stream_file_offset  = stream.uint64_read()
         self.gpu_resource_offset = stream.uint64_read()
         self.unknown1            = stream.uint64_read() #seems to contain duplicate entry index
         self.unknown2            = stream.uint64_read()
@@ -434,25 +452,89 @@ class MusicSegment(HircEntry):
 
     def __init__(self):
         super().__init__()
+        self.tracks = []
+        self.duration = 0
+        self.entry_marker = None
+        self.exit_marker = None
+        self.unused_sections = []
+        self.markers = []
+        self.modified = False
     
     @classmethod
     def from_memory_stream(cls, stream):
+        global num_segments
+        num_segments += 1
         entry = MusicSegment()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
         start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
-        stream.read(15)
-        n = stream.uint8_read()
-        stream.seek(stream.tell()+ n*9)
-        n = stream.uint8_read()
-        stream.seek(stream.tell()+ n*9)
-        stream.seek(stream.tell()+12)
-        
+        entry.unused_sections.append(stream.read(15))
+        n = stream.uint8_read() #number of props
+        stream.seek(stream.tell()-1)
+        entry.unused_sections.append(stream.read(5*n + 1))
+        n = stream.uint8_read() #number of props (again)
+        stream.seek(stream.tell()-1)
+        entry.unused_sections.append(stream.read(5*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
+        n = stream.uint32_read() #number of children (tracks)
+        for _ in range(n):
+            entry.tracks.append(stream.uint32_read())
+        entry.unused_sections.append(stream.read(23)) #meter info
+        n = stream.uint32_read() #number of stingers
+        stream.seek(stream.tell()-4)
+        entry.unused_sections.append(stream.read(24*n + 4))
+        entry.duration = struct.unpack("<d", stream.read(8))[0]
+        n = stream.uint32_read() #number of markers
+        for i in range(n):
+            id = stream.uint32_read()
+            position = struct.unpack("<d", stream.read(8))[0]
+            name = []
+            temp = b"1"
+            while temp != b"\x00":
+                temp = stream.read(1)
+                name.append(temp)
+            name = b"".join(name)
+            marker = [id, position, name]
+            entry.markers.append(marker)
+            if i == 0:
+                entry.entry_marker = marker
+            elif i == n-1:
+                entry.exit_marker = marker
         return entry
         
+    def set_data(self, duration=None, entry_marker=None, exit_marker=None):
+        if not self.modified:
+            self.duration_old = self.duration
+            self.entry_marker_old = self.entry_marker
+            self.exit_marker_old = self.exit_marker
+        if duration is not None: self.duration = duration
+        if entry_marker is not None: self.entry_marker[1] = entry_marker
+        if exit_marker is not None: self.exit_marker[1] = exit_marker
+        self.modified = True
+        
+    def revert_modifications(self):
+        if self.modified:
+            self.entry_marker[1] = self.entry_marker_old
+            self.exit_marker[1] = self.exit_marker_old
+            self.duration = self.duration_old
+            self.modified = False
+        
     def get_data(self):
-        pass
+        return (
+            b"".join([
+                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
+                self.unused_sections[0],
+                self.unused_sections[1],
+                self.unused_sections[2],
+                len(self.tracks).to_bytes(4, byteorder="little"),
+                b"".join([x.to_bytes(4, byteorder="little") for x in self.tracks]),
+                self.unused_sections[3],
+                self.unused_sections[4],
+                struct.pack("<d", self.duration),
+                len(self.markers).to_bytes(4, byteorder="little"),
+                b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in self.markers])
+            ])
+        )
         
 class HircEntryFactory:
     
@@ -464,6 +546,8 @@ class HircEntryFactory:
             return Sound.from_memory_stream(stream)
         elif hierarchy_type == 11: #music track
             return MusicTrack.from_memory_stream(stream)
+        elif hierarchy_type == 0x0A: #music segment
+            return MusicSegment.from_memory_stream(stream)
         else:
             return HircEntry.from_memory_stream(stream)
         
@@ -720,7 +804,7 @@ class WwiseBank(Subscriber):
                             if info.source_id == source.source_id:
                                 break
                             count += 1
-                        if audio.get_track_info() is not None:
+                        if audio.get_track_info() is not None: #is this needed?
                             entry.track_info[count] = audio.get_track_info()
                         else:
                             pass
@@ -870,7 +954,7 @@ class TextBank:
         stream.write(self.language.to_bytes(4, byteorder="little"))
         offset = 16 + 8*len(self.string_ids)
         for i in self.string_ids:
-            stream.write(entries[i].file_id.to_bytes(4, byteorder="little"))
+            stream.write(entries[i].get_id().to_bytes(4, byteorder="little"))
         for i in self.string_ids:
             stream.write(offset.to_bytes(4, byteorder="little"))
             initial_position = stream.tell()
@@ -911,6 +995,7 @@ class FileReader:
         self.text_banks = {}
         self.music_track_events = {}
         self.string_entries = {}
+        self.music_segments = {}
         
     def from_file(self, path):
         self.name = os.path.basename(path)
@@ -1066,6 +1151,7 @@ class FileReader:
         self.text_banks.clear()
         self.music_track_events.clear()
         self.string_entries.clear()
+        self.music_segments.clear()
         
         self.magic      = toc_file.uint32_read()
         if self.magic != 4026531857: return False
@@ -1207,6 +1293,8 @@ class FileReader:
                 for info in entry.track_info:
                     if info.event_id != 0:
                         self.music_track_events[info.event_id] = info
+                if isinstance(entry, MusicSegment):
+                    self.music_segments[entry.get_id()] = entry
         
 
         #construct list of audio sources in each bank
@@ -1599,6 +1687,12 @@ class FileHandler:
         except:
             pass
         
+    def get_music_segment_by_id(self, segment_id):
+        try:
+            return self.file_reader.music_segments[segment_id]
+        except:
+            pass
+        
     def get_wwise_streams(self):
         return self.file_reader.wwise_streams
         
@@ -1637,17 +1731,28 @@ class FileHandler:
         progress_window = ProgressWindow(title="Loading Files", max_progress=len(patch_file_reader.audio_sources))
         progress_window.show()
         
+        #TO-DO: Import hierarchy changes
+        
         for bank in patch_file_reader.wwise_banks.values():
+            #load audio content from the patch
             for new_audio in bank.get_content():
                 progress_window.set_text(f"Loading {new_audio.get_id()}")
                 old_audio = self.get_audio_by_id(new_audio.get_short_id())
-                old_audio.set_data(new_audio.get_data())
+                if old_audio is not None:
+                    old_audio.set_data(new_audio.get_data())
+                    old_audio.set_track_info(new_audio.get_track_info())
                 progress_window.step()
+            
+        for key, music_segment in patch_file_reader.music_segments.items():
+            self.file_reader.music_segments[key] = music_segment
 
         for text_data in patch_file_reader.text_banks.values():
             for string_id in text_data.string_ids:
                 new_text_data = patch_file_reader.string_entries[language][string_id]
-                old_text_data = self.file_reader.string_entries[language][string_id]
+                try:
+                    old_text_data = self.file_reader.string_entries[language][string_id]
+                except:
+                    continue
                 old_text_data.set_text(new_text_data.get_text())
         
         progress_window.destroy()
@@ -1666,6 +1771,7 @@ class FileHandler:
             patch_file_reader.audio_sources = self.file_reader.audio_sources
             patch_file_reader.string_entries = self.file_reader.string_entries
             patch_file_reader.music_track_events = self.file_reader.music_track_events
+            patch_file_reader.music_segments = self.file_reader.music_segments
             patch_file_reader.wwise_banks = {}
             patch_file_reader.wwise_streams = {}
             patch_file_reader.text_banks = {}
@@ -1893,6 +1999,63 @@ class AudioSourceWindow:
         self.audio.set_track_info(new_track_info)
         self.track_info = new_track_info
         
+class MusicSegmentWindow:
+    def __init__(self, parent):
+        self.frame = Frame(parent)
+        self.frame.configure(background="white")
+        
+        self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
+
+        self.duration_text_var = tkinter.StringVar(self.frame)
+        self.fade_in_text_var = tkinter.StringVar(self.frame)
+        self.fade_out_text_var = tkinter.StringVar(self.frame)
+        
+        self.duration_label = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
+        
+        self.fade_in_label = Label(self.frame, text="End fade-in (ms)", background="white", font=('Segoe UI', 12))
+        self.fade_in_text = Entry(self.frame, textvariable=self.fade_in_text_var, font=('Segoe UI', 12), width=50)
+        
+        self.fade_out_label = Label(self.frame, text="Start fade-out (ms)", background="white", font=('Segoe UI', 12))
+        self.fade_out_text = Entry(self.frame, textvariable=self.fade_out_text_var, font=('Segoe UI', 12), width=50)
+        self.revert_button = ttk.Button(self.frame, text="Revert", command=self.revert)
+        self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
+        
+        self.title_label.pack()
+        
+        self.duration_label.pack()
+        self.duration_text.pack()
+        self.fade_in_label.pack()
+        self.fade_in_text.pack()
+        self.fade_out_label.pack()
+        self.fade_out_text.pack()
+        self.revert_button.pack(side="left")
+        self.apply_button.pack(side="left")
+        
+    def set_segment_info(self, segment):
+        self.title_label.configure(text=f"Info for Music Segment {segment.get_id()}")
+        self.segment = segment
+        self.duration_text.delete(0, 'end')
+        self.fade_in_text.delete(0, 'end')
+        self.fade_out_text.delete(0, 'end')
+        self.duration_text.insert(END, f"{self.segment.duration}")
+        self.fade_in_text.insert(END, f"{self.segment.entry_marker[1]}")
+        self.fade_out_text.insert(END, f"{self.segment.exit_marker[1]}")
+        
+    def revert(self):
+        self.segment.revert_modifications()
+        self.duration_text.delete(0, 'end')
+        self.fade_in_text.delete(0, 'end')
+        self.fade_out_text.delete(0, 'end')
+        self.duration_text.insert(END, f"{self.segment.duration}")
+        self.fade_in_text.insert(END, f"{self.segment.entry_marker[1]}")
+        self.fade_out_text.insert(END, f"{self.segment.exit_marker[1]}")
+        
+    def apply_changes(self):
+        self.segment.set_data(duration=float(self.duration_text_var.get()), entry_marker=float(self.fade_in_text_var.get()), exit_marker=float(self.fade_out_text_var.get()))
+
+    
+        
 class EventWindow:
 
     def __init__(self, parent):
@@ -2011,6 +2174,7 @@ class MainWindow:
         self.audio_info_panel = AudioSourceWindow(self.entry_info_panel, self.play_audio)
         self.event_info_panel = EventWindow(self.entry_info_panel)
         self.string_info_panel = StringEntryWindow(self.entry_info_panel)
+        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel)
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -2027,12 +2191,8 @@ class MainWindow:
         self.view_menu.add_radiobutton(label="Hierarchy", variable=self.selected_view, value="HierarchyView", command=self.create_hierarchy_view)
         
         self.selected_language = StringVar()
-        self.selected_language.set("English (US)")
         self.options_menu = Menu(self.menu, tearoff=0)
         self.language_menu = Menu(self.options_menu, tearoff=0)
-        self.options_menu.add_cascade(label="Game text Language", menu=self.language_menu)
-        for language in LANGUAGE_MAPPING:
-            self.language_menu.add_radiobutton(label=language, variable=self.selected_language, value=language, command=self.set_language)
         
         self.file_menu = Menu(self.menu, tearoff=0)
         self.file_menu.add_command(label="Load Archive", command=self.load_archive)
@@ -2125,8 +2285,9 @@ class MainWindow:
         elif selection_type == "Event":
             self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
             self.event_info_panel.frame.pack()
-        elif selection_type == "Music Track":
-            pass
+        elif selection_type == "Music Segment":
+            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.segment_info_panel.frame.pack()
         elif selection_type == "Sound Bank":
             pass
         elif selection_type == "Text Bank":
@@ -2149,29 +2310,32 @@ class MainWindow:
         else:
             self.file_handler.dump_multiple_as_wav([self.treeview.item(i)['tags'][0] for i in self.treeview.selection()])
         
-    def create_treeveiw_entry(self, entry, parentItem=""):
+    def create_treeview_entry(self, entry, parentItem=""):
         if entry is None: return
         tree_entry = self.treeview.insert(parentItem, END, tag=entry.get_id())
         if isinstance(entry, WwiseBank):
             name = entry.dep.data.split('/')[-1]
-            entryType = "Sound Bank"
+            entry_type = "Sound Bank"
         elif isinstance(entry, TextBank):
             name = f"{entry.get_id()}.text"
-            entryType = "Text Bank"
+            entry_type = "Text Bank"
         elif isinstance(entry, AudioSource):
             name = f"{entry.get_id()}.wem"
-            entryType = "Audio Source"
+            entry_type = "Audio Source"
         elif isinstance(entry, TrackInfoStruct):
             name = f"Event {entry.get_id()}"
-            entryType = "Event"
+            entry_type = "Event"
         elif isinstance(entry, StringEntry):
-            entryType = "String"
+            entry_type = "String"
             name = entry.get_text()[:20]
         elif isinstance(entry, MusicTrack):
-            entryType = "Music Track"
+            entry_type = "Music Track"
             name = f"Track {entry.get_id()}"
+        elif isinstance(entry, MusicSegment):
+            entry_type = "Music Segment"
+            name = f"Segment {entry.get_id()}"
         self.treeview.item(tree_entry, text=name)
-        self.treeview.item(tree_entry, values=(entryType,))
+        self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
         
     def clear_search(self):
@@ -2185,40 +2349,43 @@ class MainWindow:
         self.treeview.delete(*self.treeview.get_children())
         bank_dict = self.file_handler.get_wwise_banks()
         for bank in bank_dict.values():
-            bank_entry = self.create_treeveiw_entry(bank)
+            bank_entry = self.create_treeview_entry(bank)
             for hierarchy_entry in bank.hierarchy.entries.values():
-                if isinstance(hierarchy_entry, MusicTrack):
-                    track_entry = self.create_treeveiw_entry(hierarchy_entry, bank_entry)
-                    for source in hierarchy_entry.sources:
-                        if source.plugin_id == VORBIS:
-                            self.create_treeveiw_entry(self.file_handler.get_audio_by_id(source.source_id), track_entry)
-                    for info in hierarchy_entry.track_info:
-                        if info.event_id != 0:
-                            self.create_treeveiw_entry(info, track_entry)
+                if isinstance(hierarchy_entry, MusicSegment):
+                    segment_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
+                    for track_id in hierarchy_entry.tracks:
+                        track = bank.hierarchy.entries[track_id]
+                        track_entry = self.create_treeview_entry(track, segment_entry)
+                        for source in track.sources:
+                            if source.plugin_id == VORBIS:
+                                self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), track_entry)
+                        for info in track.track_info:
+                            if info.event_id != 0:
+                                self.create_treeview_entry(info, track_entry)
                 elif isinstance(hierarchy_entry, Sound):
                     if hierarchy_entry.sources[0].plugin_id == VORBIS:
-                        self.create_treeveiw_entry(self.file_handler.get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
+                        self.create_treeview_entry(self.file_handler.get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
         for entry in self.file_handler.file_reader.text_banks.values():
             if entry.language == language:
-                e = self.create_treeveiw_entry(entry)
+                e = self.create_treeview_entry(entry)
                 for string_id in entry.string_ids:
-                    self.create_treeveiw_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
                 
     def create_source_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
         bank_dict = self.file_handler.get_wwise_banks()
         for bank in bank_dict.values():
-            bank_entry = self.create_treeveiw_entry(bank)
+            bank_entry = self.create_treeview_entry(bank)
             for hierarchy_entry in bank.hierarchy.entries.values():
                 for source in hierarchy_entry.sources:
                     if source.plugin_id == VORBIS:
-                        self.create_treeveiw_entry(self.file_handler.get_audio_by_id(source.source_id), bank_entry)
+                        self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), bank_entry)
         for entry in self.file_handler.file_reader.text_banks.values():
             if entry.language == language:
-                e = self.create_treeveiw_entry(entry)
+                e = self.create_treeview_entry(entry)
                 for string_id in entry.string_ids:
-                    self.create_treeveiw_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item)['values'][0] == "String":
@@ -2253,6 +2420,16 @@ class MainWindow:
         self.sound_handler.kill_sound()
         if self.file_handler.load_archive_file():
             self.clear_search()
+            self.options_menu.delete(0, "end") #change to delete only the language select menu
+            if len(self.file_handler.get_strings()) > 0:
+                self.language_menu.delete(0, "end")
+                first = ""
+                self.options_menu.add_cascade(label="Game text language", menu=self.language_menu)
+                for name, lang_id in LANGUAGE_MAPPING.items():
+                    if first == "": first = name
+                    if lang_id in self.file_handler.get_strings():
+                        self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
+                self.selected_language.set(first)
             if self.selected_view.get() == "SourceView":
                 self.create_source_view()
             else:
@@ -2309,4 +2486,4 @@ if __name__ == "__main__":
     sound_handler = SoundHandler()
     file_handler = FileHandler()
     window = MainWindow(file_handler, sound_handler)
-    window.set_language()
+    #window.set_language()
