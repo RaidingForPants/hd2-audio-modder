@@ -1733,14 +1733,14 @@ class FileHandler:
         
         #TO-DO: Import hierarchy changes
         
-        for bank in patch_file_reader.wwise_banks.values():
+        for bank in patch_file_reader.wwise_banks.values(): #something is a bit wrong here
             #load audio content from the patch
             for new_audio in bank.get_content():
                 progress_window.set_text(f"Loading {new_audio.get_id()}")
                 old_audio = self.get_audio_by_id(new_audio.get_short_id())
                 if old_audio is not None:
                     old_audio.set_data(new_audio.get_data())
-                    if old_audio.get_track_info() is not None:
+                    if old_audio.get_track_info() is not None and new_audio.get_track_info() is not None:
                         new_track_info = new_audio.get_track_info()
                         old_audio.get_track_info().set_data(play_at=new_track_info.play_at, begin_trim_offset=new_track_info.begin_trim_offset, end_trim_offset=new_track_info.end_trim_offset, source_duration=new_track_info.source_duration)
                         old_audio.set_track_info(old_audio.get_track_info())
@@ -2466,7 +2466,7 @@ class MainWindow:
         for child in self.treeview.get_children(item):
             self.clear_treeview_background(child)
         
-    def check_modified(self):
+    def check_modified(self): #could be improved: small, but noticeable lag if there are many, many entries in the tree
         for child in self.treeview.get_children():
             self.clear_treeview_background(child)
         for audio in self.file_handler.get_audio().values():
