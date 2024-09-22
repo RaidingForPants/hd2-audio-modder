@@ -1,4 +1,4 @@
-# Audio Modder For Helldivers 2
+# Audio and Text Modder For Helldivers 2
 
 I made this program to help make modding audio data easier.
 
@@ -6,4 +6,4 @@ I made this program to help make modding audio data easier.
 
 Thanks to everyone behind the [Helldivers 2 Blender Addon](https://github.com/Boxofbiscuits97/HD2SDK-CommunityEdition) for letting me use some of their code.
 
-EXE built with PyInstaller and provided for convenience
+EXE built with PyInstaller and provided for convenience. If you are on Linux or MacOS you can run the Python code
