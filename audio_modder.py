@@ -1871,8 +1871,9 @@ class PopupWindow:
         
 class StringEntryWindow:
     
-    def __init__(self, parent):
+    def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
+        self.update_modified = update_modified
         self.text_box = Text(self.frame, width=50, font=('Arial', 8), wrap=WORD)
         self.string_entry = None
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
@@ -1892,17 +1893,20 @@ class StringEntryWindow:
     def apply_changes(self):
         if self.string_entry is not None:
             self.string_entry.set_text(self.text_box.get("1.0", "end-1c"))
+            self.update_modified()
     
     def revert(self):
         if self.string_entry is not None:
             self.string_entry.revert_modifications()
             self.text_box.delete("1.0", END)
             self.text_box.insert(END, self.string_entry.get_text())
+            self.update_modified()
         
 class AudioSourceWindow:
     
-    def __init__(self, parent, play):
+    def __init__(self, parent, play, update_modified):
         self.frame = Frame(parent)
+        self.update_modified = update_modified
         self.frame.configure(background="white")
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.play = play
@@ -1985,8 +1989,8 @@ class AudioSourceWindow:
             
     def revert(self):
         self.audio.revert_modifications()
-        self.track_info.revert_modifications()
         if self.track_info is not None:
+            self.track_info.revert_modifications()
             self.play_at_text.delete(0, 'end')
             self.duration_text.delete(0, 'end')
             self.start_offset_text.delete(0, 'end')
@@ -1995,16 +1999,19 @@ class AudioSourceWindow:
             self.duration_text.insert(END, f"{self.track_info.source_duration}")
             self.start_offset_text.insert(END, f"{self.track_info.begin_trim_offset}")
             self.end_offset_text.insert(END, f"{self.track_info.end_trim_offset}")
+        self.update_modified()
         
     def apply_changes(self):
         new_track_info = copy.deepcopy(self.track_info)
         new_track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
         self.audio.set_track_info(new_track_info)
         self.track_info = new_track_info
+        self.update_modified()
         
 class MusicSegmentWindow:
-    def __init__(self, parent):
+    def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
+        self.update_modified = update_modified
         self.frame.configure(background="white")
         
         self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
@@ -2045,6 +2052,7 @@ class MusicSegmentWindow:
         self.fade_in_text.insert(END, f"{self.segment.entry_marker[1]}")
         self.fade_out_text.insert(END, f"{self.segment.exit_marker[1]}")
         
+        
     def revert(self):
         self.segment.revert_modifications()
         self.duration_text.delete(0, 'end')
@@ -2053,16 +2061,19 @@ class MusicSegmentWindow:
         self.duration_text.insert(END, f"{self.segment.duration}")
         self.fade_in_text.insert(END, f"{self.segment.entry_marker[1]}")
         self.fade_out_text.insert(END, f"{self.segment.exit_marker[1]}")
+        self.update_modified()
         
     def apply_changes(self):
         self.segment.set_data(duration=float(self.duration_text_var.get()), entry_marker=float(self.fade_in_text_var.get()), exit_marker=float(self.fade_out_text_var.get()))
+        self.update_modified()
 
     
         
 class EventWindow:
 
-    def __init__(self, parent):
+    def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
+        self.update_modified = update_modified
         self.frame.configure(background="white")
         
         self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
@@ -2121,9 +2132,11 @@ class EventWindow:
         self.duration_text.insert(END, f"{self.track_info.source_duration}")
         self.start_offset_text.insert(END, f"{self.track_info.begin_trim_offset}")
         self.end_offset_text.insert(END, f"{self.track_info.end_trim_offset}")
+        self.update_modified()
         
     def apply_changes(self):
         self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
+        self.update_modified()
 
 class MainWindow:
 
@@ -2174,10 +2187,10 @@ class MainWindow:
         self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
         self.entry_info_panel.pack(side="left", fill="both")
         
-        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel, self.play_audio)
-        self.event_info_panel = EventWindow(self.entry_info_panel)
-        self.string_info_panel = StringEntryWindow(self.entry_info_panel)
-        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel)
+        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel, self.play_audio, self.check_modified)
+        self.event_info_panel = EventWindow(self.entry_info_panel, self.check_modified)
+        self.string_info_panel = StringEntryWindow(self.entry_info_panel, self.check_modified)
+        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel, self.check_modified)
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -2373,6 +2386,7 @@ class MainWindow:
                 e = self.create_treeview_entry(entry)
                 for string_id in entry.string_ids:
                     self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+        self.check_modified()
                 
     def create_source_view(self):
         self.clear_search()
@@ -2391,6 +2405,7 @@ class MainWindow:
                 e = self.create_treeview_entry(entry)
                 for string_id in entry.string_ids:
                     self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+        self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item)['values'][0] == "String":
@@ -2446,9 +2461,48 @@ class MainWindow:
         self.sound_handler.kill_sound()
         self.file_handler.save_archive_file()
         
+    def clear_treeview_background(self, item):
+        self.treeview.tag_configure(self.treeview.item(item)['tags'][0], background="white")
+        for child in self.treeview.get_children(item):
+            self.clear_treeview_background(child)
+        
+    def check_modified(self):
+        for child in self.treeview.get_children():
+            self.clear_treeview_background(child)
+        for audio in self.file_handler.get_audio().values():
+            self.treeview.tag_configure(audio.get_id(), background="lawn green" if audio.modified or audio.get_track_info() is not None and audio.get_track_info().modified else "white")
+            if audio.modified or audio.get_track_info() is not None and audio.get_track_info().modified:
+                items = self.treeview.tag_has(audio.get_id())
+                for item in items:
+                    parent = self.treeview.parent(item)
+                    while parent != "":
+                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
+                        parent = self.treeview.parent(parent)
+        for event in self.file_handler.file_reader.music_track_events.values():
+            self.treeview.tag_configure(event.get_id(), background="lawn green" if event.modified else "white")
+            if event.modified:
+                items = self.treeview.tag_has(event.get_id())
+                for item in items:
+                    parent = self.treeview.parent(item)
+                    while parent != "":
+                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
+                        parent = self.treeview.parent(parent)
+        try:
+            for string in self.file_handler.get_strings()[language].values():
+                self.treeview.tag_configure(string.get_id(), background="lawn green" if string.modified else "white")
+                if string.modified:
+                    item = self.treeview.tag_has(string.get_id())
+                    parent = self.treeview.parent(item)
+                    while parent != "":
+                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
+                        parent = self.treeview.parent(parent)
+        except KeyError:
+            pass
+        
     def load_wems(self):
         self.sound_handler.kill_sound()
         self.file_handler.load_wems()
+        self.check_modified()
         
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
@@ -2468,6 +2522,7 @@ class MainWindow:
     def revert_all(self):
         self.sound_handler.kill_sound()
         self.file_handler.revert_all()
+        self.check_modified()
         
     def write_patch(self):
         self.sound_handler.kill_sound()
@@ -2476,7 +2531,7 @@ class MainWindow:
     def load_patch(self):
         self.sound_handler.kill_sound()
         if self.file_handler.load_patch():
-            pass
+            self.check_modified()
 
 if __name__ == "__main__":
     system = platform.system()
