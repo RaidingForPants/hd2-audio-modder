@@ -1544,6 +1544,8 @@ class FileHandler:
                 string.revert_modifications()
         for track_info in self.file_reader.music_track_events.values():
             track_info.revert_modifications()
+        for music_segment in self.file_reader.music_segments.values():
+            music_segment.revert_modifications()
         
     def revert_audio(self, file_id):
         audio = self.get_audio_by_id(file_id)
@@ -1781,16 +1783,16 @@ class FileHandler:
             
             for key, value in self.file_reader.wwise_streams.items():
                 if value.content.modified:
-                    patch_file_reader.wwise_streams[key] = copy.deepcopy(value)
+                    patch_file_reader.wwise_streams[key] = value
                     
             for key, value in self.file_reader.wwise_banks.items():
                 if value.modified:
-                    patch_file_reader.wwise_banks[key] = copy.deepcopy(value)
+                    patch_file_reader.wwise_banks[key] = value
                     
             for key, value in self.file_reader.text_banks.items():
                 for string_id in value.string_ids:
                     if self.file_reader.string_entries[value.language][string_id].modified:
-                        patch_file_reader.text_banks[key] = copy.deepcopy(value)
+                        patch_file_reader.text_banks[key] = value
                         break
      
             patch_file_reader.rebuild_headers()
