@@ -32,8 +32,3 @@ PortAudio and tkinter must be installed.
 Install the dependencies:
 
 ```python3 -m pip install -r requirements.txt```
-
-### MacOS
-Install Python 3. PortAudio and tkinter must be installed.
-
-```brew install portaudio```
