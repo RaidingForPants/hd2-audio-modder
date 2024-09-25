@@ -16,13 +16,16 @@ import copy
 import numpy
 import platform
 
+import config
+import fileutil
+
 #constants
 MUSIC_TRACK = 11
 SOUND = 2
 BANK = 0
 PREFETCH_STREAM = 1
 STREAM = 2
-WINDOW_WIDTH = 700
+WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
 VORBIS = 0x00040001
 DRIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -1707,8 +1710,9 @@ class FileHandler:
     def get_strings(self):
         return self.file_reader.string_entries
         
-    def load_archive_file(self):
-        archive_file = askopenfilename(title="Select archive")
+    def load_archive_file(self, initial_dir: str | None = None):
+        archive_file = askopenfilename(title="Select archive",
+                                       initialdir=initial_dir)
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         if os.path.exists(archive_file):
@@ -1802,8 +1806,10 @@ class FileHandler:
             return False
         return True
 
-    def load_wems(self): 
-        wems = filedialog.askopenfilenames(title="Choose .wem files to import")
+    def load_wems(self, wems = None): 
+        if wems == None:
+            wems = filedialog.askopenfilenames(
+                    title="Choose .wem files to import")
         
         progress_window = ProgressWindow(title="Loading Files", max_progress=len(wems))
         progress_window.show()
@@ -2142,7 +2148,7 @@ class EventWindow:
 
 class MainWindow:
 
-    def __init__(self, file_handler, sound_handler):
+    def __init__(self, config: config.Config, file_handler, sound_handler):
         self.file_handler = file_handler
         self.sound_handler = sound_handler
         
@@ -2173,6 +2179,10 @@ class MainWindow:
         
         self.search_results = []
         self.search_result_index = 0
+
+        # Workspace
+        self.config = config
+        self.init_workspace_treeview()
         
         self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
         self.treeview.pack(side="left")
@@ -2213,12 +2223,22 @@ class MainWindow:
         self.language_menu = Menu(self.options_menu, tearoff=0)
         
         self.file_menu = Menu(self.menu, tearoff=0)
-        self.file_menu.add_command(label="Load Archive", command=self.load_archive)
+
+        self.load_archive_menu = Menu(self.menu, tearoff=0)
+        self.load_archive_menu.add_command(
+                label="From HD2 Data Folder", 
+                command=lambda: self.load_archive(self.config.game_data_path))
+        self.load_archive_menu.add_command(
+                label="From File Explorer",
+                command=self.load_archive)
+        self.file_menu.add_cascade(menu=self.load_archive_menu, 
+                                   label="Load Archive")
         self.file_menu.add_command(label="Save Archive", command=self.save_archive)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Import Patch File", command=self.load_patch)
         self.file_menu.add_command(label="Import .wems", command=self.load_wems)
-        
+        self.file_menu.add_command(label="Open Folder as Workspace",
+                                   command=self.add_new_workspace)
         
         self.edit_menu = Menu(self.menu, tearoff=0)
         self.edit_menu.add_command(label="Revert All Changes", command=self.revert_all)
@@ -2234,9 +2254,87 @@ class MainWindow:
         self.menu.add_cascade(label="Options", menu=self.options_menu)
         self.root.config(menu=self.menu)
         self.treeview.bind_all("<Button-3>", self.treeview_on_right_click)
+        self.workspace_view.bind_all("<Button-3>", 
+                                     self.workspace_view_on_right_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
         self.root.resizable(False, False)
         self.root.mainloop()
+
+    def render_workspace(self):
+        """
+        TO-DO: This should be fine grained diffing instead of tearing the entire 
+        thing down despite Tkinter already perform some type of rendering and 
+        display optimization behind the scene. 
+        """ 
+        self.workspace_inodes.clear()
+        self.workspace_view_mapping.clear()
+
+        for p in self.config.get_workspace_paths():
+            inode = fileutil.generate_file_tree(p)
+            if inode != None:
+                self.workspace_inodes.append(inode)
+
+        for c in self.workspace_view.get_children():
+            self.workspace_view.delete(c)
+
+        for root_inode in self.workspace_inodes:
+            root_id = self.workspace_view.insert("", "end", 
+                                                 text=root_inode.basename)
+            inode_stack = [root_inode]
+            id_stack = [root_id] 
+            self.workspace_view_mapping[root_id] = root_inode
+            while len(inode_stack) > 0:
+                top_inode = inode_stack.pop()
+                top_id = id_stack.pop()
+                for node in top_inode.nodes:
+                    id = self.workspace_view.insert(top_id, "end", 
+                                                    text=node.basename)
+                    self.workspace_view_mapping[id] = node
+                    if node.isdir:
+                        inode_stack.append(node)
+                        id_stack.append(id)
+
+    def add_new_workspace(self):
+        if self.config.add_new_workspace() == 1:
+            return
+        self.render_workspace()
+    
+    def remove_workspace(self, workspace):
+        self.config.workspace_paths.remove(workspace)
+        self.render_workspace()
+                        
+    def workspace_view_on_right_click(self, event):
+        self.workspace_view_right_click_menu.delete(0, "end")
+        selects = self.workspace_view.selection()
+        if len(selects) == 1:
+            inode = self.workspace_view_mapping[selects[0]]
+            if inode.isdir and inode.absolute_path in self.config.workspace_paths:
+                self.workspace_view_right_click_menu.add_command(
+                        label="Remove workspace", 
+                        command=lambda: self.remove_workspace(inode.absolute_path)
+                )
+                self.workspace_view_right_click_menu.tk_popup(event.x_root, 
+                                                              event.y_root)
+                self.workspace_view_right_click_menu.grab_release()
+                return
+        wems = []
+        for i in selects:
+            inode = self.workspace_view_mapping[i]
+            if not inode.isdir and os.path.exists(inode.absolute_path):
+                wems.append(inode.absolute_path)
+        self.workspace_view_right_click_menu.add_command(
+                label="Import",
+                command=lambda: self.file_handler.load_wems(wems=wems))
+        self.workspace_view_right_click_menu.tk_popup(event.x_root, event.y_root)
+        self.workspace_view_right_click_menu.grab_release()
+
+    def init_workspace_treeview(self):
+        self.workspace_view = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
+        self.workspace_view.pack(side="left")
+        self.workspace_inodes: list[fileutil.INode] = []
+        self.workspace_view_mapping: dict[str, fileutil.INode] = {}
+        self.workspace_view_right_click_menu = Menu(self.root, tearoff=0)
+        self.render_workspace()
         
     def search_bar_on_enter_key(self, event):
         self.search()
@@ -2438,9 +2536,9 @@ class MainWindow:
         else:
             self.search_label['text'] = ""
 
-    def load_archive(self):
+    def load_archive(self, initial_dir: str | None = None):
         self.sound_handler.kill_sound()
-        if self.file_handler.load_archive_file():
+        if self.file_handler.load_archive_file(initial_dir):
             self.clear_search()
             self.options_menu.delete(0, "end") #change to delete only the language select menu
             if len(self.file_handler.get_strings()) > 0:
@@ -2536,6 +2634,11 @@ class MainWindow:
             self.check_modified()
 
 if __name__ == "__main__":
+    # Load configuration and application last save state
+    # This operation cannot fail.
+    cfg = config.load_config()
+    if cfg == None:
+        exit(1)
     system = platform.system()
     if system == "Windows":
         GAME_FILE_LOCATION = look_for_steam_install_windows()
@@ -2547,5 +2650,6 @@ if __name__ == "__main__":
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
     file_handler = FileHandler()
-    window = MainWindow(file_handler, sound_handler)
+    window = MainWindow(cfg, file_handler, sound_handler)
+    cfg.save_config()
     #window.set_language()
