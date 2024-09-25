@@ -2254,8 +2254,8 @@ class MainWindow:
         self.menu.add_cascade(label="Options", menu=self.options_menu)
         self.root.config(menu=self.menu)
         self.treeview.bind_all("<Button-3>", self.treeview_on_right_click)
-        self.workspace_view.bind_all("<Button-3>", 
-                                     self.workspace_view_on_right_click)
+        self.workspace_view.bind("<Button-3>", 
+                                 self.workspace_view_on_right_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
         self.root.resizable(False, False)
         self.root.mainloop()
@@ -2335,7 +2335,8 @@ class MainWindow:
         self.workspace_view.pack(side="left")
         self.workspace_inodes: list[fileutil.INode] = []
         self.workspace_view_mapping: dict[str, fileutil.INode] = {}
-        self.workspace_view_right_click_menu = Menu(self.root, tearoff=0)
+        self.workspace_view_right_click_menu = Menu(self.workspace_view, 
+                                                    tearoff=0)
         self.render_workspace()
         
     def search_bar_on_enter_key(self, event):
