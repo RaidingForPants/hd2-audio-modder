@@ -2317,6 +2317,8 @@ class MainWindow:
                                                               event.y_root)
                 self.workspace_view_right_click_menu.grab_release()
                 return
+            if inode.isdir:
+                return
         wems = []
         for i in selects:
             inode = self.workspace_view_mapping[i]
