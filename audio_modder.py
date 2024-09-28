@@ -55,6 +55,7 @@ LANGUAGE_MAPPING = {
 
 # "constants" (set once on runtime)
 GAME_FILE_LOCATION = ""
+FFMPEG = ""
 VGMSTREAM = ""
 
 # global variables
@@ -1804,7 +1805,7 @@ class FileHandler:
             return
         output_file.write(self.get_audio_by_id(file_id).get_data())
 
-    def dump_as_wav(self, file_id):
+    def dump_as_wav(self, file_id, muted: bool = False):
         output_file = filedialog.asksaveasfilename(
             title="Save As",
             initialfile=(str(file_id) + ".wav"),
@@ -1814,6 +1815,19 @@ class FileHandler:
         if output_file == "":
             return
         save_path = os.path.splitext(output_file)[0]
+
+        if muted:
+            subprocess.run([
+                FFMPEG, 
+                "-f", "lavfi", 
+                "-i", "anullsrc=r=48000:cl=stereo",
+                "-t", "1", # TO-DO, this better to match up with actual duration
+                "-c:a", "pcm_s16le",
+                f"{save_path}.wav"],
+                stdout=subprocess.DEVNULL
+            )
+            return
+
         with open(f"{save_path}.wem", "wb") as f:
             f.write(self.get_audio_by_id(file_id).get_data())
         subprocess.run(
@@ -1846,7 +1860,8 @@ class FileHandler:
 
         progress_window.destroy()
 
-    def dump_multiple_as_wav(self, file_ids: list[str], with_seq: bool = False):
+    def dump_multiple_as_wav(self, file_ids: list[str], muted: bool = False, 
+                             with_seq: bool = False):
         folder = filedialog.askdirectory(title="Select folder to save files to")
 
         progress_window = ProgressWindow(
@@ -1868,13 +1883,24 @@ class FileHandler:
             progress_window.set_text(
                 "Dumping " + os.path.basename(save_path) + ".wem"
             )
-            with open(save_path + ".wem", "wb") as f:
-                f.write(audio.get_data())
-            subprocess.run(
-                [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"],
-                stdout=subprocess.DEVNULL,
-            )
-            os.remove(f"{save_path}.wem")
+            if muted:
+                subprocess.run([
+                    FFMPEG, 
+                    "-f", "lavfi", 
+                    "-i", "anullsrc=r=48000:cl=stereo",
+                    "-t", "1", # TO-DO, this better to match up with actual duration
+                    "-c:a", "pcm_s16le",
+                    f"{save_path}.wav"],
+                    stdout=subprocess.DEVNULL
+                )
+            else:
+                with open(save_path + ".wem", "wb") as f:
+                    f.write(audio.get_data())
+                subprocess.run(
+                    [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"],
+                    stdout=subprocess.DEVNULL,
+                )
+                os.remove(f"{save_path}.wem")
             progress_window.step()
 
         progress_window.destroy()
@@ -2896,13 +2922,18 @@ class MainWindow:
                 ),
                 command=self.dump_as_wav,
             )
-            if not is_single_select:
-                self.right_click_menu.add_command(
-                    label=(
-                        "Dump As .wav with Sequence Number"
-                    ),
-                    command=lambda: self.dump_as_wav(with_seq=True)
-                )
+            self.right_click_menu.add_command(
+                label="Dump As .wav with Sequence Number",
+                command=lambda: self.dump_as_wav(with_seq=True)
+            )
+            self.right_click_menu.add_command(
+                label="Dump muted .wav with same ID",
+                command=lambda: self.dump_as_wav(muted=True)
+            )
+            self.right_click_menu.add_command(
+                label="Dump muted .wav with same ID and sequence number",
+                command=lambda: self.dump_as_wav(muted=True, with_seq=True)
+            )
             self.right_click_menu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
             pass
@@ -3008,14 +3039,15 @@ class MainWindow:
                 [self.treeview.item(i)["tags"][0] for i in self.treeview.selection()]
             )
 
-    def dump_as_wav(self, with_seq: bool = False):
+    def dump_as_wav(self, muted: bool = False, with_seq: bool = False):
         if len(self.treeview.selection()) == 1:
-            self.file_handler.dump_as_wav(self.right_click_id)
-        else:
-            self.file_handler.dump_multiple_as_wav(
-                [self.treeview.item(i)["tags"][0] for i in self.treeview.selection()],
-                with_seq=with_seq
-            )
+            self.file_handler.dump_as_wav(self.right_click_id, muted=muted)
+            return
+        self.file_handler.dump_multiple_as_wav(
+            [self.treeview.item(i)["tags"][0] for i in self.treeview.selection()],
+            muted=muted,
+            with_seq=with_seq
+        )
 
     def create_treeview_entry(self, entry, parentItem=""):
         if entry is None:
@@ -3301,6 +3333,7 @@ class MainWindow:
 if __name__ == "__main__":
     # Load configuration and application last save state
     # This operation cannot fail.
+    
     cfg = config.load_config()
     if cfg == None:
         exit(1)
@@ -3308,8 +3341,10 @@ if __name__ == "__main__":
     if system == "Windows":
         GAME_FILE_LOCATION = look_for_steam_install_windows()
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
+        FFMPEG = "ffmpeg.exe"
     elif system == "Linux":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
+        FFMPEG = "ffmpeg"
     elif system == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
     language = language_lookup("English (US)")
