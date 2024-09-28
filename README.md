@@ -6,7 +6,7 @@ I made this program to help make modding audio data easier.
 
 Thanks to everyone behind the [Helldivers 2 Blender Addon](https://github.com/Boxofbiscuits97/HD2SDK-CommunityEdition) for letting me use some of their code.
 
-EXE built with PyInstaller and provided for convenience. If you are on Linux or MacOS you can run the Python code
+If you are on windows, you can use the executable in the release zip. If you are on Linux or MacOS you must the Python code. Planning on having Linux/MacOS executables in the future.
 
 ## Running the Python code
 
