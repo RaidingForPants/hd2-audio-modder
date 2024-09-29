@@ -52,6 +52,7 @@ LANGUAGE_MAPPING = ({
 })
 
 #"constants" (set once on runtime)
+FFMPEG = ""
 GAME_FILE_LOCATION = ""
 VGMSTREAM = ""
 
@@ -1617,15 +1618,17 @@ class FileHandler:
                              with_seq: bool = False):
         folder = filedialog.askdirectory(title="Select folder to save files to")
         
+        if not os.path.exists(folder):
+            logger.warning("Invalid folder selected, aborting dump")
+            return
+
         progress_window = ProgressWindow(title="Dumping Files", 
                                          max_progress=len(file_ids))
         progress_window.show()
 
-        if not os.path.exists(folder):
-            logger.warning("Invalid folder selected, aborting dump")
 
         for i, file_id in enumerate(file_ids, start=0):
-            audio: int | None = self.get_audio_by_id(file_id)
+            audio: int | None = self.get_audio_by_id(int(file_id))
             if audio is None:
                 continue
             basename = str(audio.get_id())
