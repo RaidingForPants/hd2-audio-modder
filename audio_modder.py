@@ -2253,7 +2253,7 @@ class MainWindow:
         self.root.config(menu=self.menu)
 
         self.treeview.bind("<Button-3>", self.treeview_on_right_click)
-        self.workspace.bind("<Button-3>", self.workspace_view_on_right_click)
+        self.workspace.bind("<Button-3>", self.workspace_on_right_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
 
         self.root.resizable(False, False)
@@ -2303,7 +2303,7 @@ class MainWindow:
         self.app_state.workspace_paths.remove(workspace)
         self.render_workspace()
 
-    def workspace_view_on_right_click(self, event):
+    def workspace_on_right_click(self, event):
         self.workspace_popup_menu.delete(0, "end")
         selects = self.workspace.selection()
         if len(selects) == 0:
