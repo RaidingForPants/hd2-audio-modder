@@ -4,3 +4,4 @@ dist/
 audio_modder.spec
 vgmstream-linux/
 vgmstream-macos/
+**/*.pickle
