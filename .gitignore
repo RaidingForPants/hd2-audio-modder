@@ -4,4 +4,4 @@ dist/
 audio_modder.spec
 vgmstream-linux/
 vgmstream-macos/
-log.txt
+**/log.txt
