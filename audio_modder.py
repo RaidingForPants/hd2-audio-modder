@@ -2186,7 +2186,7 @@ class MainWindow:
         self.search_results = []
         self.search_result_index = 0
 
-        self.init_workspace_treeview()
+        self.init_workspace()
         
         self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
         self.treeview.pack(side="left")
@@ -2198,6 +2198,7 @@ class MainWindow:
         self.treeview.configure(yscrollcommand=self.scroll_bar.set)
         self.treeview.bind("<<TreeviewSelect>>", self.show_info_window)
         self.treeview.bind("<Double-Button-1>", self.treeview_on_double_click)
+        self.treeview.bind("<Return>", self.treeview_on_double_click)
         self.scroll_bar['command'] = self.treeview.yview
 
         self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
@@ -2252,7 +2253,7 @@ class MainWindow:
         self.root.config(menu=self.menu)
 
         self.treeview.bind("<Button-3>", self.treeview_on_right_click)
-        self.workspace_view.bind("<Button-3>", self.workspace_view_on_right_click)
+        self.workspace.bind("<Button-3>", self.workspace_view_on_right_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
 
         self.root.resizable(False, False)
@@ -2275,11 +2276,11 @@ class MainWindow:
             if inode != None:
                 self.workspace_inodes.append(inode)
 
-        for c in self.workspace_view.get_children():
-            self.workspace_view.delete(c)
+        for c in self.workspace.get_children():
+            self.workspace.delete(c)
 
         for root_inode in self.workspace_inodes:
-            root_id = self.workspace_view.insert("", "end", text=root_inode.basename)
+            root_id = self.workspace.insert("", "end", text=root_inode.basename)
             inode_stack = [root_inode]
             id_stack = [root_id]
             self.workspace_view_mapping[root_id] = root_inode
@@ -2287,7 +2288,7 @@ class MainWindow:
                 top_inode = inode_stack.pop()
                 top_id = id_stack.pop()
                 for node in top_inode.nodes:
-                    id = self.workspace_view.insert(top_id, "end", text=node.basename)
+                    id = self.workspace.insert(top_id, "end", text=node.basename)
                     self.workspace_view_mapping[id] = node
                     if node.isdir:
                         inode_stack.append(node)
@@ -2303,8 +2304,8 @@ class MainWindow:
         self.render_workspace()
 
     def workspace_view_on_right_click(self, event):
-        self.workspace_view_right_click_menu.delete(0, "end")
-        selects = self.workspace_view.selection()
+        self.workspace_popup_menu.delete(0, "end")
+        selects = self.workspace.selection()
         if len(selects) == 0:
             return
         if len(selects) == 1:
@@ -2312,14 +2313,14 @@ class MainWindow:
             is_workspace = inode.isdir \
                     and inode.absolute_path in self.app_state.workspace_paths
             if is_workspace:
-                self.workspace_view_right_click_menu.add_command(
+                self.workspace_popup_menu.add_command(
                     label="Remove Folder from Workspace",
                     command=lambda: self.remove_workspace(inode.absolute_path),
                 )
-                self.workspace_view_right_click_menu.tk_popup(
+                self.workspace_popup_menu.tk_popup(
                     event.x_root, event.y_root
                 )
-                self.workspace_view_right_click_menu.grab_release()
+                self.workspace_popup_menu.grab_release()
                 return
             if inode.isdir:
                 return
@@ -2328,21 +2329,21 @@ class MainWindow:
             inode = self.workspace_view_mapping[i]
             if not inode.isdir and os.path.exists(inode.absolute_path):
                 wems.append(inode.absolute_path)
-        self.workspace_view_right_click_menu.add_command(
+        self.workspace_popup_menu.add_command(
             label="Import", 
             command=lambda: self.load_wems(wems=wems)
         )
-        self.workspace_view_right_click_menu.tk_popup(event.x_root, event.y_root)
-        self.workspace_view_right_click_menu.grab_release()
+        self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
+        self.workspace_popup_menu.grab_release()
 
-    def init_workspace_treeview(self):
-        self.workspace_view = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
-        self.workspace_view.heading("#0", text="Workspace Folders")
-        self.workspace_view.column("#0", width=256+16)
-        self.workspace_view.pack(side="left")
+    def init_workspace(self):
+        self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
+        self.workspace.heading("#0", text="Workspace Folders")
+        self.workspace.column("#0", width=256+16)
+        self.workspace.pack(side="left")
         self.workspace_inodes: list[fileutil.INode] = []
         self.workspace_view_mapping: dict[str, fileutil.INode] = {}
-        self.workspace_view_right_click_menu = Menu(self.workspace_view, tearoff=0)
+        self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
         self.render_workspace() 
 
     def treeview_on_right_click(self, event):
@@ -2361,8 +2362,21 @@ class MainWindow:
             self.right_click_menu.grab_release()
             
     def treeview_on_double_click(self, event):
-        if len(self.treeview.selection()) == 1 and self.treeview.item(self.treeview.selection())['values'][0] == "Audio Source":
-            self.play_audio(self.treeview.item(self.treeview.selection())['tags'][0])
+        """
+        It work as before but it's setup for playing multiple selected .wem 
+        files I'm planning to implement. For now, it will be overhead since 
+        there's extra code need to be loaded into the memory and interpreted.
+        """
+        # Rewrite this part against the doc how to use .item(). Provide better 
+        # LSP type hinting
+        selects = self.treeview.selection() 
+        for select in selects:
+            values = self.treeview.item(select, option="values")
+            tags = self.treeview.item(select, option="tags")
+            assert(len(values) == 1 and len(tags) == 1)
+            if values[0] != "Audio Source":
+                continue
+            self.play_audio(int(tags[0]))
             
     def set_language(self):
         global language
@@ -2618,7 +2632,7 @@ class MainWindow:
         self.sound_handler.kill_sound()
         self.file_handler.dump_all_as_wav()
         
-    def play_audio(self, file_id, callback=None):
+    def play_audio(self, file_id: int, callback=None):
         audio = self.file_handler.get_audio_by_id(file_id)
         self.sound_handler.play_audio(audio.get_short_id(), audio.get_data(), callback)
         
