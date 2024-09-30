@@ -16,6 +16,8 @@ import copy
 import numpy
 import platform
 
+import config as cfg
+
 #constants
 MUSIC_TRACK = 11
 SOUND = 2
@@ -1707,8 +1709,9 @@ class FileHandler:
     def get_strings(self):
         return self.file_reader.string_entries
         
-    def load_archive_file(self):
-        archive_file = askopenfilename(title="Select archive")
+    def load_archive_file(self, initialdir: str | None = ''):
+        archive_file = askopenfilename(initialdir=initialdir, 
+                                       title="Select archive")
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         if os.path.exists(archive_file):
@@ -2142,7 +2145,9 @@ class EventWindow:
 
 class MainWindow:
 
-    def __init__(self, file_handler, sound_handler):
+    def __init__(self, app_state: cfg.Config, file_handler, sound_handler):
+        self.app_state = app_state
+
         self.file_handler = file_handler
         self.sound_handler = sound_handler
         
@@ -2213,7 +2218,20 @@ class MainWindow:
         self.language_menu = Menu(self.options_menu, tearoff=0)
         
         self.file_menu = Menu(self.menu, tearoff=0)
-        self.file_menu.add_command(label="Load Archive", command=self.load_archive)
+
+        self.load_archive_menu = Menu(self.menu, tearoff=0)
+        self.load_archive_menu.add_command(
+            label="From HD2 Data Folder",
+            command=lambda: self.load_archive(self.app_state.game_data_path)
+        )
+        self.load_archive_menu.add_command(
+            label="From File Explorer",
+            command=self.load_archive
+        )
+        self.file_menu.add_cascade(
+            menu=self.load_archive_menu, 
+            label="Load Archive"
+        )
         self.file_menu.add_command(label="Save Archive", command=self.save_archive)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Import Patch File", command=self.load_patch)
@@ -2438,9 +2456,9 @@ class MainWindow:
         else:
             self.search_label['text'] = ""
 
-    def load_archive(self):
+    def load_archive(self, initialdir: str | None = ''):
         self.sound_handler.kill_sound()
-        if self.file_handler.load_archive_file():
+        if self.file_handler.load_archive_file(initialdir=initialdir):
             self.clear_search()
             self.options_menu.delete(0, "end") #change to delete only the language select menu
             if len(self.file_handler.get_strings()) > 0:
@@ -2536,16 +2554,24 @@ class MainWindow:
             self.check_modified()
 
 if __name__ == "__main__":
+    app_state: cfg.Config | None = cfg.load_config()
+    if app_state == None:
+        exit(1)
+    GAME_FILE_LOCATION = app_state.game_data_path
+
     system = platform.system()
     if system == "Windows":
-        GAME_FILE_LOCATION = look_for_steam_install_windows()
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
     elif system == "Linux":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
     elif system == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
+
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
     file_handler = FileHandler()
-    window = MainWindow(file_handler, sound_handler)
+    window = MainWindow(app_state, file_handler, sound_handler)
+    
+    app_state.save_config()
+
     #window.set_language()
