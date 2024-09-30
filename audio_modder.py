@@ -1,20 +1,28 @@
+import copy
+import numpy
+import os
+import platform
+import pyaudio
+import subprocess
+import struct
+import tkinter
+import wave
+
+from functools import partial
+from itertools import takewhile
+from math import ceil
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
-import os
-import struct
-from math import ceil
-import tkinter
 from tkinter.filedialog import askdirectory
 from tkinter.filedialog import askopenfilename
-from functools import partial
-import pyaudio
-import wave
-import subprocess
-from itertools import takewhile
-import copy
-import numpy
-import platform
+from typing import Literal, Tuple, Union
+
+import config as cfg
+import log
+import fileutil
+
+import config as cfg
 
 from log import logger
 
@@ -24,7 +32,7 @@ SOUND = 2
 BANK = 0
 PREFETCH_STREAM = 1
 STREAM = 2
-WINDOW_WIDTH = 700
+WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
 VORBIS = 0x00040001
 DRIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -1711,7 +1719,7 @@ class FileHandler:
         try:
             return int(number)
         except:
-            print("File name must begin with a number: "+n)
+            log.logger.warning(f"File name must begin with a number: {n}")
         
     def save_archive_file(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
@@ -1760,8 +1768,9 @@ class FileHandler:
     def get_strings(self):
         return self.file_reader.string_entries
         
-    def load_archive_file(self):
-        archive_file = askopenfilename(title="Select archive")
+    def load_archive_file(self, initialdir: str | None = ''):
+        archive_file = askopenfilename(initialdir=initialdir, 
+                                       title="Select archive")
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         if os.path.exists(archive_file):
@@ -1855,21 +1864,25 @@ class FileHandler:
             return False
         return True
 
-    def load_wems(self): 
-        wems = filedialog.askopenfilenames(title="Choose .wem files to import")
-        
-        progress_window = ProgressWindow(title="Loading Files", max_progress=len(wems))
+    def load_wems(self, wems: Union[tuple[str, ...], Literal[""], None] = None): 
+        if wems == None:
+            wems = filedialog.askopenfilenames(title="Choose .wem files to import")
+        if wems == "":
+            return
+        progress_window = ProgressWindow(title="Loading Files", 
+                                         max_progress=len(wems))
         progress_window.show()
-        
-        for file in wems:
-            progress_window.set_text("Loading "+os.path.basename(file))
-            file_id = self.get_number_prefix(os.path.basename(file))
-            audio = self.get_audio_by_id(file_id)
-            if audio is not None:
-                with open(file, 'rb') as f:
-                    audio.set_data(f.read())
+        for wem in wems:
+            progress_window.set_text("Loading " + os.path.basename(wem))
+            file_id: int | None = self.get_number_prefix(os.path.basename(wem))
+            if file_id == None:
+                continue
+            audio: str | None = self.get_audio_by_id(file_id)
+            if audio == None:
+                continue
+            with open(wem, 'rb') as f:
+                audio.set_data(f.read())
             progress_window.step()
-        
         progress_window.destroy()
       
 class ProgressWindow:
@@ -2195,7 +2208,9 @@ class EventWindow:
 
 class MainWindow:
 
-    def __init__(self, file_handler, sound_handler):
+    def __init__(self, app_state: cfg.Config, file_handler, sound_handler):
+        self.app_state = app_state
+
         self.file_handler = file_handler
         self.sound_handler = sound_handler
         
@@ -2226,6 +2241,8 @@ class MainWindow:
         
         self.search_results = []
         self.search_result_index = 0
+
+        self.init_workspace()
         
         self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
         self.treeview.pack(side="left")
@@ -2237,8 +2254,9 @@ class MainWindow:
         self.treeview.configure(yscrollcommand=self.scroll_bar.set)
         self.treeview.bind("<<TreeviewSelect>>", self.show_info_window)
         self.treeview.bind("<Double-Button-1>", self.treeview_on_double_click)
+        self.treeview.bind("<Return>", self.treeview_on_double_click)
         self.scroll_bar['command'] = self.treeview.yview
-        
+
         self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
         self.entry_info_panel.pack(side="left", fill="both")
         
@@ -2250,7 +2268,7 @@ class MainWindow:
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
-        self.right_click_menu = Menu(self.root, tearoff=0)
+        self.right_click_menu = Menu(self.treeview, tearoff=0)
         self.right_click_id = 0
 
         self.menu = Menu(self.root, tearoff=0)
@@ -2266,12 +2284,28 @@ class MainWindow:
         self.language_menu = Menu(self.options_menu, tearoff=0)
         
         self.file_menu = Menu(self.menu, tearoff=0)
-        self.file_menu.add_command(label="Load Archive", command=self.load_archive)
+
+        self.load_archive_menu = Menu(self.menu, tearoff=0)
+        self.load_archive_menu.add_command(
+            label="From HD2 Data Folder",
+            command=lambda: self.load_archive(self.app_state.game_data_path)
+        )
+        self.load_archive_menu.add_command(
+            label="From File Explorer",
+            command=self.load_archive
+        )
+        self.file_menu.add_cascade(
+            menu=self.load_archive_menu, 
+            label="Load Archive"
+        )
         self.file_menu.add_command(label="Save Archive", command=self.save_archive)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Import Patch File", command=self.load_patch)
         self.file_menu.add_command(label="Import .wems", command=self.load_wems)
-        
+        self.file_menu.add_command(label="Refresh Workspace",
+                                   command=self.render_workspace)
+        self.file_menu.add_command(label="Add a Folder to Workspace",
+                                   command=self.add_new_workspace)
         
         self.edit_menu = Menu(self.menu, tearoff=0)
         self.edit_menu.add_command(label="Revert All Changes", command=self.revert_all)
@@ -2286,14 +2320,101 @@ class MainWindow:
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
         self.root.config(menu=self.menu)
-        self.treeview.bind_all("<Button-3>", self.treeview_on_right_click)
+
+        self.treeview.bind("<Button-3>", self.treeview_on_right_click)
+        self.workspace.bind("<Button-3>", self.workspace_on_right_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
+
         self.root.resizable(False, False)
         self.root.mainloop()
         
     def search_bar_on_enter_key(self, event):
         self.search()
-        
+
+    def render_workspace(self):
+        """
+        TO-DO: This should be fine grained diffing instead of tearing the entire
+        thing down despite Tkinter already perform some type of rendering and
+        display optimization behind the scene.
+        """
+        self.workspace_inodes.clear()
+        self.workspace_view_mapping.clear()
+
+        for p in self.app_state.get_workspace_paths():
+            inode = fileutil.generate_file_tree(p)
+            if inode != None:
+                self.workspace_inodes.append(inode)
+
+        for c in self.workspace.get_children():
+            self.workspace.delete(c)
+
+        for root_inode in self.workspace_inodes:
+            root_id = self.workspace.insert("", "end", text=root_inode.basename)
+            inode_stack = [root_inode]
+            id_stack = [root_id]
+            self.workspace_view_mapping[root_id] = root_inode
+            while len(inode_stack) > 0:
+                top_inode = inode_stack.pop()
+                top_id = id_stack.pop()
+                for node in top_inode.nodes:
+                    id = self.workspace.insert(top_id, "end", text=node.basename)
+                    self.workspace_view_mapping[id] = node
+                    if node.isdir:
+                        inode_stack.append(node)
+                        id_stack.append(id)
+
+    def add_new_workspace(self):
+        if self.app_state.add_new_workspace() == 1:
+            return
+        self.render_workspace()
+
+    def remove_workspace(self, workspace):
+        self.app_state.workspace_paths.remove(workspace)
+        self.render_workspace()
+
+    def workspace_on_right_click(self, event):
+        self.workspace_popup_menu.delete(0, "end")
+        selects = self.workspace.selection()
+        if len(selects) == 0:
+            return
+        if len(selects) == 1:
+            inode = self.workspace_view_mapping[selects[0]]
+            is_workspace = inode.isdir \
+                    and inode.absolute_path in self.app_state.workspace_paths
+            if is_workspace:
+                self.workspace_popup_menu.add_command(
+                    label="Remove Folder from Workspace",
+                    command=lambda: self.remove_workspace(inode.absolute_path),
+                )
+                self.workspace_popup_menu.tk_popup(
+                    event.x_root, event.y_root
+                )
+                self.workspace_popup_menu.grab_release()
+                return
+            if inode.isdir:
+                return
+        wems = []
+        for i in selects:
+            inode = self.workspace_view_mapping[i]
+            if not inode.isdir and os.path.exists(inode.absolute_path):
+                wems.append(inode.absolute_path)
+        self.workspace_popup_menu.add_command(
+            label="Import", 
+            command=lambda: self.load_wems(wems=wems)
+        )
+        self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
+        self.workspace_popup_menu.grab_release()
+
+    def init_workspace(self):
+        self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
+        self.workspace.heading("#0", text="Workspace Folders")
+        self.workspace.column("#0", width=256+16)
+        self.workspace.pack(side="left")
+        self.workspace_inodes: list[fileutil.INode] = []
+        self.workspace_view_mapping: dict[str, fileutil.INode] = {}
+        self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
+        self.render_workspace() 
+
     def treeview_on_right_click(self, event):
         try:
             self.right_click_menu.delete(0, "end")
@@ -2348,8 +2469,21 @@ class MainWindow:
             self.right_click_menu.grab_release()
             
     def treeview_on_double_click(self, event):
-        if len(self.treeview.selection()) == 1 and self.treeview.item(self.treeview.selection())['values'][0] == "Audio Source":
-            self.play_audio(self.treeview.item(self.treeview.selection())['tags'][0])
+        """
+        It work as before but it's setup for playing multiple selected .wem 
+        files I'm planning to implement. For now, it will be overhead since 
+        there's extra code need to be loaded into the memory and interpreted.
+        """
+        # Rewrite this part against the doc how to use .item(). Provide better 
+        # LSP type hinting
+        selects = self.treeview.selection() 
+        for select in selects:
+            values = self.treeview.item(select, option="values")
+            tags = self.treeview.item(select, option="tags")
+            assert(len(values) == 1 and len(tags) == 1)
+            if values[0] != "Audio Source":
+                continue
+            self.play_audio(int(tags[0]))
             
     def set_language(self):
         global language
@@ -2533,9 +2667,9 @@ class MainWindow:
         else:
             self.search_label['text'] = ""
 
-    def load_archive(self):
+    def load_archive(self, initialdir: str | None = ''):
         self.sound_handler.kill_sound()
-        if self.file_handler.load_archive_file():
+        if self.file_handler.load_archive_file(initialdir=initialdir):
             self.clear_search()
             self.options_menu.delete(0, "end") #change to delete only the language select menu
             if len(self.file_handler.get_strings()) > 0:
@@ -2596,9 +2730,9 @@ class MainWindow:
         except KeyError:
             pass
         
-    def load_wems(self):
+    def load_wems(self, wems: list[str] | None = None):
         self.sound_handler.kill_sound()
-        self.file_handler.load_wems()
+        self.file_handler.load_wems(wems=wems)
         self.check_modified()
         
     def dump_all_as_wem(self):
@@ -2609,7 +2743,7 @@ class MainWindow:
         self.sound_handler.kill_sound()
         self.file_handler.dump_all_as_wav()
         
-    def play_audio(self, file_id, callback=None):
+    def play_audio(self, file_id: int, callback=None):
         audio = self.file_handler.get_audio_by_id(file_id)
         self.sound_handler.play_audio(audio.get_short_id(), audio.get_data(), callback)
         
@@ -2631,9 +2765,13 @@ class MainWindow:
             self.check_modified()
 
 if __name__ == "__main__":
+    app_state: cfg.Config | None = cfg.load_config()
+    if app_state == None:
+        exit(1)
+    GAME_FILE_LOCATION = app_state.game_data_path
+
     system = platform.system()
     if system == "Windows":
-        GAME_FILE_LOCATION = look_for_steam_install_windows()
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
         FFMPEG = "ffmpeg.exe"
     elif system == "Linux":
@@ -2642,8 +2780,6 @@ if __name__ == "__main__":
     elif system == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
         FFMPEG = "ffmpeg"
-    language = language_lookup("English (US)")
-    sound_handler = SoundHandler()
-    file_handler = FileHandler()
-    window = MainWindow(file_handler, sound_handler)
-    #window.set_language()
+    window = MainWindow(app_state, file_handler, sound_handler)
+    
+    app_state.save_config()
