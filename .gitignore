@@ -4,5 +4,6 @@ dist/
 audio_modder.spec
 vgmstream-linux/
 vgmstream-macos/
+__pycache__/
 **/*.pickle
 **/log.txt

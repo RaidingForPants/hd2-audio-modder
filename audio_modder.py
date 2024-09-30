@@ -2780,6 +2780,10 @@ if __name__ == "__main__":
     elif system == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
         FFMPEG = "ffmpeg"
+        
+    language = language_lookup("English (US)")
+    sound_handler = SoundHandler()
+    file_handler = FileHandler()
     window = MainWindow(app_state, file_handler, sound_handler)
     
     app_state.save_config()
