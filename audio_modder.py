@@ -16,7 +16,7 @@ from tkinter import ttk
 from tkinter import filedialog
 from tkinter.filedialog import askdirectory
 from tkinter.filedialog import askopenfilename
-from typing import Literal, Tuple, Union
+from typing import Any, Literal, Tuple, Union
 
 import config as cfg
 import log
@@ -1893,12 +1893,10 @@ class ProgressWindow:
     def show(self):
         self.root = Tk()
         self.root.title(self.title)
-        self.root.configure(background="white")
         self.root.geometry("410x45")
         self.root.attributes('-topmost', True)
         self.progress_bar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.max_progress)
         self.progress_bar_text = Text(self.root)
-        self.progress_bar_text.configure(background="white")
         self.progress_bar.pack()
         self.progress_bar_text.pack()
         self.root.resizable(False, False)
@@ -1925,10 +1923,13 @@ class PopupWindow:
     def show(self):
         self.root = Tk()
         self.root.title(self.title)
-        self.root.configure(background="white")
         #self.root.geometry("410x45")
         self.root.attributes('-topmost', True)
-        self.text = ttk.Label(self.root, text=self.message, background="white", font=('Segoe UI', 12), wraplength=500, justify="left")
+        self.text = ttk.Label(self.root,
+                              text=self.message,
+                              font=('Segoe UI', 12),
+                              wraplength=500,
+                              justify="left")
         self.button = ttk.Button(self.root, text="OK", command=self.destroy)
         self.text.pack(padx=20, pady=0)
         self.button.pack(pady=20)
@@ -1975,10 +1976,9 @@ class AudioSourceWindow:
     def __init__(self, parent, play, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
-        self.frame.configure(background="white")
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.play = play
-        self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
+        self.title_label = Label(self.frame, font=('Segoe UI', 14))
         self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
         self.play_button = ttk.Button(self.frame, text= '\u23f5', image=self.fake_image, compound='c', width=2)
         self.play_at_text_var = tkinter.StringVar(self.frame)
@@ -1986,19 +1986,27 @@ class AudioSourceWindow:
         self.start_offset_text_var = tkinter.StringVar(self.frame)
         self.end_offset_text_var = tkinter.StringVar(self.frame)
         
-        self.play_at_label = Label(self.frame, text="Play At (ms)", background="white", font=('Segoe UI', 12))
+        self.play_at_label = Label(self.frame,
+                                   text="Play At (ms)",
+                                   font=('Segoe UI', 12))
         self.play_at_text = Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=50)
         
         
-        self.duration_label = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.duration_label = Label(self.frame,
+                                    text="Duration (ms)",
+                                    font=('Segoe UI', 12))
         self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
         
         
-        self.start_offset_label = Label(self.frame, text="Start Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.start_offset_label = Label(self.frame,
+                                        text="Start Trim (ms)",
+                                        font=('Segoe UI', 12))
         self.start_offset_text = Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=50)
         
         
-        self.end_offset_label = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.end_offset_label = Label(self.frame,
+                                      text="End Trim (ms)",
+                                      font=('Segoe UI', 12))
         self.end_offset_text = Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=50)
 
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
@@ -2080,21 +2088,26 @@ class MusicSegmentWindow:
     def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
-        self.frame.configure(background="white")
         
-        self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
+        self.title_label = Label(self.frame, font=('Segoe UI', 14))
 
         self.duration_text_var = tkinter.StringVar(self.frame)
         self.fade_in_text_var = tkinter.StringVar(self.frame)
         self.fade_out_text_var = tkinter.StringVar(self.frame)
         
-        self.duration_label = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.duration_label = Label(self.frame,
+                                    text="Duration (ms)",
+                                    font=('Segoe UI', 12))
         self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
         
-        self.fade_in_label = Label(self.frame, text="End fade-in (ms)", background="white", font=('Segoe UI', 12))
+        self.fade_in_label = Label(self.frame,
+                                   text="End fade-in (ms)",
+                                   font=('Segoe UI', 12))
         self.fade_in_text = Entry(self.frame, textvariable=self.fade_in_text_var, font=('Segoe UI', 12), width=50)
         
-        self.fade_out_label = Label(self.frame, text="Start fade-out (ms)", background="white", font=('Segoe UI', 12))
+        self.fade_out_label = Label(self.frame,
+                                    text="Start fade-out (ms)",
+                                    font=('Segoe UI', 12))
         self.fade_out_text = Entry(self.frame, textvariable=self.fade_out_text_var, font=('Segoe UI', 12), width=50)
         self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
@@ -2142,25 +2155,32 @@ class EventWindow:
     def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
-        self.frame.configure(background="white")
         
-        self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
+        self.title_label = Label(self.frame, font=('Segoe UI', 14))
         
         self.play_at_text_var = tkinter.StringVar(self.frame)
         self.duration_text_var = tkinter.StringVar(self.frame)
         self.start_offset_text_var = tkinter.StringVar(self.frame)
         self.end_offset_text_var = tkinter.StringVar(self.frame)
         
-        self.play_at_label = Label(self.frame, text="Play At (ms)", background="white", font=('Segoe UI', 12))
+        self.play_at_label = Label(self.frame,
+                                   text="Play At (ms)",
+                                   font=('Segoe UI', 12))
         self.play_at_text = Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=50)
         
-        self.duration_label = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.duration_label = Label(self.frame,
+                                    text="Duration (ms)",
+                                    font=('Segoe UI', 12))
         self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
         
-        self.start_offset_label = Label(self.frame, text="Start Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.start_offset_label = Label(self.frame,
+                                        text="Start Trim (ms)",
+                                        font=('Segoe UI', 12))
         self.start_offset_text = Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=50)
         
-        self.end_offset_label = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.end_offset_label = Label(self.frame,
+                                      text="End Trim (ms)",
+                                      font=('Segoe UI', 12))
         self.end_offset_text = Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=50)
         self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
@@ -2208,6 +2228,9 @@ class EventWindow:
 
 class MainWindow:
 
+    default_bg = "#333333"
+    default_fg = "#ffffff"
+
     def __init__(self, app_state: cfg.Config, file_handler, sound_handler):
         self.app_state = app_state
 
@@ -2215,25 +2238,38 @@ class MainWindow:
         self.sound_handler = sound_handler
         
         self.root = Tk()
-        self.root.configure(bg="white")
+        self.root.tk.call("source", "azure.tcl")
+        self.root.tk.call("set_theme", "dark")
         
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         
-        self.top_bar = Canvas(self.root, width=WINDOW_WIDTH, height=30)
+        self.top_bar = Canvas(self.root, width=WINDOW_WIDTH, height=40)
         self.search_text_var = tkinter.StringVar(self.root)
         self.search_bar = Entry(self.top_bar, textvariable=self.search_text_var, font=('Arial', 16))
         self.top_bar.pack(side="top")
         
-        self.up_button = ttk.Button(self.top_bar, text='^', image=self.fake_image, compound='c', width=2, command=self.search_up)
-        self.down_button = ttk.Button(self.top_bar, text='v', image=self.fake_image, compound='c', width=2, command=self.search_down)
+        self.up_button = ttk.Button(self.top_bar, text='^', 
+                                    width=1, command=self.search_up)
+        self.down_button = ttk.Button(self.top_bar, text='v',
+                                      width=1, command=self.search_down)
         
-        self.search_label = ttk.Label(self.top_bar, background="white", width=10, font=('Segoe UI', 12), justify="center")
+        self.search_label = ttk.Label(self.top_bar,
+                                      width=10,
+                                      font=('Segoe UI', 12),
+                                      justify="center")
+        self.default_bg = "#333333"
+        self.default_fg = "#ffffff"
         
-        self.top_bar.create_text(WINDOW_WIDTH-425, 0, text="\u2315", fill='gray', font=('Arial', 20), anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-350, 3, window=self.search_bar, anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-375, 5, window=self.up_button, anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-400, 5, window=self.down_button, anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-100, 5, window=self.search_label, anchor='nw')
+        self.top_bar.create_text(WINDOW_WIDTH-450, 4, text="\u2315", 
+                                 fill='gray', font=('Arial', 20), anchor='nw')
+        self.top_bar.create_window(WINDOW_WIDTH-350, 8, window=self.search_bar, 
+                                   anchor='nw')
+        self.top_bar.create_window(WINDOW_WIDTH-390, 5, window=self.up_button, 
+                                   anchor='nw')
+        self.top_bar.create_window(WINDOW_WIDTH-425, 5, window=self.down_button, 
+                                   anchor='nw')
+        self.top_bar.create_window(WINDOW_WIDTH-100, 5, window=self.search_label, 
+                                   anchor='nw')
 
         self.scroll_bar = Scrollbar(self.root, orient=VERTICAL)
         
@@ -2245,8 +2281,8 @@ class MainWindow:
         self.init_workspace()
         
         self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
-        self.treeview.pack(side="left")
-        self.scroll_bar.pack(side="left", fill="y")
+        self.treeview.pack(side="left", padx=8, pady=8)
+        self.scroll_bar.pack(side="left", pady=8, fill="y")
         self.treeview.heading("#0", text="File")
         self.treeview.column("#0", width=250)
         self.treeview.column("type", width=100)
@@ -2257,13 +2293,18 @@ class MainWindow:
         self.treeview.bind("<Return>", self.treeview_on_double_click)
         self.scroll_bar['command'] = self.treeview.yview
 
-        self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
-        self.entry_info_panel.pack(side="left", fill="both")
+        self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3))
+        self.entry_info_panel.pack(side="left", fill="both", padx=8, pady=8)
         
-        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel, self.play_audio, self.check_modified)
-        self.event_info_panel = EventWindow(self.entry_info_panel, self.check_modified)
-        self.string_info_panel = StringEntryWindow(self.entry_info_panel, self.check_modified)
-        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel, self.check_modified)
+        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel,
+                                                  self.play_audio,
+                                                  self.check_modified)
+        self.event_info_panel = EventWindow(self.entry_info_panel,
+                                            self.check_modified)
+        self.string_info_panel = StringEntryWindow(self.entry_info_panel,
+                                                   self.check_modified)
+        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
+                                                     self.check_modified)
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -2409,7 +2450,7 @@ class MainWindow:
         self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
         self.workspace.heading("#0", text="Workspace Folders")
         self.workspace.column("#0", width=256+16)
-        self.workspace.pack(side="left")
+        self.workspace.pack(side="left", padx=8, pady=8)
         self.workspace_inodes: list[fileutil.INode] = []
         self.workspace_view_mapping: dict[str, fileutil.INode] = {}
         self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
@@ -2693,43 +2734,80 @@ class MainWindow:
         self.file_handler.save_archive_file()
         
     def clear_treeview_background(self, item):
-        self.treeview.tag_configure(self.treeview.item(item)['tags'][0], background="white")
+        self.treeview.tag_configure(self.treeview.item(item)['tags'][0],
+                                    background=self.default_bg)
         for child in self.treeview.get_children(item):
             self.clear_treeview_background(child)
         
-    def check_modified(self): #could be improved: small, but noticeable lag if there are many, many entries in the tree
+    """
+    TO-DO:
+    optimization point: small, but noticeable lag if there are many, many 
+    entries in the tree
+    """
+    def check_modified(self): 
         for child in self.treeview.get_children():
             self.clear_treeview_background(child)
+        bg: Any
+        fg: Any
         for audio in self.file_handler.get_audio().values():
-            self.treeview.tag_configure(audio.get_id(), background="lawn green" if audio.modified or audio.get_track_info() is not None and audio.get_track_info().modified else "white")
-            if audio.modified or audio.get_track_info() is not None and audio.get_track_info().modified:
-                items = self.treeview.tag_has(audio.get_id())
-                for item in items:
-                    parent = self.treeview.parent(item)
-                    while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
-                        parent = self.treeview.parent(parent)
+            bg, fg = self.default_bg, self.default_fg
+            is_modified = audio.modified or audio.get_track_info() is not None \
+                    and audio.get_track_info().modified
+            if is_modified:
+                bg, fg = fg, bg
+                print(bg, fg)
+            self.treeview.tag_configure(audio.get_id(),
+                                        background=bg,
+                                        foreground=fg)
+            if not is_modified:
+                continue
+
+            items = self.treeview.tag_has(audio.get_id())
+            for item in items:
+                parent = self.treeview.parent(item)
+                while parent != "":
+                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
+                                                background=bg, 
+                                                foreground=fg)
+                    parent = self.treeview.parent(parent)
         for event in self.file_handler.file_reader.music_track_events.values():
-            self.treeview.tag_configure(event.get_id(), background="lawn green" if event.modified else "white")
+            bg, fg = self.default_bg, self.default_fg
             if event.modified:
-                items = self.treeview.tag_has(event.get_id())
-                for item in items:
-                    parent = self.treeview.parent(item)
-                    while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
-                        parent = self.treeview.parent(parent)
+                bg, fg = fg, bg
+            self.treeview.tag_configure(event.get_id(),
+                                        background=bg,
+                                        foreground=fg)
+            if not event.modified:
+                continue
+
+            items = self.treeview.tag_has(event.get_id())
+            for item in items:
+                parent = self.treeview.parent(item)
+                while parent != "":
+                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
+                                                background=bg,
+                                                foreground=fg)
+                    parent = self.treeview.parent(parent)
         try:
             for string in self.file_handler.get_strings()[language].values():
-                self.treeview.tag_configure(string.get_id(), background="lawn green" if string.modified else "white")
+                bg, fg = self.default_bg, self.default_fg
                 if string.modified:
-                    item = self.treeview.tag_has(string.get_id())
-                    parent = self.treeview.parent(item)
-                    while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
-                        parent = self.treeview.parent(parent)
+                    bg, fg = fg, bg
+                self.treeview.tag_configure(string.get_id(), 
+                                            background=bg,
+                                            foreground=fg)
+                if not string.modified:
+                    continue
+                item = self.treeview.tag_has(string.get_id())
+                parent = self.treeview.parent(item)
+                while parent != "":
+                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0],
+                                                background=bg,
+                                                foreground=fg)
+                    parent = self.treeview.parent(parent)
         except KeyError:
             pass
-        
+
     def load_wems(self, wems: list[str] | None = None):
         self.sound_handler.kill_sound()
         self.file_handler.load_wems(wems=wems)
