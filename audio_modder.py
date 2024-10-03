@@ -2349,7 +2349,7 @@ class MainWindow:
         for root_inode in self.workspace_inodes:
             root_id = self.workspace.insert("", "end", 
                                             text=root_inode.basename,
-                                            values=[root_inode],
+                                            values=[root_inode.absolute_path],
                                             tags="workspace")
             inode_stack = [root_inode]
             id_stack = [root_id]
@@ -2359,7 +2359,7 @@ class MainWindow:
                 for node in top_inode.nodes:
                     id = self.workspace.insert(top_id, "end", 
                                                text=node.basename,
-                                               values=[node],
+                                               values=[node.absolute_path],
                                                tags="dir" if node.isdir else "file")
                     if node.isdir:
                         inode_stack.append(node)
@@ -2376,39 +2376,37 @@ class MainWindow:
 
     def workspace_on_right_click(self, event):
         self.workspace_popup_menu.delete(0, "end")
-        target_id = self.workspace.identify_row(event.y)
-        if target_id == "":
-            return
-        selects = self.workspace.selection()
+        selects: tuple[str, ...] = self.workspace.selection()
         if len(selects) == 0:
             return
-        target_tag = self.workspace.item(target_id, option="tags")
-        if target_tag == "workspace":
-            target_values = self.workspace.item(target_id, option="values")
-            assert(len(target_values) == 1 and isinstance(target_values[0], 
-                                                          fileutil.INode))
-            inode = target_values[0]
-            self.workspace_popup_menu.add_command(
-                label="Remove Folder from Workspace",
-                command=lambda: self.remove_workspace(inode.absolute_path),
-            )
-            self.workspace_popup_menu.tk_popup(
-                event.x_root, event.y_root
-            )
-            self.workspace_popup_menu.grab_release()
-            return
+        if len(selects) == 1:
+            select = selects[0]
+            tags = self.workspace.item(select, option="tags")
+            assert(tags != '' and len(tags) == 1)
+            if tags[0] == "workspace":
+                values = self.workspace.item(select, option="values")
+                assert(values != '' and len(values) == 1)
+                self.workspace_popup_menu.add_command(
+                    label="Remove Folder from Workspace",
+                    command=lambda: self.remove_workspace(values[0]),
+                )
+                self.workspace_popup_menu.tk_popup(
+                    event.x_root, event.y_root
+                )
+                self.workspace_popup_menu.grab_release()
+                return
+            if tags[0] == "dir":
+                return
         wems = []
         for i in selects:
-            tag = self.workspace.item(i, option="tags")
-            if tag != "file":
+            tags = self.workspace.item(i, option="tags")
+            assert(tags != '' and len(tags) == 1)
+            if tags[0] != "file":
                 continue
             values = self.workspace.item(i, option="values")
-            assert(len(values) == 1 and \
-                    isinstance(values[0], fileutil.INode) \
-                    and not values[0].isdir)
-            inode = values[0]
-            if os.path.exists(inode.absolute_path):
-                wems.append(inode.absolute_path)
+            assert(values != '' and len(values) == 1)
+            if os.path.exists(values[0]):
+                wems.append(values[0])
         self.workspace_popup_menu.add_command(
             label="Import", 
             command=lambda: self.load_wems(wems=wems)
