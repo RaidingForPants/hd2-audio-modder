@@ -14,9 +14,8 @@ from math import ceil
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
-from tkinter.filedialog import askdirectory
 from tkinter.filedialog import askopenfilename
-from typing import Literal, Tuple, Union
+from typing import Literal, Union
 
 import config as cfg
 import log
@@ -2338,7 +2337,6 @@ class MainWindow:
         display optimization behind the scene.
         """
         self.workspace_inodes.clear()
-        self.workspace_view_mapping.clear()
 
         for p in self.app_state.get_workspace_paths():
             inode = fileutil.generate_file_tree(p)
@@ -2349,16 +2347,20 @@ class MainWindow:
             self.workspace.delete(c)
 
         for root_inode in self.workspace_inodes:
-            root_id = self.workspace.insert("", "end", text=root_inode.basename)
+            root_id = self.workspace.insert("", "end", 
+                                            text=root_inode.basename,
+                                            values=[root_inode],
+                                            tags="workspace")
             inode_stack = [root_inode]
             id_stack = [root_id]
-            self.workspace_view_mapping[root_id] = root_inode
             while len(inode_stack) > 0:
                 top_inode = inode_stack.pop()
                 top_id = id_stack.pop()
                 for node in top_inode.nodes:
-                    id = self.workspace.insert(top_id, "end", text=node.basename)
-                    self.workspace_view_mapping[id] = node
+                    id = self.workspace.insert(top_id, "end", 
+                                               text=node.basename,
+                                               values=[node],
+                                               tags="dir" if node.isdir else "file")
                     if node.isdir:
                         inode_stack.append(node)
                         id_stack.append(id)
@@ -2374,29 +2376,38 @@ class MainWindow:
 
     def workspace_on_right_click(self, event):
         self.workspace_popup_menu.delete(0, "end")
+        target_id = self.workspace.identify_row(event.y)
+        if target_id == "":
+            return
         selects = self.workspace.selection()
         if len(selects) == 0:
             return
-        if len(selects) == 1:
-            inode = self.workspace_view_mapping[selects[0]]
-            is_workspace = inode.isdir \
-                    and inode.absolute_path in self.app_state.workspace_paths
-            if is_workspace:
-                self.workspace_popup_menu.add_command(
-                    label="Remove Folder from Workspace",
-                    command=lambda: self.remove_workspace(inode.absolute_path),
-                )
-                self.workspace_popup_menu.tk_popup(
-                    event.x_root, event.y_root
-                )
-                self.workspace_popup_menu.grab_release()
-                return
-            if inode.isdir:
-                return
+        target_tag = self.workspace.item(target_id, option="tags")
+        if target_tag == "workspace":
+            target_values = self.workspace.item(target_id, option="values")
+            assert(len(target_values) == 1 and isinstance(target_values[0], 
+                                                          fileutil.INode))
+            inode = target_values[0]
+            self.workspace_popup_menu.add_command(
+                label="Remove Folder from Workspace",
+                command=lambda: self.remove_workspace(inode.absolute_path),
+            )
+            self.workspace_popup_menu.tk_popup(
+                event.x_root, event.y_root
+            )
+            self.workspace_popup_menu.grab_release()
+            return
         wems = []
         for i in selects:
-            inode = self.workspace_view_mapping[i]
-            if not inode.isdir and os.path.exists(inode.absolute_path):
+            tag = self.workspace.item(i, option="tags")
+            if tag != "file":
+                continue
+            values = self.workspace.item(i, option="values")
+            assert(len(values) == 1 and \
+                    isinstance(values[0], fileutil.INode) \
+                    and not values[0].isdir)
+            inode = values[0]
+            if os.path.exists(inode.absolute_path):
                 wems.append(inode.absolute_path)
         self.workspace_popup_menu.add_command(
             label="Import", 
@@ -2409,9 +2420,8 @@ class MainWindow:
         self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
         self.workspace.heading("#0", text="Workspace Folders")
         self.workspace.column("#0", width=256+16)
-        self.workspace.pack(side="left")
+        self.workspace.pack(side="left", padx=8, pady=8)
         self.workspace_inodes: list[fileutil.INode] = []
-        self.workspace_view_mapping: dict[str, fileutil.INode] = {}
         self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
         self.render_workspace() 
 
