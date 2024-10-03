@@ -2755,7 +2755,6 @@ class MainWindow:
                     and audio.get_track_info().modified
             if is_modified:
                 bg, fg = fg, bg
-                print(bg, fg)
             self.treeview.tag_configure(audio.get_id(),
                                         background=bg,
                                         foreground=fg)
