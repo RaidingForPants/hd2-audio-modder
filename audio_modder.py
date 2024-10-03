@@ -1873,8 +1873,18 @@ class FileHandler:
                                          max_progress=len(wems))
         progress_window.show()
         for wem in wems:
-            progress_window.set_text("Loading " + os.path.basename(wem))
-            file_id: int | None = self.get_number_prefix(os.path.basename(wem))
+            basename = os.path.basename(wem)
+            splits: list[str] = basename.split("_", 1)
+            prefix, rest = splits[0], splits[1]
+            has_seq: bool = True 
+            for c in prefix:
+                if not c.isdigit():
+                    has_seq = False
+                    break
+            if has_seq:
+                basename = rest
+            progress_window.set_text("Loading " + basename)
+            file_id: int | None = self.get_number_prefix(basename)
             if file_id == None:
                 continue
             audio: str | None = self.get_audio_by_id(file_id)
@@ -1885,6 +1895,7 @@ class FileHandler:
             progress_window.step()
         progress_window.destroy()
       
+
 class ProgressWindow:
     def __init__(self, title, max_progress):
         self.title = title
