@@ -8,7 +8,7 @@ from log import logger
 class Config:
 
     def __init__(self, game_data_path: str,
-                 workspace_paths: set = set()):
+                 workspace_paths: set[str] = set()):
         self.game_data_path = game_data_path
         self.workspace_paths = workspace_paths
 
