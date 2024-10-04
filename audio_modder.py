@@ -2254,8 +2254,12 @@ class MainWindow:
         self.sound_handler = sound_handler
         
         self.root = Tk()
-        self.root.tk.call("source", "azure.tcl")
-        self.root.tk.call("set_theme", "dark")
+        try:
+            self.root.tk.call("source", "azure.tcl")
+        except Exception as e:
+            logger.critical("Error occurred when loading themes:")
+            logger.critical(e)
+            logger.critical("Ensure azure.tcl and the themes folder are in the same folder as the executable")
         
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         
@@ -2399,10 +2403,13 @@ class MainWindow:
         
     def set_theme(self):
         theme = self.selected_theme.get()
-        if theme == "dark_mode":
-            self.root.tk.call("set_theme", "dark")
-        elif theme == "light_mode":
-            self.root.tk.call("set_theme", "light")
+        try:
+            if theme == "dark_mode":
+                self.root.tk.call("set_theme", "dark")
+            elif theme == "light_mode":
+                self.root.tk.call("set_theme", "light")
+        except Exception as e:
+            logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
         self.app_state.theme = theme
         self.check_modified()
         
@@ -2915,6 +2922,9 @@ if __name__ == "__main__":
     elif system == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
         FFMPEG = "ffmpeg"
+        
+    if not os.path.exists(VGMSTREAM):
+        logger.error(f"Cannot find vgmstream distribution! Ensure the {os.path.dirname(VGMSTREAM)} folder is in the same folder as the executable")
         
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()

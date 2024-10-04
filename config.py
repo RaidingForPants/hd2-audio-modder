@@ -68,6 +68,10 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             cfg.game_data_path = game_data_path
             cfg.workspace_paths = set([p for p in cfg.workspace_paths 
                                    if os.path.exists(p)])
+        try:
+            t = cfg.theme
+        except:
+            cfg.theme = "dark_mode"
         cfg.save_config()
         return cfg
 
