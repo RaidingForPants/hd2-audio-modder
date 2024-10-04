@@ -1877,11 +1877,11 @@ class FileHandler:
             splits: list[str] = basename.split("_", 1)
             prefix, rest = splits[0], splits[1]
             has_seq: bool = True 
-            for i in range(0, 3):
+            for i in range(0, 2):
                 if not prefix[i].isdigit():
                     has_seq = False
                     break
-            has_seq = has_seq and prefix[3] == "_"
+            has_seq = has_seq and prefix[2] == "_"
             if has_seq:
                 basename = rest
             progress_window.set_text("Loading " + basename)
