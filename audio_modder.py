@@ -15,7 +15,7 @@ from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
 from tkinter.filedialog import askopenfilename
-from typing import Literal, Union
+from typing import Any, Literal, Tuple, Union
 
 import config as cfg
 import log
@@ -272,7 +272,6 @@ class AudioSource:
         self.short_id = 0
         self.modified = False
         self.data_OLD = b""
-        self.track_info_old = None
         self.subscribers = set()
         self.stream_type = 0
         self.track_info = None
@@ -329,9 +328,8 @@ class AudioSource:
             if self.data_OLD != b"":
                 self.data = self.data_OLD
                 self.data_OLD = b""
-            if self.track_info_old is not None:
-                self.track_info = self.track_info_old
-                self.track_info_old = None
+            if self.track_info is not None:
+                self.track_info.revert_modifications()
             self.size = len(self.data)
             if notify_subscribers:
                 for item in self.subscribers:
@@ -1806,11 +1804,17 @@ class FileHandler:
                     if old_audio.get_track_info() is not None and new_audio.get_track_info() is not None:
                         new_track_info = new_audio.get_track_info()
                         old_audio.get_track_info().set_data(play_at=new_track_info.play_at, begin_trim_offset=new_track_info.begin_trim_offset, end_trim_offset=new_track_info.end_trim_offset, source_duration=new_track_info.source_duration)
-                        old_audio.set_track_info(old_audio.get_track_info())
                 progress_window.step()
-            
+
         for key, music_segment in patch_file_reader.music_segments.items():
-            self.file_reader.music_segments[key].set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
+            old_music_segment = self.file_reader.music_segments[key]
+            if (
+                not old_music_segment.modified
+                or music_segment.entry_marker[1] != old_music_segment.entry_marker_old
+                or music_segment.exit_marker[1] != old_music_segment.exit_marker_old
+                or music_segment.duration != old_music_segment.duration_old
+            ):
+                old_music_segment.set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
 
         for text_data in patch_file_reader.text_banks.values():
             for string_id in text_data.string_ids:
@@ -1892,12 +1896,10 @@ class ProgressWindow:
     def show(self):
         self.root = Tk()
         self.root.title(self.title)
-        self.root.configure(background="white")
         self.root.geometry("410x45")
         self.root.attributes('-topmost', True)
         self.progress_bar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.max_progress)
         self.progress_bar_text = Text(self.root)
-        self.progress_bar_text.configure(background="white")
         self.progress_bar.pack()
         self.progress_bar_text.pack()
         self.root.resizable(False, False)
@@ -1924,10 +1926,13 @@ class PopupWindow:
     def show(self):
         self.root = Tk()
         self.root.title(self.title)
-        self.root.configure(background="white")
         #self.root.geometry("410x45")
         self.root.attributes('-topmost', True)
-        self.text = ttk.Label(self.root, text=self.message, background="white", font=('Segoe UI', 12), wraplength=500, justify="left")
+        self.text = ttk.Label(self.root,
+                              text=self.message,
+                              font=('Segoe UI', 12),
+                              wraplength=500,
+                              justify="left")
         self.button = ttk.Button(self.root, text="OK", command=self.destroy)
         self.text.pack(padx=20, pady=0)
         self.button.pack(pady=20)
@@ -1974,10 +1979,9 @@ class AudioSourceWindow:
     def __init__(self, parent, play, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
-        self.frame.configure(background="white")
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.play = play
-        self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
+        self.title_label = Label(self.frame, font=('Segoe UI', 14))
         self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
         self.play_button = ttk.Button(self.frame, text= '\u23f5', image=self.fake_image, compound='c', width=2)
         self.play_at_text_var = tkinter.StringVar(self.frame)
@@ -1985,19 +1989,27 @@ class AudioSourceWindow:
         self.start_offset_text_var = tkinter.StringVar(self.frame)
         self.end_offset_text_var = tkinter.StringVar(self.frame)
         
-        self.play_at_label = Label(self.frame, text="Play At (ms)", background="white", font=('Segoe UI', 12))
+        self.play_at_label = Label(self.frame,
+                                   text="Play At (ms)",
+                                   font=('Segoe UI', 12))
         self.play_at_text = Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=50)
         
         
-        self.duration_label = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.duration_label = Label(self.frame,
+                                    text="Duration (ms)",
+                                    font=('Segoe UI', 12))
         self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
         
         
-        self.start_offset_label = Label(self.frame, text="Start Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.start_offset_label = Label(self.frame,
+                                        text="Start Trim (ms)",
+                                        font=('Segoe UI', 12))
         self.start_offset_text = Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=50)
         
         
-        self.end_offset_label = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.end_offset_label = Label(self.frame,
+                                      text="End Trim (ms)",
+                                      font=('Segoe UI', 12))
         self.end_offset_text = Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=50)
 
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
@@ -2069,31 +2081,38 @@ class AudioSourceWindow:
         self.update_modified()
         
     def apply_changes(self):
-        new_track_info = copy.deepcopy(self.track_info)
-        new_track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
-        self.audio.set_track_info(new_track_info)
-        self.track_info = new_track_info
+        #new_track_info = copy.deepcopy(self.track_info)
+        #new_track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
+        self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
+        self.audio.modified = True
+        #self.audio.set_track_info(new_track_info)
+        #self.track_info = new_track_info
         self.update_modified()
         
 class MusicSegmentWindow:
     def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
-        self.frame.configure(background="white")
         
-        self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
+        self.title_label = Label(self.frame, font=('Segoe UI', 14))
 
         self.duration_text_var = tkinter.StringVar(self.frame)
         self.fade_in_text_var = tkinter.StringVar(self.frame)
         self.fade_out_text_var = tkinter.StringVar(self.frame)
         
-        self.duration_label = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.duration_label = Label(self.frame,
+                                    text="Duration (ms)",
+                                    font=('Segoe UI', 12))
         self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
         
-        self.fade_in_label = Label(self.frame, text="End fade-in (ms)", background="white", font=('Segoe UI', 12))
+        self.fade_in_label = Label(self.frame,
+                                   text="End fade-in (ms)",
+                                   font=('Segoe UI', 12))
         self.fade_in_text = Entry(self.frame, textvariable=self.fade_in_text_var, font=('Segoe UI', 12), width=50)
         
-        self.fade_out_label = Label(self.frame, text="Start fade-out (ms)", background="white", font=('Segoe UI', 12))
+        self.fade_out_label = Label(self.frame,
+                                    text="Start fade-out (ms)",
+                                    font=('Segoe UI', 12))
         self.fade_out_text = Entry(self.frame, textvariable=self.fade_out_text_var, font=('Segoe UI', 12), width=50)
         self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
@@ -2141,25 +2160,32 @@ class EventWindow:
     def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
-        self.frame.configure(background="white")
         
-        self.title_label = Label(self.frame, background="white", font=('Segoe UI', 14))
+        self.title_label = Label(self.frame, font=('Segoe UI', 14))
         
         self.play_at_text_var = tkinter.StringVar(self.frame)
         self.duration_text_var = tkinter.StringVar(self.frame)
         self.start_offset_text_var = tkinter.StringVar(self.frame)
         self.end_offset_text_var = tkinter.StringVar(self.frame)
         
-        self.play_at_label = Label(self.frame, text="Play At (ms)", background="white", font=('Segoe UI', 12))
+        self.play_at_label = Label(self.frame,
+                                   text="Play At (ms)",
+                                   font=('Segoe UI', 12))
         self.play_at_text = Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=50)
         
-        self.duration_label = Label(self.frame, text="Duration (ms)", background="white", font=('Segoe UI', 12))
+        self.duration_label = Label(self.frame,
+                                    text="Duration (ms)",
+                                    font=('Segoe UI', 12))
         self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
         
-        self.start_offset_label = Label(self.frame, text="Start Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.start_offset_label = Label(self.frame,
+                                        text="Start Trim (ms)",
+                                        font=('Segoe UI', 12))
         self.start_offset_text = Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=50)
         
-        self.end_offset_label = Label(self.frame, text="End Trim (ms)", background="white", font=('Segoe UI', 12))
+        self.end_offset_label = Label(self.frame,
+                                      text="End Trim (ms)",
+                                      font=('Segoe UI', 12))
         self.end_offset_text = Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=50)
         self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
@@ -2207,6 +2233,9 @@ class EventWindow:
 
 class MainWindow:
 
+    default_bg = "#333333"
+    default_fg = "#ffffff"
+
     def __init__(self, app_state: cfg.Config, file_handler, sound_handler):
         self.app_state = app_state
 
@@ -2214,25 +2243,38 @@ class MainWindow:
         self.sound_handler = sound_handler
         
         self.root = Tk()
-        self.root.configure(bg="white")
+        self.root.tk.call("source", "azure.tcl")
+        self.root.tk.call("set_theme", "dark")
         
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         
-        self.top_bar = Canvas(self.root, width=WINDOW_WIDTH, height=30)
+        self.top_bar = Canvas(self.root, width=WINDOW_WIDTH, height=40)
         self.search_text_var = tkinter.StringVar(self.root)
         self.search_bar = Entry(self.top_bar, textvariable=self.search_text_var, font=('Arial', 16))
         self.top_bar.pack(side="top")
         
-        self.up_button = ttk.Button(self.top_bar, text='^', image=self.fake_image, compound='c', width=2, command=self.search_up)
-        self.down_button = ttk.Button(self.top_bar, text='v', image=self.fake_image, compound='c', width=2, command=self.search_down)
+        self.up_button = ttk.Button(self.top_bar, text='^', 
+                                    width=1, command=self.search_up)
+        self.down_button = ttk.Button(self.top_bar, text='v',
+                                      width=1, command=self.search_down)
         
-        self.search_label = ttk.Label(self.top_bar, background="white", width=10, font=('Segoe UI', 12), justify="center")
+        self.search_label = ttk.Label(self.top_bar,
+                                      width=10,
+                                      font=('Segoe UI', 12),
+                                      justify="center")
+        self.default_bg = "#333333"
+        self.default_fg = "#ffffff"
         
-        self.top_bar.create_text(WINDOW_WIDTH-425, 0, text="\u2315", fill='gray', font=('Arial', 20), anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-350, 3, window=self.search_bar, anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-375, 5, window=self.up_button, anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-400, 5, window=self.down_button, anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-100, 5, window=self.search_label, anchor='nw')
+        self.top_bar.create_text(WINDOW_WIDTH-450, 4, text="\u2315", 
+                                 fill='gray', font=('Arial', 20), anchor='nw')
+        self.top_bar.create_window(WINDOW_WIDTH-350, 8, window=self.search_bar, 
+                                   anchor='nw')
+        self.top_bar.create_window(WINDOW_WIDTH-390, 5, window=self.up_button, 
+                                   anchor='nw')
+        self.top_bar.create_window(WINDOW_WIDTH-425, 5, window=self.down_button, 
+                                   anchor='nw')
+        self.top_bar.create_window(WINDOW_WIDTH-100, 5, window=self.search_label, 
+                                   anchor='nw')
 
         self.scroll_bar = Scrollbar(self.root, orient=VERTICAL)
         
@@ -2244,8 +2286,8 @@ class MainWindow:
         self.init_workspace()
         
         self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
-        self.treeview.pack(side="left")
-        self.scroll_bar.pack(side="left", fill="y")
+        self.treeview.pack(side="left", padx=8, pady=8)
+        self.scroll_bar.pack(side="left", pady=8, fill="y")
         self.treeview.heading("#0", text="File")
         self.treeview.column("#0", width=250)
         self.treeview.column("type", width=100)
@@ -2256,13 +2298,18 @@ class MainWindow:
         self.treeview.bind("<Return>", self.treeview_on_double_click)
         self.scroll_bar['command'] = self.treeview.yview
 
-        self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3), bg="white")
-        self.entry_info_panel.pack(side="left", fill="both")
+        self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3))
+        self.entry_info_panel.pack(side="left", fill="both", padx=8, pady=8)
         
-        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel, self.play_audio, self.check_modified)
-        self.event_info_panel = EventWindow(self.entry_info_panel, self.check_modified)
-        self.string_info_panel = StringEntryWindow(self.entry_info_panel, self.check_modified)
-        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel, self.check_modified)
+        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel,
+                                                  self.play_audio,
+                                                  self.check_modified)
+        self.event_info_panel = EventWindow(self.entry_info_panel,
+                                            self.check_modified)
+        self.string_info_panel = StringEntryWindow(self.entry_info_panel,
+                                                   self.check_modified)
+        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
+                                                     self.check_modified)
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -2432,7 +2479,7 @@ class MainWindow:
 
             all_audio = True
             for select in selects:
-                values = self.treeview.item(select, "values")
+                values = self.treeview.item(select, option="values")
                 assert(len(values) == 1)
                 if values[0] != "Audio Source":
                     all_audio = False
@@ -2445,9 +2492,9 @@ class MainWindow:
             if not all_audio:
                 return
 
-            tags = self.treeview.item(selects[-1], "tags")
+            tags = self.treeview.item(selects[-1], option="tags")
             assert(len(tags) == 1)
-            self.right_click_id = tags[0]
+            self.right_click_id = int(tags[0])
             
             self.right_click_menu.add_command(
                 label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
@@ -2524,20 +2571,21 @@ class MainWindow:
     def show_info_window(self, event):
         if len(self.treeview.selection()) != 1:
             return
-        selection_type = self.treeview.item(self.treeview.selection())['values'][0]
+        selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
+        selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[0])
         for child in self.entry_info_panel.winfo_children():
             child.forget()
         if selection_type == "String":
-            self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(selection_id))
             self.string_info_panel.frame.pack()
         elif selection_type == "Audio Source":
-            self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(selection_id))
             self.audio_info_panel.frame.pack()
         elif selection_type == "Event":
-            self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(selection_id))
             self.event_info_panel.frame.pack()
         elif selection_type == "Music Segment":
-            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(selection_id))
             self.segment_info_panel.frame.pack()
         elif selection_type == "Sound Bank":
             pass
@@ -2546,21 +2594,21 @@ class MainWindow:
 
     def copy_id(self):
         self.root.clipboard_clear()
-        self.root.clipboard_append("\n".join([f"{self.treeview.item(i)['tags'][0]}" for i in self.treeview.selection()]))
+        self.root.clipboard_append("\n".join([self.treeview.item(i, option="tags")[0] for i in self.treeview.selection()]))
         self.root.update()
         
     def dump_as_wem(self):
         if len(self.treeview.selection()) == 1:
             self.file_handler.dump_as_wem(self.right_click_id)
         else:
-            self.file_handler.dump_multiple_as_wem([self.treeview.item(i)['tags'][0] for i in self.treeview.selection()])
+            self.file_handler.dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()])
         
     def dump_as_wav(self, muted: bool = False, with_seq: int = False):
         if len(self.treeview.selection()) == 1:
             self.file_handler.dump_as_wav(self.right_click_id, muted=muted)
             return
         self.file_handler.dump_multiple_as_wav(
-            [self.treeview.item(i, "tags")[0] for i in self.treeview.selection()],
+            [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
             muted=muted,
             with_seq=with_seq
         )
@@ -2647,11 +2695,11 @@ class MainWindow:
         self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
-        if self.treeview.item(item)['values'][0] == "String":
-            string_entry = self.file_handler.get_string_by_id(self.treeview.item(item)['tags'][0])
+        if self.treeview.item(item, option="values")[0] == "String":
+            string_entry = self.file_handler.get_string_by_id(int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
-            s = self.treeview.item(item)['text']
+            s = self.treeview.item(item, option="text")
             match = s.startswith(search_text_var) or s.endswith(search_text_var)
         children = self.treeview.get_children(item)
         if match: self.search_results.append(item)
@@ -2701,43 +2749,80 @@ class MainWindow:
         self.file_handler.save_archive_file()
         
     def clear_treeview_background(self, item):
-        self.treeview.tag_configure(self.treeview.item(item)['tags'][0], background="white")
+        self.treeview.tag_configure(self.treeview.item(item)['tags'][0],
+                                    background=self.default_bg)
         for child in self.treeview.get_children(item):
             self.clear_treeview_background(child)
         
-    def check_modified(self): #could be improved: small, but noticeable lag if there are many, many entries in the tree
+    """
+    TO-DO:
+    optimization point: small, but noticeable lag if there are many, many 
+    entries in the tree
+    """
+    def check_modified(self): 
         for child in self.treeview.get_children():
             self.clear_treeview_background(child)
+        bg: Any
+        fg: Any
         for audio in self.file_handler.get_audio().values():
-            self.treeview.tag_configure(audio.get_id(), background="lawn green" if audio.modified or audio.get_track_info() is not None and audio.get_track_info().modified else "white")
-            if audio.modified or audio.get_track_info() is not None and audio.get_track_info().modified:
-                items = self.treeview.tag_has(audio.get_id())
-                for item in items:
-                    parent = self.treeview.parent(item)
-                    while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
-                        parent = self.treeview.parent(parent)
+            bg, fg = self.default_bg, self.default_fg
+            is_modified = audio.modified or audio.get_track_info() is not None \
+                    and audio.get_track_info().modified
+            if is_modified:
+                bg, fg = fg, bg
+            self.treeview.tag_configure(audio.get_id(),
+                                        background=bg,
+                                        foreground=fg)
+            if not is_modified:
+                continue
+
+            items = self.treeview.tag_has(audio.get_id())
+            for item in items:
+                parent = self.treeview.parent(item)
+                while parent != "":
+                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
+                                                background=bg, 
+                                                foreground=fg)
+                    parent = self.treeview.parent(parent)
+
         for event in self.file_handler.file_reader.music_track_events.values():
-            self.treeview.tag_configure(event.get_id(), background="lawn green" if event.modified else "white")
+            bg, fg = self.default_bg, self.default_fg
             if event.modified:
-                items = self.treeview.tag_has(event.get_id())
-                for item in items:
-                    parent = self.treeview.parent(item)
-                    while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
-                        parent = self.treeview.parent(parent)
+                bg, fg = fg, bg
+            self.treeview.tag_configure(event.get_id(),
+                                        background=bg,
+                                        foreground=fg)
+            if not event.modified:
+                continue
+
+            items = self.treeview.tag_has(event.get_id())
+            for item in items:
+                parent = self.treeview.parent(item)
+                while parent != "":
+                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
+                                                background=bg,
+                                                foreground=fg)
+                    parent = self.treeview.parent(parent)
         try:
             for string in self.file_handler.get_strings()[language].values():
-                self.treeview.tag_configure(string.get_id(), background="lawn green" if string.modified else "white")
+                bg, fg = self.default_bg, self.default_fg
                 if string.modified:
-                    item = self.treeview.tag_has(string.get_id())
-                    parent = self.treeview.parent(item)
-                    while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
-                        parent = self.treeview.parent(parent)
+                    bg, fg = fg, bg
+                self.treeview.tag_configure(string.get_id(), 
+                                            background=bg,
+                                            foreground=fg)
+                if not string.modified:
+                    continue
+                item = self.treeview.tag_has(string.get_id())
+                parent = self.treeview.parent(item)
+                while parent != "":
+                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0],
+                                                background=bg,
+                                                foreground=fg)
+                    parent = self.treeview.parent(parent)
         except KeyError:
             pass
-        
+
     def load_wems(self, wems: list[str] | None = None):
         self.sound_handler.kill_sound()
         self.file_handler.load_wems(wems=wems)
