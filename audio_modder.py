@@ -1878,15 +1878,12 @@ class FileHandler:
         for wem in wems:
             basename = os.path.basename(wem)
             splits: list[str] = basename.split("_", 1)
-            prefix, rest = splits[0], splits[1]
-            has_seq: bool = True 
-            for i in range(0, 2):
-                if not prefix[i].isdigit():
-                    has_seq = False
-                    break
-            has_seq = has_seq and prefix[2] == "_"
-            if has_seq:
-                basename = rest
+            try:
+                match splits:
+                    case [prefix, name] if int(prefix) < 10000:
+                        basename = name
+            except:
+                pass
             progress_window.set_text("Loading " + basename)
             file_id: int | None = self.get_number_prefix(basename)
             if file_id == None:
@@ -2093,12 +2090,8 @@ class AudioSourceWindow:
         self.update_modified()
         
     def apply_changes(self):
-        #new_track_info = copy.deepcopy(self.track_info)
-        #new_track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
         self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
         self.audio.modified = True
-        #self.audio.set_track_info(new_track_info)
-        #self.track_info = new_track_info
         self.update_modified()
         
 class MusicSegmentWindow:
@@ -2245,8 +2238,14 @@ class EventWindow:
 
 class MainWindow:
 
-    default_bg = "#333333"
-    default_fg = "#ffffff"
+    dark_mode_bg = "#333333"
+    dark_mode_fg = "#ffffff"
+    dark_mode_modified_bg = "#ffffff"
+    dark_mode_modified_fg = "#333333"
+    light_mode_bg = "#ffffff"
+    light_mode_fg = "#000000"
+    light_mode_modified_bg = "#7CFC00"
+    light_mode_modified_fg = "#000000"
 
     def __init__(self, app_state: cfg.Config, file_handler, sound_handler):
         self.app_state = app_state
@@ -2262,7 +2261,7 @@ class MainWindow:
         
         self.top_bar = Canvas(self.root, width=WINDOW_WIDTH, height=40)
         self.search_text_var = tkinter.StringVar(self.root)
-        self.search_bar = Entry(self.top_bar, textvariable=self.search_text_var, font=('Arial', 16))
+        self.search_bar = Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
         self.top_bar.pack(side="top")
         
         self.up_button = ttk.Button(self.top_bar, text='^', 
@@ -2272,23 +2271,23 @@ class MainWindow:
         
         self.search_label = ttk.Label(self.top_bar,
                                       width=10,
-                                      font=('Segoe UI', 12),
+                                      font=('Segoe UI', 14),
                                       justify="center")
         self.default_bg = "#333333"
         self.default_fg = "#ffffff"
         
-        self.top_bar.create_text(WINDOW_WIDTH-450, 4, text="\u2315", 
+        self.top_bar.create_text(WINDOW_WIDTH-430, 4, text="\u2315", 
                                  fill='gray', font=('Arial', 20), anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-350, 8, window=self.search_bar, 
+        self.top_bar.create_window(WINDOW_WIDTH-330, 8, window=self.search_bar, 
                                    anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-390, 5, window=self.up_button, 
+        self.top_bar.create_window(WINDOW_WIDTH-370, 5, window=self.up_button, 
                                    anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-425, 5, window=self.down_button, 
+        self.top_bar.create_window(WINDOW_WIDTH-405, 5, window=self.down_button, 
                                    anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-100, 5, window=self.search_label, 
+        self.top_bar.create_window(WINDOW_WIDTH-110, 5, window=self.search_label, 
                                    anchor='nw')
 
-        self.scroll_bar = Scrollbar(self.root, orient=VERTICAL)
+        self.scroll_bar = ttk.Scrollbar(self.root, orient=VERTICAL)
         
         self.top_bar.pack(side="top")
         
@@ -2339,6 +2338,15 @@ class MainWindow:
         
         self.selected_language = StringVar()
         self.options_menu = Menu(self.menu, tearoff=0)
+        
+        self.selected_theme = StringVar()
+        self.selected_theme.set(self.app_state.theme)
+        self.set_theme()
+        self.theme_menu = Menu(self.menu, tearoff=0)
+        self.theme_menu.add_radiobutton(label="Dark Mode", variable=self.selected_theme, value="dark_mode", command=self.set_theme)
+        self.theme_menu.add_radiobutton(label="Light Mode", variable=self.selected_theme, value="light_mode", command=self.set_theme)
+        self.options_menu.add_cascade(menu=self.theme_menu, label="Set Theme")
+        
         self.language_menu = Menu(self.options_menu, tearoff=0)
         
         self.file_menu = Menu(self.menu, tearoff=0)
@@ -2388,6 +2396,28 @@ class MainWindow:
         
     def search_bar_on_enter_key(self, event):
         self.search()
+        
+    def set_theme(self):
+        theme = self.selected_theme.get()
+        if theme == "dark_mode":
+            self.root.tk.call("set_theme", "dark")
+        elif theme == "light_mode":
+            self.root.tk.call("set_theme", "light")
+        self.app_state.theme = theme
+        self.check_modified()
+        
+    def get_colors(self, modified=False):
+        theme = self.selected_theme.get()
+        if theme == "dark_mode":
+            if modified:
+                return (MainWindow.dark_mode_modified_bg, MainWindow.dark_mode_modified_fg)
+            else:
+                return (MainWindow.dark_mode_bg, MainWindow.dark_mode_fg)
+        elif theme == "light_mode":
+            if modified:
+                return (MainWindow.light_mode_modified_bg, MainWindow.light_mode_modified_fg)
+            else:
+                return (MainWindow.light_mode_bg, MainWindow.light_mode_fg)
 
     def render_workspace(self):
         """
@@ -2480,6 +2510,10 @@ class MainWindow:
         self.workspace.pack(side="left", padx=8, pady=8)
         self.workspace_inodes: list[fileutil.INode] = []
         self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
+        self.workspace_scroll_bar = ttk.Scrollbar(self.root, orient=VERTICAL)
+        self.workspace_scroll_bar['command'] = self.workspace.yview
+        self.workspace_scroll_bar.pack(side="left", pady=8, fill="y")
+        self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
         self.render_workspace() 
 
     def treeview_on_right_click(self, event):
@@ -2739,7 +2773,7 @@ class MainWindow:
         self.sound_handler.kill_sound()
         if self.file_handler.load_archive_file(initialdir=initialdir):
             self.clear_search()
-            self.options_menu.delete(0, "end") #change to delete only the language select menu
+            self.options_menu.delete(1, "end") #change to delete only the language select menu
             if len(self.file_handler.get_strings()) > 0:
                 self.language_menu.delete(0, "end")
                 first = ""
@@ -2759,10 +2793,12 @@ class MainWindow:
     def save_archive(self):
         self.sound_handler.kill_sound()
         self.file_handler.save_archive_file()
+            
         
     def clear_treeview_background(self, item):
+        bg_color = self.get_colors()[0]
         self.treeview.tag_configure(self.treeview.item(item)['tags'][0],
-                                    background=self.default_bg)
+                                    background=bg_color)
         for child in self.treeview.get_children(item):
             self.clear_treeview_background(child)
         
@@ -2777,11 +2813,9 @@ class MainWindow:
         bg: Any
         fg: Any
         for audio in self.file_handler.get_audio().values():
-            bg, fg = self.default_bg, self.default_fg
             is_modified = audio.modified or audio.get_track_info() is not None \
                     and audio.get_track_info().modified
-            if is_modified:
-                bg, fg = fg, bg
+            bg, fg = self.get_colors(modified=is_modified)
             self.treeview.tag_configure(audio.get_id(),
                                         background=bg,
                                         foreground=fg)
@@ -2798,9 +2832,7 @@ class MainWindow:
                     parent = self.treeview.parent(parent)
 
         for event in self.file_handler.file_reader.music_track_events.values():
-            bg, fg = self.default_bg, self.default_fg
-            if event.modified:
-                bg, fg = fg, bg
+            bg, fg = self.get_colors(modified=event.modified)
             self.treeview.tag_configure(event.get_id(),
                                         background=bg,
                                         foreground=fg)
@@ -2817,9 +2849,7 @@ class MainWindow:
                     parent = self.treeview.parent(parent)
         try:
             for string in self.file_handler.get_strings()[language].values():
-                bg, fg = self.default_bg, self.default_fg
-                if string.modified:
-                    bg, fg = fg, bg
+                bg, fg = self.get_colors(modified=string.modified)
                 self.treeview.tag_configure(string.get_id(), 
                                             background=bg,
                                             foreground=fg)
@@ -2892,3 +2922,4 @@ if __name__ == "__main__":
     window = MainWindow(app_state, file_handler, sound_handler)
     
     app_state.save_config()
+

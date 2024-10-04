@@ -8,9 +8,11 @@ from log import logger
 class Config:
 
     def __init__(self, game_data_path: str,
-                 workspace_paths: set[str] = set()):
+                 workspace_paths: set[str] = set(),
+                 theme: str = "dark_mode",):
         self.game_data_path = game_data_path
         self.workspace_paths = workspace_paths
+        self.theme = theme
 
     """
     @return (int): A status code to tell whether there are new workspace being 
@@ -35,7 +37,6 @@ class Config:
         except Exception as e:
             logger.error("Error occur when serializing configuration")
             logger.error(e)
-
 
     def get_workspace_paths(self) -> set[str]:
         # Validate and update all workspace paths to ensure they exists
