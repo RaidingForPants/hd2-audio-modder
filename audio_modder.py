@@ -2411,6 +2411,9 @@ class MainWindow:
         except Exception as e:
             logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
         self.app_state.theme = theme
+        self.workspace.column("#0", width=256+16)
+        self.treeview.column("#0", width=250)
+        self.treeview.column("type", width=100)
         self.check_modified()
         
     def get_colors(self, modified=False):
