@@ -273,7 +273,6 @@ class AudioSource:
         self.short_id = 0
         self.modified = False
         self.data_OLD = b""
-        self.track_info_old = None
         self.subscribers = set()
         self.stream_type = 0
         self.track_info = None
@@ -330,9 +329,8 @@ class AudioSource:
             if self.data_OLD != b"":
                 self.data = self.data_OLD
                 self.data_OLD = b""
-            if self.track_info_old is not None:
-                self.track_info = self.track_info_old
-                self.track_info_old = None
+            if self.track_info is not None:
+                self.track_info.revert_modifications()
             self.size = len(self.data)
             if notify_subscribers:
                 for item in self.subscribers:
@@ -1807,11 +1805,17 @@ class FileHandler:
                     if old_audio.get_track_info() is not None and new_audio.get_track_info() is not None:
                         new_track_info = new_audio.get_track_info()
                         old_audio.get_track_info().set_data(play_at=new_track_info.play_at, begin_trim_offset=new_track_info.begin_trim_offset, end_trim_offset=new_track_info.end_trim_offset, source_duration=new_track_info.source_duration)
-                        old_audio.set_track_info(old_audio.get_track_info())
                 progress_window.step()
-            
+
         for key, music_segment in patch_file_reader.music_segments.items():
-            self.file_reader.music_segments[key].set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
+            old_music_segment = self.file_reader.music_segments[key]
+            if (
+                not old_music_segment.modified
+                or music_segment.entry_marker[1] != old_music_segment.entry_marker_old
+                or music_segment.exit_marker[1] != old_music_segment.exit_marker_old
+                or music_segment.duration != old_music_segment.duration_old
+            ):
+                old_music_segment.set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
 
         for text_data in patch_file_reader.text_banks.values():
             for string_id in text_data.string_ids:
@@ -2070,10 +2074,12 @@ class AudioSourceWindow:
         self.update_modified()
         
     def apply_changes(self):
-        new_track_info = copy.deepcopy(self.track_info)
-        new_track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
-        self.audio.set_track_info(new_track_info)
-        self.track_info = new_track_info
+        #new_track_info = copy.deepcopy(self.track_info)
+        #new_track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
+        self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
+        self.audio.modified = True
+        #self.audio.set_track_info(new_track_info)
+        #self.track_info = new_track_info
         self.update_modified()
         
 class MusicSegmentWindow:
@@ -2424,7 +2430,7 @@ class MainWindow:
 
             all_audio = True
             for select in selects:
-                values = self.treeview.item(select, "values")
+                values = self.treeview.item(select, option="values")
                 assert(len(values) == 1)
                 if values[0] != "Audio Source":
                     all_audio = False
@@ -2437,9 +2443,9 @@ class MainWindow:
             if not all_audio:
                 return
 
-            tags = self.treeview.item(selects[-1], "tags")
+            tags = self.treeview.item(selects[-1], option="tags")
             assert(len(tags) == 1)
-            self.right_click_id = tags[0]
+            self.right_click_id = int(tags[0])
             
             self.right_click_menu.add_command(
                 label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
@@ -2516,20 +2522,21 @@ class MainWindow:
     def show_info_window(self, event):
         if len(self.treeview.selection()) != 1:
             return
-        selection_type = self.treeview.item(self.treeview.selection())['values'][0]
+        selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
+        selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[0])
         for child in self.entry_info_panel.winfo_children():
             child.forget()
         if selection_type == "String":
-            self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(selection_id))
             self.string_info_panel.frame.pack()
         elif selection_type == "Audio Source":
-            self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(selection_id))
             self.audio_info_panel.frame.pack()
         elif selection_type == "Event":
-            self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(selection_id))
             self.event_info_panel.frame.pack()
         elif selection_type == "Music Segment":
-            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(self.treeview.item(self.treeview.selection())['tags'][0]))
+            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(selection_id))
             self.segment_info_panel.frame.pack()
         elif selection_type == "Sound Bank":
             pass
@@ -2538,21 +2545,21 @@ class MainWindow:
 
     def copy_id(self):
         self.root.clipboard_clear()
-        self.root.clipboard_append("\n".join([f"{self.treeview.item(i)['tags'][0]}" for i in self.treeview.selection()]))
+        self.root.clipboard_append("\n".join([self.treeview.item(i, option="tags")[0] for i in self.treeview.selection()]))
         self.root.update()
         
     def dump_as_wem(self):
         if len(self.treeview.selection()) == 1:
             self.file_handler.dump_as_wem(self.right_click_id)
         else:
-            self.file_handler.dump_multiple_as_wem([self.treeview.item(i)['tags'][0] for i in self.treeview.selection()])
+            self.file_handler.dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()])
         
     def dump_as_wav(self, muted: bool = False, with_seq: int = False):
         if len(self.treeview.selection()) == 1:
             self.file_handler.dump_as_wav(self.right_click_id, muted=muted)
             return
         self.file_handler.dump_multiple_as_wav(
-            [self.treeview.item(i, "tags")[0] for i in self.treeview.selection()],
+            [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
             muted=muted,
             with_seq=with_seq
         )
@@ -2639,11 +2646,11 @@ class MainWindow:
         self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
-        if self.treeview.item(item)['values'][0] == "String":
-            string_entry = self.file_handler.get_string_by_id(self.treeview.item(item)['tags'][0])
+        if self.treeview.item(item, option="values")[0] == "String":
+            string_entry = self.file_handler.get_string_by_id(int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
-            s = self.treeview.item(item)['text']
+            s = self.treeview.item(item, option="text")
             match = s.startswith(search_text_var) or s.endswith(search_text_var)
         children = self.treeview.get_children(item)
         if match: self.search_results.append(item)
@@ -2693,7 +2700,7 @@ class MainWindow:
         self.file_handler.save_archive_file()
         
     def clear_treeview_background(self, item):
-        self.treeview.tag_configure(self.treeview.item(item)['tags'][0], background="white")
+        self.treeview.tag_configure(self.treeview.item(item, option="tags")[0], background="white")
         for child in self.treeview.get_children(item):
             self.clear_treeview_background(child)
         
@@ -2707,7 +2714,7 @@ class MainWindow:
                 for item in items:
                     parent = self.treeview.parent(item)
                     while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
+                        self.treeview.tag_configure(self.treeview.item(parent, option="tags")[0], background="lawn green")
                         parent = self.treeview.parent(parent)
         for event in self.file_handler.file_reader.music_track_events.values():
             self.treeview.tag_configure(event.get_id(), background="lawn green" if event.modified else "white")
@@ -2716,7 +2723,7 @@ class MainWindow:
                 for item in items:
                     parent = self.treeview.parent(item)
                     while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
+                        self.treeview.tag_configure(self.treeview.item(parent, option="tags")[0], background="lawn green")
                         parent = self.treeview.parent(parent)
         try:
             for string in self.file_handler.get_strings()[language].values():
@@ -2725,7 +2732,7 @@ class MainWindow:
                     item = self.treeview.tag_has(string.get_id())
                     parent = self.treeview.parent(item)
                     while parent != "":
-                        self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], background="lawn green")
+                        self.treeview.tag_configure(self.treeview.item(parent, option="tags")[0], background="lawn green")
                         parent = self.treeview.parent(parent)
         except KeyError:
             pass
