@@ -1481,8 +1481,12 @@ class SoundHandler:
         if not os.path.isfile(f"{filename}.wav"):
             with open(f'{filename}.wem', 'wb') as f:
                 f.write(sound_data)
-            subprocess.run([VGMSTREAM, "-o", f"{filename}.wav", f"{filename}.wem"], stdout=subprocess.DEVNULL)
+            process = subprocess.run([VGMSTREAM, "-o", f"{filename}.wav", f"{filename}.wem"], stdout=subprocess.DEVNULL)
             os.remove(f"{filename}.wem")
+            if process.returncode != 0:
+                logger.error(f"Encountered error when converting {sound_id}.wem for playback")
+                self.callback = None
+                return
             
         self.audio_id = sound_id
         self.wave_file = wave.open(f"{filename}.wav")
@@ -1592,10 +1596,13 @@ class FileHandler:
         with open(f"{save_path}.wem", 'wb') as f:
             f.write(self.get_audio_by_id(file_id).get_data())
 
-        subprocess.run(
+        process = subprocess.run(
             [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], 
             stdout=subprocess.DEVNULL
         )
+        
+        if process.returncode != 0:
+            logger.error(f"Encountered error when converting {file_id}.wem into .wav format")
 
         os.remove(f"{save_path}.wem")
         
@@ -1656,10 +1663,12 @@ class FileHandler:
             else:
                 with open(save_path + ".wem", "wb") as f:
                     f.write(audio.get_data())
-                subprocess.run(
+                process = subprocess.run(
                     [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"],
                     stdout=subprocess.DEVNULL,
                 )
+                if process.returncode != 0:
+                    logger.error(f"Encountered error when converting {basename}.wem to .wav")
                 os.remove(f"{save_path}.wem")
             progress_window.step()
 
@@ -1703,7 +1712,9 @@ class FileHandler:
                     progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wav")
                     with open(save_path+".wem", "wb") as f:
                         f.write(audio.get_data())
-                    subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
+                    process = subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
+                    if process.returncode != 0:
+                        logger.error(f"Encountered error when converting {os.path.basename(save_path)}.wem to .wav")
                     os.remove(f"{save_path}.wem")
                     progress_window.step()
         else:
@@ -2635,7 +2646,7 @@ class MainWindow:
             values = self.workspace.item(select, option="values")
             tags = self.workspace.item(select, option="tags")
             assert(len(values) == 1 and len(tags) == 1)
-            if tags[0] == "file" and os.path.exists(values[0]):
+            if tags[0] == "file" and os.path.splitext(values[0])[1] == ".wem" and os.path.exists(values[0]):
                 audio_data = None
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
