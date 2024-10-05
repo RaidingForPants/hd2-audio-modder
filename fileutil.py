@@ -25,10 +25,11 @@ def generate_file_tree(path) -> INode | None:
             inodes[absolute_path] = inode
             curr.nodes.append(inode)
         for filename in filenames:
-            ext = filename.split(".")
-            if ext[-1] == "wem":
+            f, ext = os.path.splitext(filename)
+            if ext == ".wem" or "patch" in ext:
                 curr.nodes.append(INode(
                     False, os.path.join(dirpath, filename), filename))
+                
     return inodes[path]
 
 def traverse(node):

@@ -1765,9 +1765,10 @@ class FileHandler:
     def get_strings(self):
         return self.file_reader.string_entries
         
-    def load_archive_file(self, initialdir: str | None = ''):
-        archive_file = askopenfilename(initialdir=initialdir, 
-                                       title="Select archive")
+    def load_archive_file(self, initialdir: str | None = '', archive_file: str | None = None):
+        if archive_file == None:
+            archive_file = askopenfilename(initialdir=initialdir, 
+                                           title="Select archive")
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         if os.path.exists(archive_file):
@@ -1778,9 +1779,10 @@ class FileHandler:
         return True
             
             
-    def load_patch(self): #TO-DO: only import if DIFFERENT from original audio; makes it possible to import different mods that change the same soundbank
+    def load_patch(self, patch_file: str | None = None): #TO-DO: only import if DIFFERENT from original audio; makes it possible to import different mods that change the same soundbank
         patch_file_reader = FileReader()
-        patch_file = filedialog.askopenfilename(title="Choose patch file to import")
+        if patch_file == None:
+            patch_file = filedialog.askopenfilename(title="Choose patch file to import")
         if os.path.splitext(patch_file)[1] in (".stream", ".gpu_resources"):
             patch_file = os.path.splitext(patch_file)[0]
         if os.path.exists(patch_file):
@@ -2393,6 +2395,7 @@ class MainWindow:
 
         self.treeview.bind("<Button-3>", self.treeview_on_right_click)
         self.workspace.bind("<Button-3>", self.workspace_on_right_click)
+        self.workspace.bind("<Double-Button-1>", self.workspace_on_double_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
 
         self.root.resizable(False, False)
@@ -2494,8 +2497,16 @@ class MainWindow:
                 )
                 self.workspace_popup_menu.grab_release()
                 return
-            if tags[0] == "dir":
+            elif tags[0] == "dir":
                 return
+            elif tags[0] == "file":
+                values = self.workspace.item(select, option="values")
+                assert(values != '' and len(values) == 1)
+                if "patch" in os.path.splitext(values[0])[1] and os.path.exists(values[0]):
+                    self.workspace_popup_menu.add_command(
+                        label="Open",
+                        command=lambda: self.load_archive(archive_file=values[0]),
+                    )
         wems = []
         for i in selects:
             tags = self.workspace.item(i, option="tags")
@@ -2508,10 +2519,21 @@ class MainWindow:
                 wems.append(values[0])
         self.workspace_popup_menu.add_command(
             label="Import", 
-            command=lambda: self.load_wems(wems=wems)
+            command=lambda: self.import_from_workspace(files=wems)
         )
         self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
         self.workspace_popup_menu.grab_release()
+        
+    def import_from_workspace(self, files):
+        patches = [file for file in files if "patch" in os.path.splitext(file)[1]]
+        wems = [file for file in files if os.path.splitext(file)[1] == ".wem"]
+        for patch in patches:
+            self.sound_handler.kill_sound()
+            self.file_handler.load_patch(patch_file=patch)
+        if len(wems) > 0:
+            self.load_wems(wems=wems)
+        else:
+            self.check_modified()
 
     def init_workspace(self):
         self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
@@ -2595,6 +2617,19 @@ class MainWindow:
             if values[0] != "Audio Source":
                 continue
             self.play_audio(int(tags[0]))
+            
+    def workspace_on_double_click(self, event):
+        selects = self.workspace.selection()
+        if len(selects) == 1:
+            select = selects[0]
+            values = self.workspace.item(select, option="values")
+            tags = self.workspace.item(select, option="tags")
+            assert(len(values) == 1 and len(tags) == 1)
+            if tags[0] == "file" and os.path.exists(values[0]):
+                audio_data = None
+                with open(values[0], "rb") as f:
+                    audio_data = f.read()
+                self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
             
     def set_language(self):
         global language
@@ -2737,6 +2772,7 @@ class MainWindow:
         self.treeview.delete(*self.treeview.get_children())
         bank_dict = self.file_handler.get_wwise_banks()
         for bank in bank_dict.values():
+            existing_sources.clear()
             bank_entry = self.create_treeview_entry(bank)
             for hierarchy_entry in bank.hierarchy.entries.values():
                 for source in hierarchy_entry.sources:
@@ -2779,9 +2815,9 @@ class MainWindow:
         else:
             self.search_label['text'] = ""
 
-    def load_archive(self, initialdir: str | None = ''):
+    def load_archive(self, initialdir: str | None = '', archive_file: str | None = None):
         self.sound_handler.kill_sound()
-        if self.file_handler.load_archive_file(initialdir=initialdir):
+        if self.file_handler.load_archive_file(initialdir=initialdir, archive_file=archive_file):
             self.clear_search()
             self.options_menu.delete(1, "end") #change to delete only the language select menu
             if len(self.file_handler.get_strings()) > 0:
