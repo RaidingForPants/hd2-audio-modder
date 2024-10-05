@@ -12,6 +12,8 @@ If you run the Python code, you will need the appropriate distribution of [vgmst
 
 ## Running the Python code
 
+Requires Python 3.10 or later.
+
 ### Windows
 Install [Python 3](https://www.python.org/downloads/windows/). Make sure to check in the Python installer the optional feature "tcl/tk and IDLE".
 
