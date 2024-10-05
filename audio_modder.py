@@ -1772,9 +1772,14 @@ class FileHandler:
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         if os.path.exists(archive_file):
-            self.file_reader.from_file(archive_file)
+            try:
+                self.file_reader.from_file(archive_file)
+            except Exception as e:
+                logger.error(f"Error occured when loading {archive_file}: {e}.")
+                logger.warning("Aborting load")
+                return False
         else:
-            print("Invalid file selected, aborting load")   
+            print("Invalid file selected, aborting load")
             return False
         return True
             
@@ -1786,7 +1791,12 @@ class FileHandler:
         if os.path.splitext(patch_file)[1] in (".stream", ".gpu_resources"):
             patch_file = os.path.splitext(patch_file)[0]
         if os.path.exists(patch_file):
-            patch_file_reader.from_file(patch_file)
+            try:
+                patch_file_reader.from_file(patch_file)
+            except Exception as e:
+                logger.error(f"Error occured when loading {patch_file}: {e}.")
+                logger.warning("Aborting load")
+                return False
         else:
             print("Invalid file selected, aborting load")
             return False
@@ -2835,6 +2845,9 @@ class MainWindow:
                 self.create_hierarchy_view()
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
+        else:
+            for child in self.treeview.get_children():
+                self.treeview.delete(child)
         
     def save_archive(self):
         self.sound_handler.kill_sound()
