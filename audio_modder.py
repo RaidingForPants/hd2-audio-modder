@@ -2450,7 +2450,7 @@ class MainWindow:
         """
         self.workspace_inodes.clear()
 
-        for p in self.app_state.get_workspace_paths():
+        for p in sorted(self.app_state.get_workspace_paths()):
             inode = fileutil.generate_file_tree(p)
             if inode != None:
                 self.workspace_inodes.append(inode)
