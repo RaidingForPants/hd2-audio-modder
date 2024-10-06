@@ -1994,7 +1994,7 @@ class StringEntryWindow:
     def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
-        self.text_box = Text(self.frame, width=50, font=('Segoe UI', 12), wrap=WORD)
+        self.text_box = Text(self.frame, width=54, font=('Segoe UI', 12), wrap=WORD)
         self.string_entry = None
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         
@@ -2029,40 +2029,46 @@ class AudioSourceWindow:
         self.update_modified = update_modified
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.play = play
-        self.title_label = Label(self.frame, font=('Segoe UI', 14))
+        self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), width=50, anchor="center")
         self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
         self.play_button = ttk.Button(self.frame, text= '\u23f5', image=self.fake_image, compound='c', width=2)
+        self.play_original_button = ttk.Button(self.frame, text= '\u23f5', width=2)
+        self.play_original_label = ttk.Label(self.frame, font=('Segoe UI', 12), text="Play Original Audio")
         self.play_at_text_var = tkinter.StringVar(self.frame)
         self.duration_text_var = tkinter.StringVar(self.frame)
         self.start_offset_text_var = tkinter.StringVar(self.frame)
         self.end_offset_text_var = tkinter.StringVar(self.frame)
         
-        self.play_at_label = Label(self.frame,
+        self.play_at_label = ttk.Label(self.frame,
                                    text="Play At (ms)",
-                                   font=('Segoe UI', 12))
-        self.play_at_text = Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=50)
+                                   font=('Segoe UI', 12),
+                                   anchor="center")
+        self.play_at_text = ttk.Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=54)
         
         
-        self.duration_label = Label(self.frame,
+        self.duration_label = ttk.Label(self.frame,
                                     text="Duration (ms)",
-                                    font=('Segoe UI', 12))
-        self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
+                                    font=('Segoe UI', 12),
+                                    anchor="center")
+        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=54)
         
         
-        self.start_offset_label = Label(self.frame,
+        self.start_offset_label = ttk.Label(self.frame,
                                         text="Start Trim (ms)",
-                                        font=('Segoe UI', 12))
-        self.start_offset_text = Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=50)
+                                        font=('Segoe UI', 12),
+                                        anchor="center")
+        self.start_offset_text = ttk.Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=54)
         
         
-        self.end_offset_label = Label(self.frame,
+        self.end_offset_label = ttk.Label(self.frame,
                                       text="End Trim (ms)",
-                                      font=('Segoe UI', 12))
-        self.end_offset_text = Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=50)
+                                      font=('Segoe UI', 12),
+                                      anchor="center")
+        self.end_offset_text = ttk.Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=54)
 
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
-        self.title_label.pack()
+        self.title_label.pack(pady=5)
        
         
     def set_audio(self, audio):
@@ -2081,7 +2087,17 @@ class AudioSourceWindow:
             else:
                 button.configure(text= '\u23f9')
             self.play(file_id, callback)
+        def play_original_audio(button, file_id, callback):
+            if button['text'] == '\u23f9':
+                button.configure(text= '\u23f5')
+            else:
+                button.configure(text= '\u23f9')
+            temp = self.audio.data
+            self.audio.data = self.audio.data_OLD
+            self.play(file_id, callback)
+            self.audio.data = temp
         self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
+        self.play_original_button.configure(command=partial(play_original_audio, self.play_original_button, audio.get_short_id(), partial(reset_button_icon, self.play_original_button)))
         if self.track_info is not None:
             self.play_at_text.delete(0, 'end')
             self.duration_text.delete(0, 'end')
@@ -2113,6 +2129,12 @@ class AudioSourceWindow:
             self.end_offset_label.forget()
             self.end_offset_text.forget()
             self.apply_button.forget()
+        if self.audio.modified and self.audio.data_OLD != b"":
+            self.play_original_label.pack(side="right")
+            self.play_original_button.pack(side="right")
+        else:
+            self.play_original_label.forget()
+            self.play_original_button.forget()
             
     def revert(self):
         self.audio.revert_modifications()
@@ -2127,6 +2149,8 @@ class AudioSourceWindow:
             self.start_offset_text.insert(END, f"{self.track_info.begin_trim_offset}")
             self.end_offset_text.insert(END, f"{self.track_info.end_trim_offset}")
         self.update_modified()
+        self.play_original_label.forget()
+        self.play_original_button.forget()
         
     def apply_changes(self):
         self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
@@ -2138,30 +2162,30 @@ class MusicSegmentWindow:
         self.frame = Frame(parent)
         self.update_modified = update_modified
         
-        self.title_label = Label(self.frame, font=('Segoe UI', 14))
+        self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), anchor="center")
 
         self.duration_text_var = tkinter.StringVar(self.frame)
         self.fade_in_text_var = tkinter.StringVar(self.frame)
         self.fade_out_text_var = tkinter.StringVar(self.frame)
         
-        self.duration_label = Label(self.frame,
+        self.duration_label = ttk.Label(self.frame,
                                     text="Duration (ms)",
                                     font=('Segoe UI', 12))
-        self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
+        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=54)
         
-        self.fade_in_label = Label(self.frame,
+        self.fade_in_label = ttk.Label(self.frame,
                                    text="End fade-in (ms)",
                                    font=('Segoe UI', 12))
-        self.fade_in_text = Entry(self.frame, textvariable=self.fade_in_text_var, font=('Segoe UI', 12), width=50)
+        self.fade_in_text = ttk.Entry(self.frame, textvariable=self.fade_in_text_var, font=('Segoe UI', 12), width=54)
         
-        self.fade_out_label = Label(self.frame,
+        self.fade_out_label = ttk.Label(self.frame,
                                     text="Start fade-out (ms)",
                                     font=('Segoe UI', 12))
-        self.fade_out_text = Entry(self.frame, textvariable=self.fade_out_text_var, font=('Segoe UI', 12), width=50)
+        self.fade_out_text = ttk.Entry(self.frame, textvariable=self.fade_out_text_var, font=('Segoe UI', 12), width=54)
         self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
-        self.title_label.pack()
+        self.title_label.pack(pady=5)
         
         self.duration_label.pack()
         self.duration_text.pack()
@@ -2210,29 +2234,29 @@ class EventWindow:
         self.start_offset_text_var = tkinter.StringVar(self.frame)
         self.end_offset_text_var = tkinter.StringVar(self.frame)
         
-        self.play_at_label = Label(self.frame,
+        self.play_at_label = ttk.Label(self.frame,
                                    text="Play At (ms)",
                                    font=('Segoe UI', 12))
-        self.play_at_text = Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=50)
+        self.play_at_text = ttk.Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=54)
         
-        self.duration_label = Label(self.frame,
+        self.duration_label = ttk.Label(self.frame,
                                     text="Duration (ms)",
                                     font=('Segoe UI', 12))
-        self.duration_text = Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=50)
+        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=54)
         
-        self.start_offset_label = Label(self.frame,
+        self.start_offset_label = ttk.Label(self.frame,
                                         text="Start Trim (ms)",
                                         font=('Segoe UI', 12))
-        self.start_offset_text = Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=50)
+        self.start_offset_text = ttk.Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=54)
         
-        self.end_offset_label = Label(self.frame,
+        self.end_offset_label = ttk.Label(self.frame,
                                       text="End Trim (ms)",
                                       font=('Segoe UI', 12))
-        self.end_offset_text = Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=50)
+        self.end_offset_text = ttk.Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=54)
         self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
-        self.title_label.pack()
+        self.title_label.pack(pady=5)
         
         self.play_at_label.pack()
         self.play_at_text.pack()
@@ -2297,36 +2321,34 @@ class MainWindow:
             logger.critical("Error occurred when loading themes:")
             logger.critical(e)
             logger.critical("Ensure azure.tcl and the themes folder are in the same folder as the executable")
-        
+
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
-        
-        self.top_bar = Canvas(self.root, width=WINDOW_WIDTH, height=40)
+
+        self.top_bar = Frame(self.root, width=WINDOW_WIDTH, height=40)
         self.search_text_var = tkinter.StringVar(self.root)
-        self.search_bar = Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
-        self.top_bar.pack(side="top")
-        
-        self.up_button = ttk.Button(self.top_bar, text='^', 
-                                    width=1, command=self.search_up)
-        self.down_button = ttk.Button(self.top_bar, text='v',
-                                      width=1, command=self.search_down)
-        
+        self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
+        self.top_bar.pack(side="top", fill='x')
+
+        self.up_button = ttk.Button(self.top_bar, text='\u25b2',
+                                    width=2, command=self.search_up)
+        self.down_button = ttk.Button(self.top_bar, text='\u25bc',
+                                      width=2, command=self.search_down)
+
         self.search_label = ttk.Label(self.top_bar,
                                       width=10,
                                       font=('Segoe UI', 14),
                                       justify="center")
+
+        self.search_icon = ttk.Label(self.top_bar, font=('Arial', 20), text="\u2315")
+
+        self.search_label.pack(side="right", padx=1)
+        self.search_bar.pack(side="right", padx=1)
+        self.down_button.pack(side="right")
+        self.up_button.pack(side="right")
+        self.search_icon.pack(side="right", padx=4)
+
         self.default_bg = "#333333"
         self.default_fg = "#ffffff"
-        
-        self.top_bar.create_text(WINDOW_WIDTH-430, 4, text="\u2315", 
-                                 fill='gray', font=('Arial', 20), anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-330, 8, window=self.search_bar, 
-                                   anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-370, 5, window=self.up_button, 
-                                   anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-405, 5, window=self.down_button, 
-                                   anchor='nw')
-        self.top_bar.create_window(WINDOW_WIDTH-110, 5, window=self.search_label, 
-                                   anchor='nw')
 
         self.scroll_bar = ttk.Scrollbar(self.root, orient=VERTICAL)
         
@@ -2569,6 +2591,7 @@ class MainWindow:
             self.load_wems(wems=wems)
         else:
             self.check_modified()
+        self.show_info_window()
 
     def init_workspace(self):
         self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
@@ -2694,7 +2717,7 @@ class MainWindow:
             self.treeview.see(self.search_results[self.search_result_index])
             self.search_label['text'] = f"{self.search_result_index+1}/{len(self.search_results)}"
 
-    def show_info_window(self, event):
+    def show_info_window(self, event=None):
         if len(self.treeview.selection()) != 1:
             return
         selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
@@ -2953,6 +2976,7 @@ class MainWindow:
         self.sound_handler.kill_sound()
         self.file_handler.load_wems(wems=wems)
         self.check_modified()
+        self.show_info_window()
         
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
@@ -2973,6 +2997,7 @@ class MainWindow:
         self.sound_handler.kill_sound()
         self.file_handler.revert_all()
         self.check_modified()
+        self.show_info_window()
         
     def write_patch(self):
         self.sound_handler.kill_sound()
@@ -2982,6 +3007,7 @@ class MainWindow:
         self.sound_handler.kill_sound()
         if self.file_handler.load_patch():
             self.check_modified()
+            self.show_info_window()
 
 if __name__ == "__main__":
     app_state: cfg.Config | None = cfg.load_config()
