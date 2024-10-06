@@ -1007,6 +1007,7 @@ class FileReader:
         
     def from_file(self, path):
         self.name = os.path.basename(path)
+        self.path = path
         toc_file = MemoryStream()
         with open(path, 'r+b') as f:
             toc_file = MemoryStream(f.read())
@@ -1830,7 +1831,10 @@ class FileHandler:
                 progress_window.step()
 
         for key, music_segment in patch_file_reader.music_segments.items():
-            old_music_segment = self.file_reader.music_segments[key]
+            try:
+                old_music_segment = self.file_reader.music_segments[key]
+            except:
+                continue
             if (
                 (
                     not old_music_segment.modified
@@ -2414,10 +2418,12 @@ class MainWindow:
         
         self.file_menu = Menu(self.menu, tearoff=0)
 
+        self.recent_file_menu = Menu(self.file_menu, tearoff=0)
+
         self.load_archive_menu = Menu(self.menu, tearoff=0)
         self.load_archive_menu.add_command(
             label="From HD2 Data Folder",
-            command=lambda: self.load_archive(self.app_state.game_data_path)
+            command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
         )
         self.load_archive_menu.add_command(
             label="From File Explorer",
@@ -2425,9 +2431,21 @@ class MainWindow:
         )
         self.file_menu.add_cascade(
             menu=self.load_archive_menu, 
-            label="Load Archive"
+            label="Open"
         )
-        self.file_menu.add_command(label="Save Archive", command=self.save_archive)
+        self.file_menu.add_cascade(
+            menu=self.recent_file_menu,
+            label="Open Recent"
+        )
+
+        for item in reversed(self.app_state.recent_files):
+            item = os.path.normpath(item)
+            self.recent_file_menu.add_command(
+                label=item,
+                command=partial(self.load_archive, "", item)
+            )
+
+        self.file_menu.add_command(label="Save", command=self.save_archive)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Import Patch File", command=self.load_patch)
         self.file_menu.add_command(label="Import .wems", command=self.load_wems)
@@ -2893,6 +2911,21 @@ class MainWindow:
                 self.create_hierarchy_view()
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
+            path = self.file_handler.file_reader.path
+            try:
+                self.app_state.recent_files.remove(os.path.normpath(path))
+            except ValueError:
+                pass
+            self.app_state.recent_files.append(os.path.normpath(path))
+            if len(self.app_state.recent_files) > 5:
+                self.app_state.recent_files.pop(0)
+            self.recent_file_menu.delete(0, "end")
+            for item in reversed(self.app_state.recent_files):
+                item = os.path.normpath(item)
+                self.recent_file_menu.add_command(
+                    label=item,
+                    command=partial(self.load_archive, "", item)
+                )
         else:
             for child in self.treeview.get_children():
                 self.treeview.delete(child)
