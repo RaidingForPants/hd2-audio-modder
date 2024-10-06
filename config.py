@@ -20,11 +20,7 @@ class Config:
     @return (int): A status code to tell whether there are new workspace being 
     added
     """
-    def add_new_workspace(self) -> int:
-        workspace_path = file_dialog.askdirectory(
-            mustexist=True,
-            title="Select a folder to open as workspace"
-        )
+    def add_new_workspace(self, workspace_path : str = "") -> int:
         if not os.path.exists(workspace_path):
             return 1
         if workspace_path in self.workspace_paths:

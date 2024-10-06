@@ -2543,13 +2543,39 @@ class MainWindow:
                         id_stack.append(id)
 
     def add_new_workspace(self):
-        if self.app_state.add_new_workspace() == 1:
+        workspace_path = filedialog.askdirectory(
+            mustexist=True,
+            title="Select a folder to open as workspace"
+        )
+        if self.app_state.add_new_workspace(workspace_path) == 1:
             return
-        self.render_workspace()
+        inode = fileutil.generate_file_tree(workspace_path)
+        if inode == None:
+            return
+        self.workspace_inodes.append(inode)
+        idx = sorted(self.app_state.get_workspace_paths()).index(workspace_path)
+        root_id = self.workspace.insert("", idx,
+                                            text=inode.basename,
+                                            values=[inode.absolute_path],
+                                            tags="workspace")
+        inode_stack = [inode]
+        id_stack = [root_id]
+        while len(inode_stack) > 0:
+            top_inode = inode_stack.pop()
+            top_id = id_stack.pop()
+            for node in top_inode.nodes:
+                id = self.workspace.insert(top_id, "end",
+                                           text=node.basename,
+                                           values=[node.absolute_path],
+                                           tags="dir" if node.isdir else "file")
+                if node.isdir:
+                    inode_stack.append(node)
+                    id_stack.append(id)
 
-    def remove_workspace(self, workspace):
-        self.app_state.workspace_paths.remove(workspace)
-        self.render_workspace()
+    def remove_workspace(self, workspace_item):
+        values = self.workspace.item(workspace_item, option="values")
+        self.app_state.workspace_paths.remove(values[0])
+        self.workspace.delete(workspace_item)
 
     def workspace_on_right_click(self, event):
         self.workspace_popup_menu.delete(0, "end")
@@ -2565,7 +2591,7 @@ class MainWindow:
                 assert(values != '' and len(values) == 1)
                 self.workspace_popup_menu.add_command(
                     label="Remove Folder from Workspace",
-                    command=lambda: self.remove_workspace(values[0]),
+                    command=lambda: self.remove_workspace(select),
                 )
                 self.workspace_popup_menu.tk_popup(
                     event.x_root, event.y_root
@@ -2603,7 +2629,6 @@ class MainWindow:
         patches = [file for file in files if "patch" in os.path.splitext(file)[1]]
         wems = [file for file in files if os.path.splitext(file)[1] == ".wem"]
         for patch in patches:
-            self.sound_handler.kill_sound()
             self.file_handler.load_patch(patch_file=patch)
         if len(wems) > 0:
             self.load_wems(wems=wems)
@@ -2622,7 +2647,7 @@ class MainWindow:
         self.workspace_scroll_bar['command'] = self.workspace.yview
         self.workspace_scroll_bar.pack(side="left", pady=8, fill="y")
         self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
-        self.render_workspace() 
+        self.render_workspace()
 
     def treeview_on_right_click(self, event):
         try:
@@ -2637,6 +2662,7 @@ class MainWindow:
                 assert(len(values) == 1)
                 if values[0] != "Audio Source":
                     all_audio = False
+                    break
 
             self.right_click_menu.add_command(
                 label=("Copy File ID" if is_single else "Copy File IDs"),
@@ -2676,7 +2702,7 @@ class MainWindow:
             pass
         finally:
             self.right_click_menu.grab_release()
-            
+
     def treeview_on_double_click(self, event):
         """
         It work as before but it's setup for playing multiple selected .wem 
@@ -2693,7 +2719,7 @@ class MainWindow:
             if values[0] != "Audio Source":
                 continue
             self.play_audio(int(tags[0]))
-            
+
     def workspace_on_double_click(self, event):
         selects = self.workspace.selection()
         if len(selects) == 1:
@@ -2706,7 +2732,7 @@ class MainWindow:
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
                 self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
-            
+
     def set_language(self):
         global language
         old_language = language
@@ -2763,13 +2789,13 @@ class MainWindow:
         self.root.clipboard_clear()
         self.root.clipboard_append("\n".join([self.treeview.item(i, option="tags")[0] for i in self.treeview.selection()]))
         self.root.update()
-        
+
     def dump_as_wem(self):
         if len(self.treeview.selection()) == 1:
             self.file_handler.dump_as_wem(self.right_click_id)
         else:
             self.file_handler.dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()])
-        
+
     def dump_as_wav(self, muted: bool = False, with_seq: int = False):
         if len(self.treeview.selection()) == 1:
             self.file_handler.dump_as_wav(self.right_click_id, muted=muted)
@@ -2779,7 +2805,7 @@ class MainWindow:
             muted=muted,
             with_seq=with_seq
         )
-        
+
     def create_treeview_entry(self, entry, parentItem=""):
         if entry is None: return
         tree_entry = self.treeview.insert(parentItem, END, tag=entry.get_id())
@@ -2891,50 +2917,54 @@ class MainWindow:
         else:
             self.search_label['text'] = ""
 
+    def update_recent_files(self, filepath):
+        try:
+            self.app_state.recent_files.remove(os.path.normpath(path))
+        except ValueError:
+            pass
+        self.app_state.recent_files.append(os.path.normpath(path))
+        if len(self.app_state.recent_files) > 5:
+            self.app_state.recent_files.pop(0)
+        self.recent_file_menu.delete(0, "end")
+        for item in reversed(self.app_state.recent_files):
+            item = os.path.normpath(item)
+            self.recent_file_menu.add_command(
+                label=item,
+                command=partial(self.load_archive, "", item)
+            )
+
+    def update_language_menu(self):
+        self.options_menu.delete(1, "end") #change to delete only the language select menu
+        if len(self.file_handler.get_strings()) > 0:
+            self.language_menu.delete(0, "end")
+            first = ""
+            self.options_menu.add_cascade(label="Game text language", menu=self.language_menu)
+            for name, lang_id in LANGUAGE_MAPPING.items():
+                if first == "": first = name
+                if lang_id in self.file_handler.get_strings():
+                    self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
+            self.selected_language.set(first)
+
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = None):
         self.sound_handler.kill_sound()
         if self.file_handler.load_archive_file(initialdir=initialdir, archive_file=archive_file):
             self.clear_search()
-            self.options_menu.delete(1, "end") #change to delete only the language select menu
-            if len(self.file_handler.get_strings()) > 0:
-                self.language_menu.delete(0, "end")
-                first = ""
-                self.options_menu.add_cascade(label="Game text language", menu=self.language_menu)
-                for name, lang_id in LANGUAGE_MAPPING.items():
-                    if first == "": first = name
-                    if lang_id in self.file_handler.get_strings():
-                        self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
-                self.selected_language.set(first)
+            self.update_language_menu()
+            self.update_recent_files(filepath=self.file_handler.file_reader.path)
             if self.selected_view.get() == "SourceView":
                 self.create_source_view()
             else:
                 self.create_hierarchy_view()
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
-            path = self.file_handler.file_reader.path
-            try:
-                self.app_state.recent_files.remove(os.path.normpath(path))
-            except ValueError:
-                pass
-            self.app_state.recent_files.append(os.path.normpath(path))
-            if len(self.app_state.recent_files) > 5:
-                self.app_state.recent_files.pop(0)
-            self.recent_file_menu.delete(0, "end")
-            for item in reversed(self.app_state.recent_files):
-                item = os.path.normpath(item)
-                self.recent_file_menu.add_command(
-                    label=item,
-                    command=partial(self.load_archive, "", item)
-                )
         else:
             for child in self.treeview.get_children():
                 self.treeview.delete(child)
-        
+
     def save_archive(self):
         self.sound_handler.kill_sound()
         self.file_handler.save_archive_file()
-            
-        
+
     def clear_treeview_background(self, item):
         bg_color = self.get_colors()[0]
         self.treeview.tag_configure(self.treeview.item(item)['tags'][0],
