@@ -24,7 +24,7 @@ class Config:
         if not os.path.exists(workspace_path):
             return 1
         if workspace_path in self.workspace_paths:
-            return 0
+            return 1
         self.workspace_paths.add(workspace_path)
         return 0 
 

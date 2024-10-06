@@ -2919,10 +2919,10 @@ class MainWindow:
 
     def update_recent_files(self, filepath):
         try:
-            self.app_state.recent_files.remove(os.path.normpath(path))
+            self.app_state.recent_files.remove(os.path.normpath(filepath))
         except ValueError:
             pass
-        self.app_state.recent_files.append(os.path.normpath(path))
+        self.app_state.recent_files.append(os.path.normpath(filepath))
         if len(self.app_state.recent_files) > 5:
             self.app_state.recent_files.pop(0)
         self.recent_file_menu.delete(0, "end")
@@ -2966,9 +2966,10 @@ class MainWindow:
         self.file_handler.save_archive_file()
 
     def clear_treeview_background(self, item):
-        bg_color = self.get_colors()[0]
+        bg_color, fg_color = self.get_colors()
         self.treeview.tag_configure(self.treeview.item(item)['tags'][0],
-                                    background=bg_color)
+                                    background=bg_color,
+                                    foreground=fg_color)
         for child in self.treeview.get_children(item):
             self.clear_treeview_background(child)
         
