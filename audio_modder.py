@@ -1832,10 +1832,23 @@ class FileHandler:
         for key, music_segment in patch_file_reader.music_segments.items():
             old_music_segment = self.file_reader.music_segments[key]
             if (
-                not old_music_segment.modified
-                or music_segment.entry_marker[1] != old_music_segment.entry_marker_old
-                or music_segment.exit_marker[1] != old_music_segment.exit_marker_old
-                or music_segment.duration != old_music_segment.duration_old
+                (
+                    not old_music_segment.modified
+                    and (
+                        music_segment.entry_marker[1] != old_music_segment.entry_marker[1]
+                        or music_segment.exit_marker[1] != old_music_segment.exit_marker[1]
+                        or music_segment.duration != old_music_segment.duration
+                    )
+                )
+                or
+                (
+                    old_music_segment.modified
+                    and (
+                        music_segment.entry_marker[1] != old_music_segment.entry_marker_old
+                        or music_segment.exit_marker[1] != old_music_segment.exit_marker_old
+                        or music_segment.duration != old_music_segment.duration_old
+                    )
+                )
             ):
                 old_music_segment.set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
 
@@ -1846,7 +1859,11 @@ class FileHandler:
                     old_text_data = self.file_reader.string_entries[language][string_id]
                 except:
                     continue
-                old_text_data.set_text(new_text_data.get_text())
+                if (
+                    (not old_text_data.modified and new_text_data.get_text() != old_text_data.get_text())
+                    or (old_text_data.modified and new_text_data.get_text() != old_text_data.text_old)
+                ):
+                    old_text_data.set_text(new_text_data.get_text())
         
         progress_window.destroy()
         return True
@@ -1919,7 +1936,6 @@ class FileHandler:
             progress_window.step()
         progress_window.destroy()
       
-
 class ProgressWindow:
     def __init__(self, title, max_progress):
         self.title = title
@@ -1978,7 +1994,7 @@ class StringEntryWindow:
     def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
-        self.text_box = Text(self.frame, width=50, font=('Arial', 8), wrap=WORD)
+        self.text_box = Text(self.frame, width=50, font=('Segoe UI', 12), wrap=WORD)
         self.string_entry = None
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         
@@ -2180,9 +2196,7 @@ class MusicSegmentWindow:
     def apply_changes(self):
         self.segment.set_data(duration=float(self.duration_text_var.get()), entry_marker=float(self.fade_in_text_var.get()), exit_marker=float(self.fade_out_text_var.get()))
         self.update_modified()
-
-    
-        
+ 
 class EventWindow:
 
     def __init__(self, parent, update_modified):
