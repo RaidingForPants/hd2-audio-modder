@@ -7,3 +7,4 @@ vgmstream-macos/
 __pycache__/
 **/*.pickle
 **/log.txt
+**/*.db
