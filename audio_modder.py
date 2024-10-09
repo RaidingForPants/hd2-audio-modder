@@ -2294,6 +2294,14 @@ class EventWindow:
         self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
         self.update_modified()
 
+"""
+Not suggested to use this as a generic autocomplete widget for other searches.
+Currently it's only used specifically for search archive.
+
+This is not a truely autocomplete widget because it render a brand new top level 
+window that contains a Listbox every time the Entry widge is changed. Widget such 
+as Combobox, Spinbox, and similar widgets that are builtin internally in Tkinter.
+"""
 class ArchiveSearch(ttk.Entry):
 
     ignore_keys: list[str] = ["Up", "Down", "Left", "Right", "Escape", "Return"]
@@ -2804,13 +2812,14 @@ class MainWindow:
         categories = self.lookup_store.query_helldiver_audio_archive_category()
         categories = [""] + categories
         self.category_search = ttk.Combobox(self.top_bar,
-                                                font=('Segoe UI', 10),
-                                                width=18, height=10,
-                                                values=categories)
+                                            state="readonly",
+                                            font=('Segoe UI', 10),
+                                            width=18, height=10,
+                                            values=categories) 
         self.archive_search.pack(side="left", padx=4, pady=8)
         self.category_search.pack(side="left", padx=4, pady=8)
-        self.category_search.bind("<<ComboboxSelected>>", 
-                                      self.on_category_search_bar_select)
+        self.category_search.bind("<<ComboboxSelected>>",
+                                  self.on_category_search_bar_select)
 
     def on_archive_search_bar_return(self, value: str):
         splits = value.split(" || ")
@@ -2825,6 +2834,8 @@ class MainWindow:
         category: str = self.category_search.get()
         archives = self.lookup_store.query_helldiver_audio_archive(category)
         self.archive_search.set_entries(archives)
+        self.archive_search.focus_set()
+        self.category_search.selection_clear()
 
     def treeview_on_right_click(self, event):
         try:
