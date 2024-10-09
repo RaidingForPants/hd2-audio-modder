@@ -814,10 +814,6 @@ class WwiseBank(Subscriber):
                             count += 1
                         if audio.get_track_info() is not None: #is this needed?
                             entry.track_info[count] = audio.get_track_info()
-                        else:
-                            pass
-                            #print(audio.get_id())
-                            #print(entry.track_info[count])
                     except: #exception because there may be no original track info struct
                         pass
                     if source.stream_type == PREFETCH_STREAM:
@@ -1197,7 +1193,6 @@ class FileReader:
                 toc_data_size = toc_header.toc_data_size
                 toc_file.seek(toc_data_offset)
                 entry.toc_data_header = toc_file.read(16)
-                #-------------------------------------
                 bank = BankParser()
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
@@ -1207,8 +1202,7 @@ class FileReader:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
                     pass
-                entry.hierarchy = hirc   
-                #-------------------------------------
+                entry.hierarchy = hirc
                 #Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
                     bank_id = entry.toc_header.file_id
@@ -1257,21 +1251,7 @@ class FileReader:
                     self.string_entries[language][string_id] = entry
                 self.text_banks[text_bank.get_id()] = text_bank
         
-        for bank in self.wwise_banks.values():
-            for e in bank.hierarchy.entries.values():
-                for source in e.sources:
-                    if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
-                        try:
-                            audio = AudioSource()
-                            audio.stream_type = BANK
-                            audio.short_id = source.source_id
-                            audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
-                            self.audio_sources[source.source_id] = audio
-                        except:
-                            pass
-        
-        #checks for backwards compatibility with patches created in older version(s) of the tool
-        #that didn't save data needed for computing resource_id hashes
+        # ---------- Backwards compatibility checks ----------
         for bank in self.wwise_banks.values():
             if bank.dep == None: #can be None because older versions didn't save the dep along with the bank
                 if not self.load_deps():
@@ -1291,12 +1271,22 @@ class FileReader:
                 self.text_banks.clear()
                 self.audio_sources.clear()
                 return
+        # ---------- End backwards compatibility checks ----------
         
-        #Add all stream entries to the AudioSource list, using their short_id (requires mapping via the dep)
+        # Create all AudioSource objects
         for bank in self.wwise_banks.values():
             for entry in bank.hierarchy.entries.values():
                 for source in entry.sources:
-                    if source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
+                    if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
+                        try:
+                            audio = AudioSource()
+                            audio.stream_type = BANK
+                            audio.short_id = source.source_id
+                            audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
+                            self.audio_sources[source.source_id] = audio
+                        except KeyError:
+                            pass
+                    elif source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
                         try:
                             stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
                             audio = self.wwise_streams[stream_resource_id].content
@@ -1309,7 +1299,6 @@ class FileReader:
                         self.music_track_events[info.event_id] = info
                 if isinstance(entry, MusicSegment):
                     self.music_segments[entry.get_id()] = entry
-        
 
         #construct list of audio sources in each bank
         #add track_info to audio sources?
