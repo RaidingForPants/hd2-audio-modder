@@ -2297,10 +2297,6 @@ class EventWindow:
 """
 Not suggested to use this as a generic autocomplete widget for other searches.
 Currently it's only used specifically for search archive.
-
-This is not a truely autocomplete widget because it render a brand new top level 
-window that contains a Listbox every time the Entry widge is changed. Widget such 
-as Combobox, Spinbox, and similar widgets that are builtin internally in Tkinter.
 """
 class ArchiveSearch(ttk.Entry):
 
@@ -2335,11 +2331,31 @@ class ArchiveSearch(ttk.Entry):
 
         query = self.get()
 
-        if self.cmp_list != None:
-            self.cmp_list.destroy()
-
         if self.cmp_root != None:
-            self.cmp_root.destroy()
+            if self.cmp_list == None:
+                logger.error("Something went wrong witht the autocomplete. cmp_list should not be None with cmp_root is still acitve",
+                             stack_info=True)
+                self.cmp_root.destroy()
+                return
+            archives = []
+            if query == "":
+                archives = [self.fmt.format(k, v) 
+                            for k, v in self.entries.items()]
+            else:
+                unique: set[str] = set()
+                for archive_id, basename in self.entries.items():
+                    match = archive_id.find(query) != -1 or \
+                            basename.find(query) != -1
+                    if not match or archive_id in unique:
+                        continue
+                    archives.append(self.fmt.format(archive_id, basename))
+                    unique.add(archive_id)
+            self.cmp_list.delete(0, tkinter.END)
+            for archive in archives:
+                self.cmp_list.insert(tkinter.END, archive)
+            self.cmp_list.selection_clear(0, tkinter.END)
+            self.cmp_list.selection_set(0)
+            return
 
         archives = []
         if query == "":
@@ -2462,7 +2478,7 @@ class MainWindow:
 
     def __init__(self, 
                  app_state: cfg.Config, 
-                 lookup_store: db.LookupStore, 
+                 lookup_store: db.LookupStore | None,
                  file_handler, 
                  sound_handler):
         self.app_state = app_state
@@ -2482,7 +2498,9 @@ class MainWindow:
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
 
         self.top_bar = Frame(self.root, width=WINDOW_WIDTH, height=40)
-        self.init_archive_search_bar()
+        if lookup_store != None:
+            self.init_archive_search_bar()
+
         self.search_text_var = tkinter.StringVar(self.root)
         self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
         self.top_bar.pack(side="top", fill='x')
@@ -2803,6 +2821,10 @@ class MainWindow:
         self.render_workspace()
 
     def init_archive_search_bar(self):
+        if self.lookup_store == None:
+            logger.critical("Audio archive database connection is None after bypassing all check.",
+                            stack_info=True)
+            return
         all_archives = self.lookup_store.query_helldiver_audio_archive()
         self.archive_search = ArchiveSearch("{1} || {0}", 
                                             entries=all_archives,
@@ -2831,6 +2853,10 @@ class MainWindow:
         self.load_archive(initialdir="", archive_file=archive_file)
 
     def on_category_search_bar_select(self, event):
+        if self.lookup_store == None:
+            logger.critical("Audio archive database connection is None after bypassing all check.",
+                            stack_info=True)
+            return
         category: str = self.category_search.get()
         archives = self.lookup_store.query_helldiver_audio_archive(category)
         self.archive_search.set_entries(archives)
@@ -3281,9 +3307,19 @@ if __name__ == "__main__":
     if not os.path.exists(VGMSTREAM):
         logger.error(f"Cannot find vgmstream distribution! Ensure the {os.path.dirname(VGMSTREAM)} folder is in the same folder as the executable")
 
-    sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
-    lookup_store: db.LookupStore = db.SQLiteLookupStore(sqlite_initializer, 
-                                                        logger)
+    lookup_store: db.LookupStore | None = None
+    if os.path.exists("hd_audio_db.db"):
+        sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
+        try:
+            lookup_store = db.SQLiteLookupStore(sqlite_initializer, logger)
+        except Exception as err:
+            logger.error("Failed to connect to audio archive database", 
+                         stack_info=True)
+            lookup_store = None
+    else:
+        logger.warning("Please ensure `hd_audio_db.db` is in the same folder as the executable to enable builtin audio archive search.")
+        logger.warning("Builtin audio archive search is disabled. Please refer to the information in Google spreadsheet.")
+
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
     file_handler = FileHandler()
