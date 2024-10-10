@@ -12,11 +12,7 @@ def config_sqlite_conn(db_path: str):
         nonlocal conn
         if conn != None:
             return conn
-        try:
-            conn = sqlite3.connect(db_path)
-        except Exception as err:
-            logger.error("Failed to connect helldiver audio source database")
-            conn = None
+        conn = sqlite3.connect(db_path)
         return conn
 
     return _get_sqlite_conn
