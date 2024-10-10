@@ -2645,6 +2645,14 @@ class MainWindow:
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
 
         self.root.resizable(False, False)
+
+        # Reopen most recently loaded archives
+        if len(self.app_state.recent_files) > 0 and \
+                os.path.exists(self.app_state.recent_files[-1]):
+            self.root.after(500, 
+                            lambda: self.load_archive(
+                                archive_file=self.app_state.recent_files[-1])
+                           )
         self.root.mainloop()
         
     def search_bar_on_enter_key(self, event):
