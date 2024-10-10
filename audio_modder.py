@@ -1,4 +1,5 @@
 import copy
+import json
 import numpy
 import os
 import platform
@@ -20,8 +21,6 @@ from typing import Any, Literal, Tuple, Union
 import config as cfg
 import log
 import fileutil
-
-import config as cfg
 
 from log import logger
 
@@ -1933,6 +1932,60 @@ class FileHandler:
                 audio.set_data(f.read())
             progress_window.step()
         progress_window.destroy()
+
+    def load_wems_spec(self):
+        spec = filedialog.askopenfilename(title="Choose .wem files to import", 
+                                          filetypes=[("json", "")])
+        if spec == "":
+            logger.warning("Import operation cancelled")
+            return
+
+        if not os.path.exists(spec):
+            logger.warning("Specification file does not exist in disk. Import operation cancelled")
+            return
+
+        mapping: Any 
+        workspace = ""
+        with open(spec, mode="r") as f:
+            mapping = json.load(f)
+            if not isinstance(mapping, dict):
+                logger.warning("Invalid data form in the provided specification file. Import operation cancelled")
+                return
+            if "workspace" not in mapping:
+                logger.warning("Specification file does not contain workspace for importing files. Fallback to the directory this specification file resides")
+                workspace = os.path.dirname(spec)
+            else:
+                workspace = mapping["workspace"]
+
+            if not os.path.exists(workspace):
+                logger.warning("Workspace does not exist in disk. Import operation cancelled")
+                return
+
+        progress_window = ProgressWindow(title="Loading Files",
+                                         max_progress=len(mapping.items()))
+        progress_window.show()
+        for src, dest in mapping.items():
+            logger.info(f"Loading {src} into {dest}")
+            progress_window.set_text(f"Loading {src} into {dest}")
+            file_id: int | None = self.get_number_prefix(dest)
+            if file_id == None:
+                logger.warning(f"{dest} does not contain a valid game asset file id. Skipping the current entry.")
+                continue
+            audio: str | None = self.get_audio_by_id(file_id)
+            if audio == None:
+                logger.warning(f"No audio source is associated with game asset file id {file_id}. Skipping the current entry.")
+                continue
+            abs_src = os.path.join(workspace, src)
+            if not abs_src.endswith(".wem"):
+                logger.info(f"Require import file missing .wem extension. Adding extension.")
+                abs_src += ".wem"
+            if not os.path.exists(abs_src):
+                logger.warning(f"Required import file does not exist in disk. Skipping the current entry.")
+                continue
+            with open(abs_src, "rb") as f:
+                audio.set_data(f.read())
+            progress_window.step()
+        progress_window.destroy()
       
 class ProgressWindow:
     def __init__(self, title, max_progress):
@@ -2441,8 +2494,26 @@ class MainWindow:
 
         self.file_menu.add_command(label="Save", command=self.save_archive)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
-        self.file_menu.add_command(label="Import Patch File", command=self.load_patch)
-        self.file_menu.add_command(label="Import .wems", command=self.load_wems)
+
+        self.import_menu = Menu(self.menu, tearoff=0)
+        self.import_menu.add_command(
+            label="From Patch File",
+            command=self.load_patch
+        )
+        self.import_menu.add_command(
+            label="From .wems",
+            command=self.load_wems
+        )
+        self.import_menu.add_command(
+            label="From spec.json",
+            command=lambda: self.file_handler.load_wems_spec() or 
+                self.check_modified()
+        )
+        self.file_menu.add_cascade(
+            menu=self.import_menu,
+            label="Import"
+        )
+        
         self.file_menu.add_command(label="Refresh Workspace",
                                    command=self.render_workspace)
         self.file_menu.add_command(label="Add a Folder to Workspace",
