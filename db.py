@@ -136,6 +136,8 @@ class SQLiteLookupStore (LookupStore):
         if self.conn == None or self.cursor == None:
             return
         try:
+            self.cursor.execute("DELETE FROM helldiver_audio_source")
+            self.conn.commit()
             data = [
                     (
                         uuid.uuid4().hex,
