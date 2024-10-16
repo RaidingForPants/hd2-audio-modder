@@ -4,9 +4,8 @@ import platform
 import config as cfg
 import db
 from log import logger
-from audio_modder import language_lookup
 from audio_modder import FileHandler, AudioSource
-from audio_modder import GAME_FILE_LOCATION, VGMSTREAM, VORBIS
+from audio_modder import VGMSTREAM, VORBIS
 
 def generate_audio_source_table(
         app_state: cfg.Config,
@@ -90,9 +89,8 @@ if __name__ == "__main__":
             exit(1)
     else:
         logger.warning("Please ensure `hd_audio_db.db` is in the same folder as \
-                the executable to enable builtin audio archive search.")
+                the executable when generating audio sources table.")
         exit(1)
 
-    language = language_lookup("English (US)")
     file_handler = FileHandler()
     generate_audio_source_table(app_state, lookup_store, file_handler)
