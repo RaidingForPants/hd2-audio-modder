@@ -1998,7 +1998,7 @@ class FileHandler:
                     "Import operation cancelled.")
             return
         mapping = spec["mapping"]
-        if mapping == None or isinstance(mapping, dict):
+        if mapping == None or not isinstance(mapping, dict):
             askokcancel(message="field `mapping` has an invalid data type")
             logger.warning("field `mapping` has an invalid data type. Import " + \
                     "operation cancelled")
