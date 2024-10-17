@@ -1866,8 +1866,9 @@ class FileHandler:
         progress_window.destroy()
         return True
 
-    def write_patch(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
+    def write_patch(self, folder=None):
+        if folder == None:
+            folder = filedialog.askdirectory(title="Select folder to save files to")
         if os.path.exists(folder):
             patch_file_reader = FileReader()
             patch_file_reader.name = self.file_reader.name + ".patch_0"
@@ -2003,14 +2004,20 @@ class FileHandler:
                     "operation cancelled")
             return
 
-        # Check for filtered sub string
-        filtered_substring: list[str] = []
-        if "filtered_substring" in spec:
-            if not isinstance(spec["filtered_substring"], list):
-                logger.warning("`filtered_substring` is not a list. Disable " + \
+        suffix: str = ""
+        if "suffix" in spec:
+            if not isinstance(spec["suffix"], str):
+                logger.warning("`suffix` is not a str. Disable " + \
                         "substring filtering")
             else:
-                filtered_substring = spec["filtered_substring"]
+                suffix = spec["suffix"]
+        prefix: str = ""
+        if "prefix" in spec:
+            if not isinstance(spec["prefix"], str):
+                logger.warning("`prefix` is not a str. Disable " + \
+                        "substring filtering")
+            else:
+                prefix = spec["prefix"]
 
         progress_window = ProgressWindow(title="Loading Files",
                                          max_progress=len(spec.items()))
@@ -2020,10 +2027,7 @@ class FileHandler:
             logger.info(f"Loading {src} into {dest}")
             progress_window.set_text(f"Loading {src} into {dest}")
 
-            # Replacing all filtered word (mostly used for suffix and prefix)
-            if len(filtered_substring) != 0:
-                for substring in filtered_substring:
-                    src = src.replace(substring, "")
+            src = prefix + src + suffix
 
             abs_src = os.path.join(workspace, src)
             if not abs_src.endswith(".wem"):
@@ -2087,7 +2091,7 @@ class FileHandler:
         if not os.path.exists(out):
             askokcancel(message=f"{out} does not exist. Write patch operation cancelled.")
             logger.warning(f"{out} does not exist. Write patch operation cancelled.")
-        if not self.write_patch():
+        if not self.write_patch(folder=out):
             askokcancel(message="Write patch operation failed. Check log.txt for \
                     detailed")
 
