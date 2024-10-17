@@ -15,8 +15,9 @@ from math import ceil
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
+from tkinter.messagebox import askokcancel
 from tkinter.filedialog import askopenfilename
-from typing import Any, Literal, Tuple, Union
+from typing import Any, Literal, Union
 
 import config as cfg
 import log
@@ -813,10 +814,6 @@ class WwiseBank(Subscriber):
                             count += 1
                         if audio.get_track_info() is not None: #is this needed?
                             entry.track_info[count] = audio.get_track_info()
-                        else:
-                            pass
-                            #print(audio.get_id())
-                            #print(entry.track_info[count])
                     except: #exception because there may be no original track info struct
                         pass
                     if source.stream_type == PREFETCH_STREAM:
@@ -966,8 +963,9 @@ class TextBank:
             stream.write(offset.to_bytes(4, byteorder="little"))
             initial_position = stream.tell()
             stream.seek(offset)
-            stream.write(entries[i].text.encode('utf-8') + b'\x00')
-            offset += len(entries[i].text) + 1
+            text_bytes = entries[i].text.encode('utf-8') + b'\x00'
+            stream.write(text_bytes)
+            offset += len(text_bytes)
             stream.seek(initial_position)
         self.data = stream.data
         self.toc_header.toc_data_size = len(self.data)
@@ -1161,6 +1159,8 @@ class FileReader:
         self.string_entries.clear()
         self.music_segments.clear()
         
+        media_index = MediaIndex()
+        
         self.magic      = toc_file.uint32_read()
         if self.magic != 4026531857: return False
 
@@ -1194,7 +1194,6 @@ class FileReader:
                 toc_data_size = toc_header.toc_data_size
                 toc_file.seek(toc_data_offset)
                 entry.toc_data_header = toc_file.read(16)
-                #-------------------------------------
                 bank = BankParser()
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
@@ -1203,22 +1202,12 @@ class FileReader:
                 try:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
-                    continue
-                entry.hierarchy = hirc    
-                #-------------------------------------
+                    pass
+                entry.hierarchy = hirc
                 #Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
                     bank_id = entry.toc_header.file_id
-                    media_index = MediaIndex()
                     media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
-                    for e in hirc.entries.values():
-                        for source in e.sources:
-                            if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
-                                audio = AudioSource()
-                                audio.stream_type = BANK
-                                audio.short_id = source.source_id
-                                audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
-                                self.audio_sources[source.source_id] = audio
                 
                 entry.bank_misc_data = b''
                 for chunk in bank.chunks.keys():
@@ -1263,9 +1252,7 @@ class FileReader:
                     self.string_entries[language][string_id] = entry
                 self.text_banks[text_bank.get_id()] = text_bank
         
-        
-        #checks for backwards compatibility with patches created in older version(s) of the tool
-        #that didn't save data needed for computing resource_id hashes
+        # ---------- Backwards compatibility checks ----------
         for bank in self.wwise_banks.values():
             if bank.dep == None: #can be None because older versions didn't save the dep along with the bank
                 if not self.load_deps():
@@ -1285,12 +1272,22 @@ class FileReader:
                 self.text_banks.clear()
                 self.audio_sources.clear()
                 return
+        # ---------- End backwards compatibility checks ----------
         
-        #Add all stream entries to the AudioSource list, using their short_id (requires mapping via the dep)
+        # Create all AudioSource objects
         for bank in self.wwise_banks.values():
             for entry in bank.hierarchy.entries.values():
                 for source in entry.sources:
-                    if source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
+                    if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
+                        try:
+                            audio = AudioSource()
+                            audio.stream_type = BANK
+                            audio.short_id = source.source_id
+                            audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
+                            self.audio_sources[source.source_id] = audio
+                        except KeyError:
+                            pass
+                    elif source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
                         try:
                             stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
                             audio = self.wwise_streams[stream_resource_id].content
@@ -1303,7 +1300,6 @@ class FileReader:
                         self.music_track_events[info.event_id] = info
                 if isinstance(entry, MusicSegment):
                     self.music_segments[entry.get_id()] = entry
-        
 
         #construct list of audio sources in each bank
         #add track_info to audio sources?
@@ -1871,8 +1867,9 @@ class FileHandler:
         progress_window.destroy()
         return True
 
-    def write_patch(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
+    def write_patch(self, folder=None):
+        if folder == None:
+            folder = filedialog.askdirectory(title="Select folder to save files to")
         if os.path.exists(folder):
             patch_file_reader = FileReader()
             patch_file_reader.name = self.file_reader.name + ".patch_0"
@@ -1940,59 +1937,165 @@ class FileHandler:
         progress_window.destroy()
 
     def load_wems_spec(self):
-        spec = filedialog.askopenfilename(title="Choose .wem files to import", 
+        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
                                           filetypes=[("json", "")])
-        if spec == "":
+        if spec_path == "":
             logger.warning("Import operation cancelled")
             return
-
-        if not os.path.exists(spec):
-            logger.warning("Specification file does not exist in disk. Import operation cancelled")
+        if not os.path.exists(spec_path):
+            askokcancel(f"{spec_path} does not exist.")
+            logger.warning(f"{spec_path} does not exist. Import operation " + \
+                    "cancelled")
             return
 
-        mapping: Any 
+        spec: Any = None
         workspace = ""
-        with open(spec, mode="r") as f:
-            mapping = json.load(f)
-            if not isinstance(mapping, dict):
-                logger.warning("Invalid data form in the provided specification file. Import operation cancelled")
-                return
-            if "workspace" not in mapping:
-                logger.warning("Specification file does not contain workspace for importing files. Fallback to the directory this specification file resides")
-                workspace = os.path.dirname(spec)
-            else:
-                workspace = mapping["workspace"]
+        try:
+            with open(spec_path, mode="r") as f:
+                spec = json.load(f)
+        except json.JSONDecodeError as err:
+            logger.warning(err)
+            spec = None
 
-            if not os.path.exists(workspace):
-                logger.warning("Workspace does not exist in disk. Import operation cancelled")
-                return
+        if spec == None:
+            return
+
+        if not isinstance(spec, dict):
+            askokcancel(message="Invalid data format in the given spec file.") 
+            logger.warning("Invalid data format in the given spec file. Import " + \
+                    "operation cancelled")
+            return
+
+        # Check for version number
+        if "v" not in spec:
+            askokcancel(message="The given spec file is missing field `v`") 
+            logger.warning("The given spec file is missing field `v`. Import " + \
+                    "operation cancelled.")
+            return
+        if spec["v"] != 1:
+            askokcancel(message="The given spec file contain invalid version " + 
+                        f'number {spec["v"]}.')
+            logger.warning("The given spec file contain invalid version " + \
+                    f'number {spec["v"]}. Import operation cancelled')
+            
+        # Check for work space
+        if "workspace" not in spec:
+            logger.warning("The given spec file is missing field `workspace`. " + \
+                    "Use the current directory of the given spec file is in instead.")
+            workspace = os.path.dirname(spec_path)
+        else:
+            workspace = spec["workspace"]
+        if not os.path.exists(workspace):
+            askokcancel(message=f"{workspace} does not exist.")
+            logger.warning(f"{workspace} does not exist. Import operation " + \
+                    "cancelled")
+            return
+
+        # Check for mapping
+        mapping: dict[str, list[str] | str] | None
+        if "mapping" not in spec:
+            askokcancel(message=f"The given spec file is missing field `mapping`")
+            logger.warning("The given spec file is missing field `mapping`. " + \
+                    "Import operation cancelled.")
+            return
+        mapping = spec["mapping"]
+        if mapping == None or not isinstance(mapping, dict):
+            askokcancel(message="field `mapping` has an invalid data type")
+            logger.warning("field `mapping` has an invalid data type. Import " + \
+                    "operation cancelled")
+            return
+
+        suffix: str = ""
+        if "suffix" in spec:
+            if not isinstance(spec["suffix"], str):
+                logger.warning("`suffix` is not a str. Disable " + \
+                        "substring filtering")
+            else:
+                suffix = spec["suffix"]
+        prefix: str = ""
+        if "prefix" in spec:
+            if not isinstance(spec["prefix"], str):
+                logger.warning("`prefix` is not a str. Disable " + \
+                        "substring filtering")
+            else:
+                prefix = spec["prefix"]
 
         progress_window = ProgressWindow(title="Loading Files",
-                                         max_progress=len(mapping.items()))
+                                         max_progress=len(spec.items()))
         progress_window.show()
+
         for src, dest in mapping.items():
             logger.info(f"Loading {src} into {dest}")
             progress_window.set_text(f"Loading {src} into {dest}")
-            file_id: int | None = self.get_number_prefix(dest)
-            if file_id == None:
-                logger.warning(f"{dest} does not contain a valid game asset file id. Skipping the current entry.")
-                continue
-            audio: str | None = self.get_audio_by_id(file_id)
-            if audio == None:
-                logger.warning(f"No audio source is associated with game asset file id {file_id}. Skipping the current entry.")
-                continue
+
+            src = prefix + src + suffix
+
             abs_src = os.path.join(workspace, src)
             if not abs_src.endswith(".wem"):
-                logger.info(f"Require import file missing .wem extension. Adding extension.")
+                logger.info("Require import file missing .wem extension. " + \
+                        "Adding extension.")
                 abs_src += ".wem"
             if not os.path.exists(abs_src):
-                logger.warning(f"Required import file does not exist in disk. Skipping the current entry.")
+                logger.warning(f"Required import file does not exist " + \
+                        "Skipping the current entry.")
                 continue
-            with open(abs_src, "rb") as f:
-                audio.set_data(f.read())
-            progress_window.step()
+
+            if isinstance(dest, str):
+                file_id: int | None = self.get_number_prefix(dest)
+                if file_id == None:
+                    logger.warning(f"{dest} does not contain a valid game asset " + \
+                            "file id. Skipping the current entry.")
+                    continue
+                audio: str | None = self.get_audio_by_id(file_id)
+                if audio == None:
+                    logger.warning(f"No audio source is associated with game " + \
+                            "asset file id {file_id}. Skipping the current entry.")
+                    continue
+                with open(abs_src, "rb") as f:
+                    audio.set_data(f.read())
+                progress_window.step()
+            elif isinstance(dest, list):
+                for d in dest:
+                    if not isinstance(d, str):
+                        logger.warning(f"{d} is not a string. Skipping the " + \
+                                "current entry.")
+                    file_id: int | None = self.get_number_prefix(d)
+                    if file_id == None:
+                        logger.warning(f"{d} does not contain a valid game asset " + \
+                                "file id. Skipping the current entry.")
+                        continue
+                    audio: str | None = self.get_audio_by_id(file_id)
+                    if audio == None:
+                        logger.warning(f"No audio source is associated with " + \
+                                "game asset file id {file_id}. Skipping the " + \
+                                "current entry.")
+                        continue
+                    with open(abs_src, "rb") as f:
+                        audio.set_data(f.read())
+                    progress_window.step()
+            else:
+                logger.warning(f"{dest} is not a string or list of string. " + \
+                        "Skipping the current entry.")
+
         progress_window.destroy()
-      
+
+        out: str | None = None
+        if "write_patch_to" not in spec:
+            return
+        out = spec["write_patch_to"]
+        if not isinstance(out, str):
+            askokcancel(message="field `write_patch_to` has an invalid data type. " + \
+                    "Write patch operation cancelled")
+            logger.warning("field `write_patch_to` has an invalid data type. " + \
+                    "Write patch operation cancelled")
+            return
+        if not os.path.exists(out):
+            askokcancel(message=f"{out} does not exist. Write patch operation cancelled.")
+            logger.warning(f"{out} does not exist. Write patch operation cancelled.")
+        if not self.write_patch(folder=out):
+            askokcancel(message="Write patch operation failed. Check log.txt for \
+                    detailed")
+
 class ProgressWindow:
     def __init__(self, title, max_progress):
         self.title = title
