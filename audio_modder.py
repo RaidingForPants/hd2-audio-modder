@@ -963,8 +963,9 @@ class TextBank:
             stream.write(offset.to_bytes(4, byteorder="little"))
             initial_position = stream.tell()
             stream.seek(offset)
-            stream.write(entries[i].text.encode('utf-8') + b'\x00')
-            offset += len(entries[i].text) + 1
+            text_bytes = entries[i].text.encode('utf-8') + b'\x00'
+            stream.write(text_bytes)
+            offset += len(text_bytes)
             stream.seek(initial_position)
         self.data = stream.data
         self.toc_header.toc_data_size = len(self.data)
