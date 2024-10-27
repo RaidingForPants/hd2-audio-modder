@@ -1936,48 +1936,8 @@ class FileHandler:
             progress_window.step()
         progress_window.destroy()
 
-    def load_wems_spec(self):
-        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
-                                          filetypes=[("json", "")])
-        if spec_path == "":
-            logger.warning("Import operation cancelled")
-            return
-        if not os.path.exists(spec_path):
-            askokcancel(f"{spec_path} does not exist.")
-            logger.warning(f"{spec_path} does not exist. Import operation " + \
-                    "cancelled")
-            return
-
-        spec: Any = None
-        workspace = ""
-        try:
-            with open(spec_path, mode="r") as f:
-                spec = json.load(f)
-        except json.JSONDecodeError as err:
-            logger.warning(err)
-            spec = None
-
-        if spec == None:
-            return
-
-        if not isinstance(spec, dict):
-            askokcancel(message="Invalid data format in the given spec file.") 
-            logger.warning("Invalid data format in the given spec file. Import " + \
-                    "operation cancelled")
-            return
-
-        # Check for version number
-        if "v" not in spec:
-            askokcancel(message="The given spec file is missing field `v`") 
-            logger.warning("The given spec file is missing field `v`. Import " + \
-                    "operation cancelled.")
-            return
-        if spec["v"] != 1:
-            askokcancel(message="The given spec file contain invalid version " + 
-                        f'number {spec["v"]}.')
-            logger.warning("The given spec file contain invalid version " + \
-                    f'number {spec["v"]}. Import operation cancelled')
-            
+    # Version one compatibility
+    def __load_wems_sepc_version_one(self, spec_path: str, spec: dict):
         # Check for work space
         if "workspace" not in spec:
             logger.warning("The given spec file is missing field `workspace`. " + \
@@ -2095,6 +2055,70 @@ class FileHandler:
         if not self.write_patch(folder=out):
             askokcancel(message="Write patch operation failed. Check log.txt for \
                     detailed")
+
+    def load_wems_spec(self):
+        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
+                                          filetypes=[("json", "")])
+        if spec_path == "":
+            logger.warning("Import operation cancelled")
+            return
+        if not os.path.exists(spec_path):
+            askokcancel(f"{spec_path} does not exist.")
+            logger.warning(f"{spec_path} does not exist. Import operation " + \
+                    "cancelled")
+            return
+
+        spec: Any = None
+        workspace = ""
+        try:
+            with open(spec_path, mode="r") as f:
+                spec = json.load(f)
+        except json.JSONDecodeError as err:
+            logger.warning(err)
+            spec = None
+
+        if spec == None:
+            return
+
+        if not isinstance(spec, dict):
+            askokcancel(message="Invalid data format in the given spec file.") 
+            logger.warning("Invalid data format in the given spec file. Import " + \
+                    "operation cancelled")
+            return
+
+        # Check for version number
+        if "v" not in spec:
+            askokcancel(message="The given spec file is missing field `v`") 
+            logger.warning("The given spec file is missing field `v`. Import " + \
+                    "operation cancelled.")
+            return
+        if spec["v"] < 1 and spec["v"] > 2:
+            askokcancel(message="The given spec file contain invalid version " + 
+                        f'number {spec["v"]}.')
+            logger.warning("The given spec file contain invalid version " + \
+                    f'number {spec["v"]}. Import operation cancelled')
+            return
+
+        if spec["v"] == 1:
+            return self.__load_wems_sepc_version_one(spec_path, spec)
+
+        if spec["specs"] not in spec:
+            askokcancel(message="The given spec file is missing field `specs`.")
+            logger.warning("The given spec file is missing field `specs`."
+                            " Import operation cancelled.")
+        if not isinstance(spec["specs"], list):
+            askokcancel(message="Field `specs` is not an array.")
+            logger.warning("Field `specs` is not an array. Import operation "
+                           "cancelled.")
+            return
+
+        specs: list[Any] = spec["specs"]
+        for s in specs:
+            if not isinstance(s, dict):
+                logger.warning("Current entry is not an object. Skipping "
+                               "current entry.")
+                continue
+            self.__load_wems_sepc_version_one(spec_path, s)
 
 class ProgressWindow:
     def __init__(self, title, max_progress):
