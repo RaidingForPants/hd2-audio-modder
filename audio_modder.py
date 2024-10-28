@@ -2004,6 +2004,18 @@ class FileHandler:
                            "Import operation cancelled")
             return
 
+        if "conversion" not in specs:
+            askokcancel(message="The given spec file is missing field "
+                        "`conversion`.")
+            logger.warning("The given spec file is missing field "
+                        "`conversion`. Import operation cancelled")
+            return
+        if isinstance(specs["conversion"], str):
+            askokcancel(message="Field `conversion` must be a string")
+            logger.warning("Field `conversion` must be a string. Import "
+                           "operation cancelled")
+            return
+
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": os.path.dirname(spec_path)
@@ -2087,6 +2099,7 @@ class FileHandler:
                         continue
                     etree.SubElement(root, "Source", attrib={
                         "Path": abs_src,
+                        "Conversion": specs["conversion"],
                         "Destination": convert_dest 
                     })
                     wems.append((convert_dest, audio))
@@ -2110,6 +2123,7 @@ class FileHandler:
                         convert_dest = f"{file_id}.wem"
                         etree.SubElement(root, "Source", attrib={
                             "Path": abs_src,
+                            "Conversion": specs["conversion"],
                             "Destination": convert_dest
                         })
                         wems.append((convert_dest, audio))
