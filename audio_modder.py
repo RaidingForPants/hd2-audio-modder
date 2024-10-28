@@ -1994,9 +1994,31 @@ class FileHandler:
                            "cancelled.")
             return
 
+        if spec["project"] not in spec:
+            askokcancel(message="The given spec file is missing field `project`.")
+            logger.warning("The given spec file is missing field `project`."
+                            " Import operation cancelled.")
+            return
+        if not os.path.exists(spec["project"]):
+            askokcancel(message="The given Wwise project does not exists.")
+            logger.warning("The given Wwise project does not exists. "
+                           "Import operation cancelled")
+            return
+
+        if spec["CLI"] not in spec:
+            askokcancel(message="The given spec file is missing field `CLI`.")
+            logger.warning("The given spec file is missing field `CLI`."
+                            " Import operation cancelled.")
+            return
+        if not os.path.exists(spec["CLI"]):
+            askokcancel(message="The given Wwise CLI path does not exists.")
+            logger.warning("The given Wwise CLI path does not exists. Import"
+                           " operation cancelled.")
+            return
+
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
-            "Root": spec_path
+            "Root": os.path.dirname(spec_path)
             })
         specs: list[Any] = spec["specs"]
         for s in specs:
@@ -2102,6 +2124,15 @@ class FileHandler:
 
         tree = etree.ElementTree(root)
         tree.write("output.xml", encoding="utf-8", xml_declaration=True)
+
+        subprocess.run([
+            spec["CLI"],
+            "convert-external-source",
+            spec["project"],
+            "--source-file",
+            "output.xml",
+            "."
+        ])
 
     def load_wems_spec(self):
         spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
