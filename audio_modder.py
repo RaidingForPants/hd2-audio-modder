@@ -1,4 +1,3 @@
-import copy
 import json
 import numpy
 import os
@@ -27,7 +26,7 @@ import fileutil
 
 from log import logger
 
-#constants
+# constants
 MUSIC_TRACK = 11
 SOUND = 2
 BANK = 0
@@ -61,13 +60,17 @@ LANGUAGE_MAPPING = ({
 })
 
 # constants (set once on runtime)
+DIR = os.path.dirname(__file__)
 FFMPEG = ""
-GAME_FILE_LOCATION = ""
-WWISE_CLI = ""
-CACHE = os.path.join(os.path.dirname(__file__), ".cache")
 VGMSTREAM = ""
+WWISE_CLI = os.path.join(os.environ["WWISEROOT"], 
+                         "Authoring\\x64\\Release\\bin\\WwiseConsole.exe")
+GAME_FILE_LOCATION = ""
+DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate") 
+DEFAULT_CONVERSION_SETTING = "Main"
+CACHE = os.path.join(DIR, ".cache")
 
-#global variables
+# global variables
 language = 0
 num_segments = 0
 
@@ -1993,28 +1996,36 @@ class FileHandler:
                            "cancelled.")
             return
 
+        project = DEFAULT_WWISE_PROJECT
         if "project" not in specs:
-            askokcancel(message="The given spec file is missing field `project`.")
-            logger.warning("The given spec file is missing field `project`."
-                            " Import operation cancelled.")
-            return
-        if not os.path.exists(specs["project"]):
-            askokcancel(message="The given Wwise project does not exists.")
-            logger.warning("The given Wwise project does not exists. "
-                           "Import operation cancelled")
-            return
+            logger.warning("Missing field `project`. Using default Wwise project")
+        else:
+            if not isinstance(specs["project"], str):
+                logger.warning("Field `project` is not a string. Using default"
+                               " Wwise project")
+            elif not os.path.exists(specs["project"]):
+                logger.warning("The given Wwise project does not exist. Using "
+                               "default Wwise project")
+            else:
+                project = specs["project"]
+        if not os.path.exists(project):
+            askokcancel("The default Wwise Project does not exist.")
+            logger.warning("The default Wwise Project does not exist. Import "
+                           "operation cancelled.")
 
-        if "conversion" not in specs:
-            askokcancel(message="The given spec file is missing field "
-                        "`conversion`.")
-            logger.warning("The given spec file is missing field "
-                        "`conversion`. Import operation cancelled")
-            return
-        if not isinstance(specs["conversion"], str):
-            askokcancel(message="Field `conversion` must be a string")
-            logger.warning("Field `conversion` must be a string. Import "
-                           "operation cancelled")
-            return
+        conversion = DEFAULT_CONVERSION_SETTING
+        if project != DEFAULT_WWISE_PROJECT:
+            if "conversion" not in specs:
+                askokcancel("Missing field `conversion`.")
+                logger.warning("Missing field `conversion`. Import operation"
+                               " cancelled.")
+                return
+            if not isinstance(specs["conversion"], str):
+                askokcancel("Field `conversion` is not a string.")
+                logger.warning("Field `conversion` is not a string. Import "
+                               "operation cancelled.")
+                return
+            conversion = specs["conversion"]
 
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
@@ -2099,7 +2110,7 @@ class FileHandler:
                         continue
                     etree.SubElement(root, "Source", attrib={
                         "Path": abs_src,
-                        "Conversion": specs["conversion"],
+                        "Conversion": conversion,
                         "Destination": convert_dest 
                     })
                     wems.append((convert_dest, audio))
@@ -2123,7 +2134,7 @@ class FileHandler:
                         convert_dest = f"{file_id}.wem"
                         etree.SubElement(root, "Source", attrib={
                             "Path": abs_src,
-                            "Conversion": specs["conversion"],
+                            "Conversion": conversion,
                             "Destination": convert_dest
                         })
                         wems.append((convert_dest, audio))
@@ -2142,24 +2153,24 @@ class FileHandler:
                 subprocess.run([
                     WWISE_CLI,
                     "convert-external-source",
-                    specs["project"],
+                    project,
                     "--platform", "Linux",
                     "--source-file",
                     schema_path,
                     "--output",
                     CACHE,
-                ])
+                ]).check_returncode()
             elif system == "Windows":
                 subprocess.run([
                     WWISE_CLI,
                     "convert-external-source",
-                    specs["project"],
+                    project,
                     "--platform", "Windows",
                     "--source-file",
                     schema_path,
                     "--output",
                     CACHE,
-                ])
+                ]).check_returncode()
             else:
                 convert_ok = False
                 askokcancel("The current operating system does not supported "
@@ -2915,11 +2926,17 @@ class MainWindow:
             command=lambda: self.file_handler.load_wems_spec() or 
                 self.check_modified()
         )
-        self.import_menu.add_command(
-            label="From spec.json (.wav)",
-            command=lambda: self.file_handler.load_convert_spec() or 
-                self.check_modified()
-        )
+        if os.path.exists(WWISE_CLI):
+            self.import_menu.add_command(
+                label="From spec.json (.wav)",
+                command=lambda: self.file_handler.load_convert_spec() or 
+                    self.check_modified()
+            )
+        else:
+            askokcancel("Failed to locate WwiseConsole. Importing wave files "
+                        "directly into an archive is disabled.")
+            logger.warning("Failed to locate WwiseConsole. Importing wave files "
+                        "directly into an archive is disabled.")
         self.file_menu.add_cascade(
             menu=self.import_menu,
             label="Import"
@@ -3553,8 +3570,8 @@ if __name__ == "__main__":
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)
+
     GAME_FILE_LOCATION = app_state.game_data_path
-    WWISE_CLI = app_state.wwise_cli_path
 
     try:
         if not os.path.exists(CACHE):
