@@ -3558,7 +3558,7 @@ if __name__ == "__main__":
 
     try:
         if not os.path.exists(CACHE):
-            os.mkdir(CACHE)
+            os.mkdir(CACHE, mode=0o777)
     except Exception as e:
         askokcancel("Error when initiating application", 
                     "Failed to create application caching space")
