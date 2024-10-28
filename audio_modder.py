@@ -2010,7 +2010,7 @@ class FileHandler:
             logger.warning("The given spec file is missing field "
                         "`conversion`. Import operation cancelled")
             return
-        if isinstance(specs["conversion"], str):
+        if not isinstance(specs["conversion"], str):
             askokcancel(message="Field `conversion` must be a string")
             logger.warning("Field `conversion` must be a string. Import "
                            "operation cancelled")
