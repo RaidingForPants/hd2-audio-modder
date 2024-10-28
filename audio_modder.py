@@ -7,6 +7,7 @@ import pyaudio
 import subprocess
 import struct
 import tkinter
+import shutil
 import wave
 import xml.etree.ElementTree as etree
 
@@ -59,9 +60,11 @@ LANGUAGE_MAPPING = ({
     "Русский": 3317373165
 })
 
-#"constants" (set once on runtime)
+# constants (set once on runtime)
 FFMPEG = ""
 GAME_FILE_LOCATION = ""
+WWISE_CLI = ""
+CACHE = os.path.join(os.path.dirname(__file__), ".cache")
 VGMSTREAM = ""
 
 #global variables
@@ -1937,10 +1940,6 @@ class FileHandler:
             progress_window.step()
         progress_window.destroy()
 
-    """
-    Similar to load_wems_spec. The only difference is that there are extra steps 
-    being process for convert .wav to .wem through Wwise CLI.
-    """
     def load_convert_spec(self):
         spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
                                           filetypes=[("json", "")])
@@ -1994,7 +1993,7 @@ class FileHandler:
                            "cancelled.")
             return
 
-        if specs["project"] not in specs:
+        if "project" not in specs:
             askokcancel(message="The given spec file is missing field `project`.")
             logger.warning("The given spec file is missing field `project`."
                             " Import operation cancelled.")
@@ -2005,21 +2004,11 @@ class FileHandler:
                            "Import operation cancelled")
             return
 
-        if specs["CLI"] not in specs:
-            askokcancel(message="The given spec file is missing field `CLI`.")
-            logger.warning("The given spec file is missing field `CLI`."
-                            " Import operation cancelled.")
-            return
-        if not os.path.exists(specs["CLI"]):
-            askokcancel(message="The given Wwise CLI path does not exists.")
-            logger.warning("The given Wwise CLI path does not exists. Import"
-                           " operation cancelled.")
-            return
-
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": os.path.dirname(spec_path)
             })
+        wems: list[tuple[str, AudioSource]] = []
         for spec in specs["specs"]:
             if not isinstance(spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
@@ -2089,14 +2078,18 @@ class FileHandler:
                                        "asset file id. Skipping the current "
                                        "entry.")
                         continue
-                    if self.get_audio_by_id(file_id) == None:
+                    audio = self.get_audio_by_id(file_id)
+                    convert_dest = f"{file_id}.wem"
+                    if audio == None:
                         logger.warning(f"No audio source is associated with "
                                        f"game asset file id {file_id}. Skipping "
                                        "the current entry.")
+                        continue
                     etree.SubElement(root, "Source", attrib={
                         "Path": abs_src,
-                        "Destination": f"{file_id}.wem"
+                        "Destination": convert_dest 
                     })
+                    wems.append((convert_dest, audio))
                 elif isinstance(dest, list):
                     for d in dest:
                         if not isinstance(d, str):
@@ -2108,30 +2101,98 @@ class FileHandler:
                                            "asset file id. Skipping the current "
                                            "entry.")
                             continue
-                        if self.get_audio_by_id(file_id) == None:
+                        audio = self.get_audio_by_id(file_id)
+                        if audio == None:
                             logger.warning(f"No audio source is associated with "
-                                       f"game asset file id {file_id}. Skipping "
-                                       "the current entry.")
+                                           f"game asset file id {file_id}. "
+                                           "Skipping the current entry.")
                             continue
+                        convert_dest = f"{file_id}.wem"
                         etree.SubElement(root, "Source", attrib={
                             "Path": abs_src,
-                            "Destination": f"{file_id}.wem"
+                            "Destination": convert_dest
                         })
+                        wems.append((convert_dest, audio))
                 else:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
 
         tree = etree.ElementTree(root)
-        tree.write("output.xml", encoding="utf-8", xml_declaration=True)
+        schema_path = os.path.join(CACHE, "schema.xml")
+        tree.write(schema_path, encoding="utf-8", xml_declaration=True)
 
-        subprocess.run([
-            specs["CLI"],
-            "convert-external-source",
-            specs["project"],
-            "--source-file",
-            "output.xml",
-            "."
-        ])
+        convert_ok = True
+        convert_dest = os.path.join(CACHE, system)
+        try:
+            if system == "Linux":
+                subprocess.run([
+                    WWISE_CLI,
+                    "convert-external-source",
+                    specs["project"],
+                    "--platform", "Linux",
+                    "--source-file",
+                    schema_path,
+                    "--output",
+                    CACHE,
+                ])
+            elif system == "Windows":
+                subprocess.run([
+                    WWISE_CLI,
+                    "convert-external-source",
+                    specs["project"],
+                    "--platform", "Windows",
+                    "--source-file",
+                    schema_path,
+                    "--output",
+                    CACHE,
+                ])
+            else:
+                convert_ok = False
+                askokcancel("The current operating system does not supported "
+                            "this feature yet")
+        except Exception as e:
+            convert_ok = False
+            logger.error(e)
+            askokcancel("Error occurs during conversion. Please check log.txt.")
+
+        if not convert_ok:
+            return
+
+        for wem in wems:
+            try:
+                dest_path = os.path.join(convert_dest, wem[0])
+                assert(os.path.exists(dest_path))
+                with open(dest_path, "rb") as f:
+                    wem[1].set_data(f.read())
+            except Exception as e:
+                logger.error(e)
+
+        try:
+            os.remove(schema_path)
+            shutil.rmtree(os.path.join(convert_dest))
+        except Exception as e:
+            logger.error(e)
+
+        out: str | None = None
+        if "write_patch_to" not in specs:
+            return
+        out = specs["write_patch_to"]
+        if not isinstance(out, str):
+            askokcancel(message="field `write_patch_to` has an invalid data "
+                        "type. Write patch operation cancelled.")
+            logger.warning("field `write_patch_to` has an invalid data "
+                           "type. Write patch operation cancelled.")
+            return
+        if not os.path.exists(out):
+            askokcancel(message=f"{out} does not exist. Write patch "
+                        "operation cancelled.")
+            logger.warning(f"{out} does not exist. Write patch operation "
+                           "cancelled.")
+            return
+        if not self.write_patch(folder=out):
+            askokcancel(message="Write patch operation failed. Check "
+                        "log.txt for detailed.")
+
 
     def load_wems_spec(self):
         spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
@@ -2145,50 +2206,49 @@ class FileHandler:
                     "cancelled")
             return
 
-        spec: Any = None
+        specs: Any = None
         workspace = ""
         try:
             with open(spec_path, mode="r") as f:
-                spec = json.load(f)
+                specs = json.load(f)
         except json.JSONDecodeError as err:
             logger.warning(err)
-            spec = None
+            specs = None
 
-        if spec == None:
+        if specs == None:
             return
 
-        if not isinstance(spec, dict):
+        if not isinstance(specs, dict):
             askokcancel(message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
         # Check for version number
-        if "v" not in spec:
+        if "v" not in specs:
             askokcancel(message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
-        if spec["v"] != 2:
+        if specs["v"] != 2:
             askokcancel(message="The given spec file contain invalid version " + 
-                        f'number {spec["v"]}.')
+                        f'number {specs["v"]}.')
             logger.warning("The given spec file contain invalid version "
-                    f'number {spec["v"]}. Import operation cancelled')
+                    f'number {specs["v"]}. Import operation cancelled')
             return
 
-        if spec["specs"] not in spec:
+        if specs["specs"] not in specs:
             askokcancel(message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
-        if not isinstance(spec["specs"], list):
+        if not isinstance(specs["specs"], list):
             askokcancel(message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
 
-        specs: list[Any] = spec["specs"]
-        for s in specs:
-            if not isinstance(s, dict):
+        for spec in specs["specs"]:
+            if not isinstance(spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
                                "current entry.")
                 continue
@@ -2313,6 +2373,7 @@ class FileHandler:
                             "operation cancelled.")
                 logger.warning(f"{out} does not exist. Write patch operation "
                                "cancelled.")
+                return
             if not self.write_patch(folder=out):
                 askokcancel(message="Write patch operation failed. Check "
                             "log.txt for detailed.")
@@ -3479,6 +3540,15 @@ if __name__ == "__main__":
     if app_state == None:
         exit(1)
     GAME_FILE_LOCATION = app_state.game_data_path
+    WWISE_CLI = app_state.wwise_cli_path
+
+    try:
+        if not os.path.exists(CACHE):
+            os.mkdir(CACHE)
+    except Exception as e:
+        askokcancel("Error when initiating application", 
+                    "Failed to create application caching space")
+        exit(1)
 
     system = platform.system()
     if system == "Windows":
@@ -3492,7 +3562,9 @@ if __name__ == "__main__":
         FFMPEG = "ffmpeg"
         
     if not os.path.exists(VGMSTREAM):
-        logger.error(f"Cannot find vgmstream distribution! Ensure the {os.path.dirname(VGMSTREAM)} folder is in the same folder as the executable")
+        logger.error("Cannot find vgmstream distribution! "
+                     f"Ensure the {os.path.dirname(VGMSTREAM)} folder is "
+                     "in the same folder as the executable")
         
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
@@ -3501,3 +3573,5 @@ if __name__ == "__main__":
     
     app_state.save_config()
 
+    if os.path.exists(CACHE):
+        shutil.rmtree(CACHE)
