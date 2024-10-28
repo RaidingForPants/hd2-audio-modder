@@ -7,14 +7,19 @@ from log import logger
 
 class Config:
 
-    def __init__(self, game_data_path: str,
-                 workspace_paths: set[str] = set(),
+    def __init__(self,
+                 game_data_path: str,
+                 wwise_cli_path: str,
+                 project_path: str = "",
                  recent_files: list[str] = [],
-                 theme: str = "dark_mode",):
+                 theme: str = "dark_mode",
+                 workspace_paths: set[str] = set()):
         self.game_data_path = game_data_path
-        self.workspace_paths = workspace_paths
-        self.theme = theme
+        self.project_path = project_path
         self.recent_files = recent_files
+        self.theme = theme
+        self.workspace_paths = workspace_paths
+        self.wwise_cli_path = wwise_cli_path
 
     """
     @return (int): A status code to tell whether there are new workspace being 
@@ -66,21 +71,40 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             cfg.game_data_path = game_data_path
             cfg.workspace_paths = set([p for p in cfg.workspace_paths 
                                    if os.path.exists(p)])
-        try: # for backwards compatibility with configs created before these were added
-            t = cfg.theme
+        # For backwards compatibility with configuration created before these 
+        # were added
+        abort = False
+        try:
+            if not os.path.exists(cfg.wwise_cli_path):
+                wwise_cli_path: str | None = _select_wwise_cli_path()
+                if wwise_cli_path is None:
+                    abort = True
+                    return
+        except:
+            wwise_cli_path = _select_wwise_cli_path()
+            if wwise_cli_path is None:
+                abort = True
+        if abort:
+            return None
+
+        try: 
+            _ = cfg.theme
         except:
             cfg.theme = "dark_mode"
         try:
-            f = cfg.recent_files
+            _ = cfg.recent_files
         except:
             cfg.recent_files = []
         cfg.save_config()
         return cfg
 
     game_data_path: str | None = _select_game_data_path()
+    wwise_cli_path: str | None = _select_wwise_cli_path()
     if game_data_path is None:
         return None
-    new_cfg: Config = Config(game_data_path)
+    if wwise_cli_path is None:
+        return None
+    new_cfg: Config = Config(wwise_cli_path, game_data_path)
     new_cfg.save_config(config_path)
 
     return new_cfg
@@ -95,5 +119,17 @@ def _select_game_data_path() -> str | None:
                 and game_data_path.endswith("steamapps/common/Helldivers 2/data"):
             return game_data_path
         res = message_box.askretrycancel(message="Invalid game data directory")
+        if not res:
+            return None
+
+def _select_wwise_cli_path() -> str | None:
+    while True:
+        wwise_cli_path: str = file_dialog.askdirectory(mustexist=True,
+                                                       title="Locate "
+                                                       "WwiseConsole.exe")
+        if os.path.exists(wwise_cli_path) \
+                and wwise_cli_path.endswith("WwiseConsole.exe"):
+            return wwise_cli_path
+        res = message_box.askretrycancel(message="Invalid path for WwiseConsole")
         if not res:
             return None
