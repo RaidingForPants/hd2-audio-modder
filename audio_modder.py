@@ -1953,64 +1953,64 @@ class FileHandler:
                     "cancelled")
             return
 
-        spec: Any = None
+        specs: Any = None
         workspace = ""
         try:
             with open(spec_path, mode="r") as f:
-                spec = json.load(f)
+                specs = json.load(f)
         except json.JSONDecodeError as err:
             logger.warning(err)
-            spec = None
+            specs = None
 
-        if spec == None:
+        if specs == None:
             return
 
-        if not isinstance(spec, dict):
+        if not isinstance(specs, dict):
             askokcancel(message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
         # Check for version number
-        if "v" not in spec:
+        if "v" not in specs:
             askokcancel(message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
-        if spec["v"] != 2:
+        if specs["v"] != 2:
             askokcancel(message="The given spec file contain invalid version " + 
-                        f'number {spec["v"]}.')
+                        f'number {specs["v"]}.')
             logger.warning("The given spec file contain invalid version "
-                    f'number {spec["v"]}. Import operation cancelled')
+                    f'number {specs["v"]}. Import operation cancelled')
             return
 
-        if spec["specs"] not in spec:
+        if "specs" not in specs:
             askokcancel(message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
-        if not isinstance(spec["specs"], list):
+        if not isinstance(specs["specs"], list):
             askokcancel(message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
 
-        if spec["project"] not in spec:
+        if specs["project"] not in specs:
             askokcancel(message="The given spec file is missing field `project`.")
             logger.warning("The given spec file is missing field `project`."
                             " Import operation cancelled.")
             return
-        if not os.path.exists(spec["project"]):
+        if not os.path.exists(specs["project"]):
             askokcancel(message="The given Wwise project does not exists.")
             logger.warning("The given Wwise project does not exists. "
                            "Import operation cancelled")
             return
 
-        if spec["CLI"] not in spec:
+        if specs["CLI"] not in specs:
             askokcancel(message="The given spec file is missing field `CLI`.")
             logger.warning("The given spec file is missing field `CLI`."
                             " Import operation cancelled.")
             return
-        if not os.path.exists(spec["CLI"]):
+        if not os.path.exists(specs["CLI"]):
             askokcancel(message="The given Wwise CLI path does not exists.")
             logger.warning("The given Wwise CLI path does not exists. Import"
                            " operation cancelled.")
@@ -2020,9 +2020,8 @@ class FileHandler:
             "SchemaVersion": "1",
             "Root": os.path.dirname(spec_path)
             })
-        specs: list[Any] = spec["specs"]
-        for s in specs:
-            if not isinstance(s, dict):
+        for spec in specs["specs"]:
+            if not isinstance(spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
                                "current entry.")
                 continue
@@ -2126,9 +2125,9 @@ class FileHandler:
         tree.write("output.xml", encoding="utf-8", xml_declaration=True)
 
         subprocess.run([
-            spec["CLI"],
+            specs["CLI"],
             "convert-external-source",
-            spec["project"],
+            specs["project"],
             "--source-file",
             "output.xml",
             "."
