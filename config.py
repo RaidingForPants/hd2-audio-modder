@@ -80,10 +80,13 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
                 if wwise_cli_path is None:
                     abort = True
                     return
+                cfg.wwise_cli_path = wwise_cli_path
         except:
             wwise_cli_path = _select_wwise_cli_path()
             if wwise_cli_path is None:
                 abort = True
+                return
+            cfg.wwise_cli_path = wwise_cli_path
         if abort:
             return None
 
