@@ -8,6 +8,7 @@ import subprocess
 import struct
 import tkinter
 import wave
+import xml.etree.ElementTree as etree
 
 from functools import partial
 from itertools import takewhile
@@ -1936,127 +1937,11 @@ class FileHandler:
             progress_window.step()
         progress_window.destroy()
 
-    # Version one compatibility
-    def __load_wems_sepc_version_one(self, spec_path: str, spec: dict):
-        # Check for work space
-        if "workspace" not in spec:
-            logger.warning("The given spec file is missing field `workspace`. " + \
-                    "Use the current directory of the given spec file is in instead.")
-            workspace = os.path.dirname(spec_path)
-        else:
-            workspace = spec["workspace"]
-        if not os.path.exists(workspace):
-            askokcancel(message=f"{workspace} does not exist.")
-            logger.warning(f"{workspace} does not exist. Import operation " + \
-                    "cancelled")
-            return
-
-        # Check for mapping
-        mapping: dict[str, list[str] | str] | None
-        if "mapping" not in spec:
-            askokcancel(message=f"The given spec file is missing field `mapping`")
-            logger.warning("The given spec file is missing field `mapping`. " + \
-                    "Import operation cancelled.")
-            return
-        mapping = spec["mapping"]
-        if mapping == None or not isinstance(mapping, dict):
-            askokcancel(message="field `mapping` has an invalid data type")
-            logger.warning("field `mapping` has an invalid data type. Import " + \
-                    "operation cancelled")
-            return
-
-        suffix: str = ""
-        if "suffix" in spec:
-            if not isinstance(spec["suffix"], str):
-                logger.warning("`suffix` is not a str. Disable " + \
-                        "substring filtering")
-            else:
-                suffix = spec["suffix"]
-        prefix: str = ""
-        if "prefix" in spec:
-            if not isinstance(spec["prefix"], str):
-                logger.warning("`prefix` is not a str. Disable " + \
-                        "substring filtering")
-            else:
-                prefix = spec["prefix"]
-
-        progress_window = ProgressWindow(title="Loading Files",
-                                         max_progress=len(spec.items()))
-        progress_window.show()
-
-        for src, dest in mapping.items():
-            logger.info(f"Loading {src} into {dest}")
-            progress_window.set_text(f"Loading {src} into {dest}")
-
-            src = prefix + src + suffix
-
-            abs_src = os.path.join(workspace, src)
-            if not abs_src.endswith(".wem"):
-                logger.info("Require import file missing .wem extension. " + \
-                        "Adding extension.")
-                abs_src += ".wem"
-            if not os.path.exists(abs_src):
-                logger.warning(f"Required import file does not exist " + \
-                        "Skipping the current entry.")
-                continue
-
-            if isinstance(dest, str):
-                file_id: int | None = self.get_number_prefix(dest)
-                if file_id == None:
-                    logger.warning(f"{dest} does not contain a valid game asset " + \
-                            "file id. Skipping the current entry.")
-                    continue
-                audio: str | None = self.get_audio_by_id(file_id)
-                if audio == None:
-                    logger.warning(f"No audio source is associated with game " + \
-                            "asset file id {file_id}. Skipping the current entry.")
-                    continue
-                with open(abs_src, "rb") as f:
-                    audio.set_data(f.read())
-                progress_window.step()
-            elif isinstance(dest, list):
-                for d in dest:
-                    if not isinstance(d, str):
-                        logger.warning(f"{d} is not a string. Skipping the " + \
-                                "current entry.")
-                    file_id: int | None = self.get_number_prefix(d)
-                    if file_id == None:
-                        logger.warning(f"{d} does not contain a valid game asset " + \
-                                "file id. Skipping the current entry.")
-                        continue
-                    audio: str | None = self.get_audio_by_id(file_id)
-                    if audio == None:
-                        logger.warning(f"No audio source is associated with " + \
-                                "game asset file id {file_id}. Skipping the " + \
-                                "current entry.")
-                        continue
-                    with open(abs_src, "rb") as f:
-                        audio.set_data(f.read())
-                    progress_window.step()
-            else:
-                logger.warning(f"{dest} is not a string or list of string. " + \
-                        "Skipping the current entry.")
-
-        progress_window.destroy()
-
-        out: str | None = None
-        if "write_patch_to" not in spec:
-            return
-        out = spec["write_patch_to"]
-        if not isinstance(out, str):
-            askokcancel(message="field `write_patch_to` has an invalid data type. " + \
-                    "Write patch operation cancelled")
-            logger.warning("field `write_patch_to` has an invalid data type. " + \
-                    "Write patch operation cancelled")
-            return
-        if not os.path.exists(out):
-            askokcancel(message=f"{out} does not exist. Write patch operation cancelled.")
-            logger.warning(f"{out} does not exist. Write patch operation cancelled.")
-        if not self.write_patch(folder=out):
-            askokcancel(message="Write patch operation failed. Check log.txt for \
-                    detailed")
-
-    def load_wems_spec(self):
+    """
+    Similar to load_wems_spec. The only difference is that there are extra steps 
+    being process for convert .wav to .wem through Wwise CLI.
+    """
+    def load_convert_spec(self):
         spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
                                           filetypes=[("json", "")])
         if spec_path == "":
@@ -2064,7 +1949,7 @@ class FileHandler:
             return
         if not os.path.exists(spec_path):
             askokcancel(f"{spec_path} does not exist.")
-            logger.warning(f"{spec_path} does not exist. Import operation " + \
+            logger.warning(f"{spec_path} does not exist. Import operation "
                     "cancelled")
             return
 
@@ -2082,25 +1967,184 @@ class FileHandler:
 
         if not isinstance(spec, dict):
             askokcancel(message="Invalid data format in the given spec file.") 
-            logger.warning("Invalid data format in the given spec file. Import " + \
+            logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
         # Check for version number
         if "v" not in spec:
             askokcancel(message="The given spec file is missing field `v`") 
-            logger.warning("The given spec file is missing field `v`. Import " + \
+            logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
-        if spec["v"] < 1 and spec["v"] > 2:
+        if spec["v"] != 2:
             askokcancel(message="The given spec file contain invalid version " + 
                         f'number {spec["v"]}.')
-            logger.warning("The given spec file contain invalid version " + \
+            logger.warning("The given spec file contain invalid version "
                     f'number {spec["v"]}. Import operation cancelled')
             return
 
-        if spec["v"] == 1:
-            return self.__load_wems_sepc_version_one(spec_path, spec)
+        if spec["specs"] not in spec:
+            askokcancel(message="The given spec file is missing field `specs`.")
+            logger.warning("The given spec file is missing field `specs`."
+                            " Import operation cancelled.")
+        if not isinstance(spec["specs"], list):
+            askokcancel(message="Field `specs` is not an array.")
+            logger.warning("Field `specs` is not an array. Import operation "
+                           "cancelled.")
+            return
+
+        root = etree.Element("ExternalSourcesList", attrib={
+            "SchemaVersion": "1",
+            "Root": spec_path
+            })
+        specs: list[Any] = spec["specs"]
+        for s in specs:
+            if not isinstance(s, dict):
+                logger.warning("Current entry is not an object. Skipping "
+                               "current entry.")
+                continue
+            # Check for work space
+            if "workspace" not in spec:
+                logger.warning("The given spec file is missing field "
+                               "`workspace`. Use the current directory of the "
+                               "given spec file is in instead.")
+                workspace = os.path.dirname(spec_path)
+            else:
+                workspace = spec["workspace"]
+            if not os.path.exists(workspace):
+                askokcancel(message=f"{workspace} does not exist.")
+                logger.warning(f"{workspace} does not exist. Import operation "
+                        "cancelled")
+                return
+
+            # Check for mapping
+            mapping: dict[str, list[str] | str] | None
+            if "mapping" not in spec:
+                askokcancel(message=f"The given spec file is missing field "
+                            "`mapping`")
+                logger.warning("The given spec file is missing field `mapping`. "
+                        "Import operation cancelled.")
+                return
+            mapping = spec["mapping"]
+            if mapping == None or not isinstance(mapping, dict):
+                askokcancel(message="field `mapping` has an invalid data type")
+                logger.warning("field `mapping` has an invalid data type. Import "
+                        "operation cancelled")
+                return
+
+            suffix: str = ""
+            if "suffix" in spec:
+                if not isinstance(spec["suffix"], str):
+                    logger.warning("`suffix` is not a str. Disable "
+                            "substring filtering")
+                else:
+                    suffix = spec["suffix"]
+            prefix: str = ""
+            if "prefix" in spec:
+                if not isinstance(spec["prefix"], str):
+                    logger.warning("`prefix` is not a str. Disable "
+                            "substring filtering")
+                else:
+                    prefix = spec["prefix"]
+
+            for src, dest in mapping.items():
+                src = prefix + src + suffix
+
+                abs_src = os.path.join(workspace, src)
+                if not abs_src.endswith(".wav"):
+                    logger.info("Require import file missing .wav extension. "
+                            "Adding extension.")
+                    abs_src += ".wav"
+                if not os.path.exists(abs_src):
+                    logger.warning(f"Required import file does not exist "
+                            "Skipping the current entry.")
+                    continue
+
+                if isinstance(dest, str):
+                    file_id: int | None = self.get_number_prefix(dest)
+                    if file_id == None:
+                        logger.warning(f"{dest} does not contain a valid game "
+                                       "asset file id. Skipping the current "
+                                       "entry.")
+                        continue
+                    if self.get_audio_by_id(file_id) == None:
+                        logger.warning(f"No audio source is associated with "
+                                       f"game asset file id {file_id}. Skipping "
+                                       "the current entry.")
+                    etree.SubElement(root, "Source", attrib={
+                        "Path": abs_src,
+                        "Destination": f"{file_id}.wem"
+                    })
+                elif isinstance(dest, list):
+                    for d in dest:
+                        if not isinstance(d, str):
+                            logger.warning(f"{d} is not a string. Skipping the "
+                                    "current entry.")
+                        file_id: int | None = self.get_number_prefix(d)
+                        if file_id == None:
+                            logger.warning(f"{d} does not contain a valid game "
+                                           "asset file id. Skipping the current "
+                                           "entry.")
+                            continue
+                        if self.get_audio_by_id(file_id) == None:
+                            logger.warning(f"No audio source is associated with "
+                                       f"game asset file id {file_id}. Skipping "
+                                       "the current entry.")
+                            continue
+                        etree.SubElement(root, "Source", attrib={
+                            "Path": abs_src,
+                            "Destination": f"{file_id}.wem"
+                        })
+                else:
+                    logger.warning(f"{dest} is not a string or list of string. "
+                            "Skipping the current entry.")
+
+        tree = etree.ElementTree(root)
+        tree.write("output.xml", encoding="utf-8", xml_declaration=True)
+
+    def load_wems_spec(self):
+        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
+                                          filetypes=[("json", "")])
+        if spec_path == "":
+            logger.warning("Import operation cancelled")
+            return
+        if not os.path.exists(spec_path):
+            askokcancel(f"{spec_path} does not exist.")
+            logger.warning(f"{spec_path} does not exist. Import operation "
+                    "cancelled")
+            return
+
+        spec: Any = None
+        workspace = ""
+        try:
+            with open(spec_path, mode="r") as f:
+                spec = json.load(f)
+        except json.JSONDecodeError as err:
+            logger.warning(err)
+            spec = None
+
+        if spec == None:
+            return
+
+        if not isinstance(spec, dict):
+            askokcancel(message="Invalid data format in the given spec file.") 
+            logger.warning("Invalid data format in the given spec file. Import "
+                    "operation cancelled")
+            return
+
+        # Check for version number
+        if "v" not in spec:
+            askokcancel(message="The given spec file is missing field `v`") 
+            logger.warning("The given spec file is missing field `v`. Import "
+                    "operation cancelled.")
+            return
+        if spec["v"] != 2:
+            askokcancel(message="The given spec file contain invalid version " + 
+                        f'number {spec["v"]}.')
+            logger.warning("The given spec file contain invalid version "
+                    f'number {spec["v"]}. Import operation cancelled')
+            return
 
         if spec["specs"] not in spec:
             askokcancel(message="The given spec file is missing field `specs`.")
@@ -2118,7 +2162,131 @@ class FileHandler:
                 logger.warning("Current entry is not an object. Skipping "
                                "current entry.")
                 continue
-            self.__load_wems_sepc_version_one(spec_path, s)
+            # Check for work space
+            if "workspace" not in spec:
+                logger.warning("The given spec file is missing field "
+                               "`workspace`. Use the current directory of the "
+                               "given spec file is in instead.")
+                workspace = os.path.dirname(spec_path)
+            else:
+                workspace = spec["workspace"]
+            if not os.path.exists(workspace):
+                askokcancel(message=f"{workspace} does not exist.")
+                logger.warning(f"{workspace} does not exist. Import operation "
+                        "cancelled")
+                return
+
+            # Check for mapping
+            mapping: dict[str, list[str] | str] | None
+            if "mapping" not in spec:
+                askokcancel(message=f"The given spec file is missing field "
+                            "`mapping`")
+                logger.warning("The given spec file is missing field `mapping`. "
+                        "Import operation cancelled.")
+                return
+            mapping = spec["mapping"]
+            if mapping == None or not isinstance(mapping, dict):
+                askokcancel(message="field `mapping` has an invalid data type")
+                logger.warning("field `mapping` has an invalid data type. Import "
+                        "operation cancelled")
+                return
+
+            suffix: str = ""
+            if "suffix" in spec:
+                if not isinstance(spec["suffix"], str):
+                    logger.warning("`suffix` is not a str. Disable "
+                            "substring filtering")
+                else:
+                    suffix = spec["suffix"]
+            prefix: str = ""
+            if "prefix" in spec:
+                if not isinstance(spec["prefix"], str):
+                    logger.warning("`prefix` is not a str. Disable "
+                            "substring filtering")
+                else:
+                    prefix = spec["prefix"]
+
+            progress_window = ProgressWindow(title="Loading Files",
+                                             max_progress=len(spec.items()))
+            progress_window.show()
+
+            for src, dest in mapping.items():
+                logger.info(f"Loading {src} into {dest}")
+                progress_window.set_text(f"Loading {src} into {dest}")
+
+                src = prefix + src + suffix
+
+                abs_src = os.path.join(workspace, src)
+                if not abs_src.endswith(".wem"):
+                    logger.info("Require import file missing .wem extension. "
+                            "Adding extension.")
+                    abs_src += ".wem"
+                if not os.path.exists(abs_src):
+                    logger.warning(f"Required import file does not exist "
+                            "Skipping the current entry.")
+                    continue
+
+                if isinstance(dest, str):
+                    file_id: int | None = self.get_number_prefix(dest)
+                    if file_id == None:
+                        logger.warning(f"{dest} does not contain a valid game "
+                                       "asset file id. Skipping the current "
+                                       "entry.")
+                        continue
+                    audio: str | None = self.get_audio_by_id(file_id)
+                    if audio == None:
+                        logger.warning(f"No audio source is associated with "
+                                       "game asset file id {file_id}. Skipping "
+                                       "the current entry.")
+                        continue
+                    with open(abs_src, "rb") as f:
+                        audio.set_data(f.read())
+                    progress_window.step()
+                elif isinstance(dest, list):
+                    for d in dest:
+                        if not isinstance(d, str):
+                            logger.warning(f"{d} is not a string. Skipping the "
+                                    "current entry.")
+                        file_id: int | None = self.get_number_prefix(d)
+                        if file_id == None:
+                            logger.warning(f"{d} does not contain a valid game "
+                                           "asset file id. Skipping the current "
+                                           "entry.")
+                            continue
+                        audio: str | None = self.get_audio_by_id(file_id)
+                        if audio == None:
+                            logger.warning(f"No audio source is associated with "
+                                    "game asset file id {file_id}. Skipping the "
+                                    "current entry.")
+                            continue
+                        with open(abs_src, "rb") as f:
+                            audio.set_data(f.read())
+                        progress_window.step()
+                else:
+                    logger.warning(f"{dest} is not a string or list of string. "
+                            "Skipping the current entry.")
+
+            progress_window.destroy()
+
+            out: str | None = None
+            if "write_patch_to" not in spec:
+                return
+            out = spec["write_patch_to"]
+            if not isinstance(out, str):
+                askokcancel(message="field `write_patch_to` has an invalid data "
+                            "type. Write patch operation cancelled.")
+                logger.warning("field `write_patch_to` has an invalid data "
+                               "type. Write patch operation cancelled.")
+                return
+            if not os.path.exists(out):
+                askokcancel(message=f"{out} does not exist. Write patch "
+                            "operation cancelled.")
+                logger.warning(f"{out} does not exist. Write patch operation "
+                               "cancelled.")
+            if not self.write_patch(folder=out):
+                askokcancel(message="Write patch operation failed. Check "
+                            "log.txt for detailed.")
+
 
 class ProgressWindow:
     def __init__(self, title, max_progress):
@@ -2638,8 +2806,13 @@ class MainWindow:
             command=self.load_wems
         )
         self.import_menu.add_command(
-            label="From spec.json",
+            label="From spec.json (.wem)",
             command=lambda: self.file_handler.load_wems_spec() or 
+                self.check_modified()
+        )
+        self.import_menu.add_command(
+            label="From spec.json (.wav)",
+            command=lambda: self.file_handler.load_convert_spec() or 
                 self.check_modified()
         )
         self.file_menu.add_cascade(
