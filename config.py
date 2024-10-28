@@ -124,8 +124,7 @@ def _select_game_data_path() -> str | None:
 
 def _select_wwise_cli_path() -> str | None:
     while True:
-        wwise_cli_path: str = file_dialog.askdirectory(mustexist=True,
-                                                       title="Locate "
+        wwise_cli_path: str = file_dialog.askopenfilename(title="Locate "
                                                        "WwiseConsole.exe")
         if os.path.exists(wwise_cli_path) \
                 and wwise_cli_path.endswith("WwiseConsole.exe"):
