@@ -2144,6 +2144,25 @@ class FileHandler:
                 else:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
+            out: str | None = None
+            if "write_patch_to" not in spec:
+                continue
+            out = spec["write_patch_to"]
+            if not isinstance(out, str):
+                askokcancel(message="field `write_patch_to` has an invalid data "
+                            "type. Write patch operation cancelled.")
+                logger.warning("field `write_patch_to` has an invalid data "
+                               "type. Write patch operation cancelled.")
+                continue
+            if not os.path.exists(out):
+                askokcancel(message=f"{out} does not exist. Write patch "
+                            "operation cancelled.")
+                logger.warning(f"{out} does not exist. Write patch operation "
+                               "cancelled.")
+                continue
+            if not self.write_patch(folder=out):
+                askokcancel(message="Write patch operation failed. Check "
+                            "log.txt for detailed.")
 
         tree = etree.ElementTree(root)
         schema_path = os.path.join(CACHE, "schema.xml")
