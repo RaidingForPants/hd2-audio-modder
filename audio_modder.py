@@ -2228,11 +2228,14 @@ class FileHandler:
                                "type. Write patch operation cancelled.")
                 continue
             if not os.path.exists(out):
-                askokcancel(message=f"{out} does not exist. Write patch "
-                            "operation cancelled.")
-                logger.warning(f"{out} does not exist. Write patch operation "
-                               "cancelled.")
-                continue
+                # Relative patch write #
+                out = os.path.join(spec_path, out)
+                if not os.path.exists(out):
+                    askokcancel(message=f"{out} does not exist. Write patch "
+                                "operation cancelled.")
+                    logger.warning(f"{out} does not exist. Write patch operation "
+                                   "cancelled.")
+                    continue
             if not self.load_wav_by_mapping(project, wems, root):
                 continue
             if not self.write_patch(folder=out):
@@ -2252,11 +2255,14 @@ class FileHandler:
                            "type. Write patch operation cancelled.")
             return
         if not os.path.exists(out):
-            askokcancel(message=f"{out} does not exist. Write patch "
-                        "operation cancelled.")
-            logger.warning(f"{out} does not exist. Write patch operation "
-                           "cancelled.")
-            return
+            # Relative path patch writing #
+            out = os.path.join(spec_path, out)
+            if not os.path.exists(out):
+                askokcancel(message=f"{out} does not exist. Write patch "
+                            "operation cancelled.")
+                logger.warning(f"{out} does not exist. Write patch operation "
+                              "cancelled.")
+                return
         if not self.load_wav_by_mapping(project, wems, root):
             return
         if not self.write_patch(folder=out):
@@ -2444,11 +2450,14 @@ class FileHandler:
                                "type. Write patch operation cancelled.")
                 continue
             if not os.path.exists(out):
-                askokcancel(message=f"{out} does not exist. Write patch "
-                            "operation cancelled.")
-                logger.warning(f"{out} does not exist. Write patch operation "
-                               "cancelled.")
-                continue
+                # Relative path
+                out = os.path.join(spec_path, out)
+                if not os.path.exists(out):
+                    askokcancel(message=f"{out} does not exist. Write patch "
+                                "operation cancelled.")
+                    logger.warning(f"{out} does not exist. Write patch operation "
+                                   "cancelled.")
+                    continue
             if not self.write_patch(folder=out):
                 askokcancel(message="Write patch operation failed. Check "
                             "log.txt for detailed.")
@@ -2461,11 +2470,14 @@ class FileHandler:
                            "type. Write patch operation cancelled.")
             return
         if not os.path.exists(out):
-            askokcancel(message=f"{out} does not exist. Write patch "
-                        "operation cancelled.")
-            logger.warning(f"{out} does not exist. Write patch operation "
-                           "cancelled.")
-            return
+            # Relative path
+            out = os.path.join(spec_path, out)
+            if not os.path.exists(out):
+                askokcancel(message=f"{out} does not exist. Write patch "
+                            "operation cancelled.")
+                logger.warning(f"{out} does not exist. Write patch operation "
+                               "cancelled.")
+                return
         if not self.write_patch(folder=out):
             askokcancel(message="Write patch operation failed. Check "
                             "log.txt for detailed.")
