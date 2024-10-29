@@ -2020,95 +2020,96 @@ class FileHandler:
                     "cancelled")
             return
 
-        specs: Any = None
-        workspace = ""
+        root_spec: Any = None
         try:
             with open(spec_path, mode="r") as f:
-                specs = json.load(f)
+                root_spec = json.load(f)
         except json.JSONDecodeError as err:
             logger.warning(err)
-            specs = None
+            root_spec = None
 
-        if specs == None:
+        if root_spec == None:
             return
 
-        if not isinstance(specs, dict):
+        if not isinstance(root_spec, dict):
             askokcancel(message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
-        # Check for version number
-        if "v" not in specs:
+        # Validate version number #
+        if "v" not in root_spec:
             askokcancel(message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
-        if specs["v"] != 2:
+        if root_spec["v"] != 2:
             askokcancel(message="The given spec file contain invalid version "
-                        f'number {specs["v"]}.')
+                        f'number {root_spec["v"]}.')
             logger.warning("The given spec file contain invalid version "
-                    f'number {specs["v"]}. Import operation cancelled')
+                    f'number {root_spec["v"]}. Import operation cancelled')
             return
 
-        if "specs" not in specs:
+        # Validate `specs` field #
+        if "specs" not in root_spec:
             askokcancel(message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
             return
-        if not isinstance(specs["specs"], list):
+        if not isinstance(root_spec["specs"], list):
             askokcancel(message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
 
+        # Validate `project` path #
         project = DEFAULT_WWISE_PROJECT
-        if "project" not in specs:
+        if "project" not in root_spec:
             logger.warning("Missing field `project`. Using default Wwise project")
         else:
-            if not isinstance(specs["project"], str):
+            if not isinstance(root_spec["project"], str):
                 logger.warning("Field `project` is not a string. Using default"
                                " Wwise project")
-            elif not os.path.exists(specs["project"]):
+            elif not os.path.exists(root_spec["project"]):
                 logger.warning("The given Wwise project does not exist. Using "
                                "default Wwise project")
             else:
-                project = specs["project"]
+                project = root_spec["project"]
         if not os.path.exists(project):
             askokcancel("The default Wwise Project does not exist.")
             logger.warning("The default Wwise Project does not exist. Import "
                            "operation cancelled.")
             return
 
+        # Validate project `conversion` setting #
         conversion = DEFAULT_CONVERSION_SETTING
         if project != DEFAULT_WWISE_PROJECT:
-            if "conversion" not in specs:
+            if "conversion" not in root_spec:
                 askokcancel("Missing field `conversion`.")
                 logger.warning("Missing field `conversion`. Import operation"
                                " cancelled.")
                 return
-            if not isinstance(specs["conversion"], str):
+            if not isinstance(root_spec["conversion"], str):
                 askokcancel("Field `conversion` is not a string.")
                 logger.warning("Field `conversion` is not a string. Import "
                                "operation cancelled.")
                 return
-            conversion = specs["conversion"]
-
-        write_patch_to_root = True
-        if "write_patch_to" not in specs:
-            write_patch_to_root = False
+            conversion = root_spec["conversion"]
 
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": os.path.dirname(spec_path)
             })
         wems: list[tuple[str, AudioSource]] = []
-        for sub_spec in specs["specs"]:
+        for sub_spec in root_spec["specs"]:
+            # Validate spec format #
             if not isinstance(sub_spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
                                "current entry.")
                 continue
-            # Check for work space
+
+            # Validate work space #
+            workspace = ""
             if "workspace" not in sub_spec:
                 logger.warning("The given spec file is missing field "
                                "`workspace`. Use the current directory of the "
@@ -2116,12 +2117,16 @@ class FileHandler:
                 workspace = os.path.dirname(spec_path)
             else:
                 workspace = sub_spec["workspace"]
+                # Relative path
+                if not os.path.exists(workspace): 
+                    workspace = os.path.join(spec_path, workspace) 
             if not os.path.exists(workspace):
                 askokcancel(message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current "
                                "entry.")
                 continue
-            # Check for mapping
+
+            # Validate `mapping` format #
             mapping: dict[str, list[str] | str] | None
             if "mapping" not in sub_spec:
                 askokcancel(message=f"The given spec file is missing field "
@@ -2212,9 +2217,6 @@ class FileHandler:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
 
-            if write_patch_to_root:
-                continue
-
             out: str | None = None
             if "write_patch_to" not in sub_spec:
                 continue
@@ -2236,12 +2238,13 @@ class FileHandler:
             if not self.write_patch(folder=out):
                 askokcancel(message="Write patch operation failed. Check "
                             "log.txt for detailed.")
+            root = etree.Element("ExternalSourcesList", attrib={
+                "SchemaVersion": "1",
+                "Root": os.path.dirname(spec_path)
+            })
             wems.clear()
         
-        if not write_patch_to_root:
-            return
-
-        out = specs["write_patch_to"]
+        out = root_spec["write_patch_to"]
         if not isinstance(out, str):
             askokcancel(message="field `write_patch_to` has an invalid data "
                         "type. Write patch operation cancelled.")
@@ -2272,58 +2275,56 @@ class FileHandler:
                     "cancelled")
             return
 
-        specs: Any = None
-        workspace = ""
+        root_spec: Any = None
         try:
             with open(spec_path, mode="r") as f:
-                specs = json.load(f)
+                root_spec = json.load(f)
         except json.JSONDecodeError as err:
             logger.warning(err)
-            specs = None
+            root_spec = None
 
-        if specs == None:
+        if root_spec == None:
             return
 
-        if not isinstance(specs, dict):
+        if not isinstance(root_spec, dict):
             askokcancel(message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
-        # Check for version number
-        if "v" not in specs:
+        # Validate version number # 
+        if "v" not in root_spec:
             askokcancel(message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
-        if specs["v"] != 2:
+        if root_spec["v"] != 2:
             askokcancel(message="The given spec file contain invalid version " + 
-                        f'number {specs["v"]}.')
+                        f'number {root_spec["v"]}.')
             logger.warning("The given spec file contain invalid version "
-                    f'number {specs["v"]}. Import operation cancelled')
+                    f'number {root_spec["v"]}. Import operation cancelled')
             return
 
-        if specs["specs"] not in specs:
+        # Validate `specs` format #
+        if "specs" not in root_spec:
             askokcancel(message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
             return
-        if not isinstance(specs["specs"], list):
+        if not isinstance(root_spec["specs"], list):
             askokcancel(message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
 
-        write_patch_to_root = True
-        if "write_patch_to" not in specs:
-            write_patch_to_root = False
-
-        for sub_spec in specs["specs"]:
+        for sub_spec in root_spec["specs"]:
             if not isinstance(sub_spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
                                "current entry.")
                 continue
-            # Check for work space
+
+            workspace = ""
+            # Validate work space # 
             if "workspace" not in sub_spec:
                 logger.warning("The given spec file is missing field "
                                "`workspace`. Use the current directory of the "
@@ -2331,13 +2332,16 @@ class FileHandler:
                 workspace = os.path.dirname(spec_path)
             else:
                 workspace = sub_spec["workspace"]
+                # Relative path
+                if not os.path.exists(workspace): 
+                    workspace = os.path.join(spec_path, workspace) 
             if not os.path.exists(workspace):
                 askokcancel(message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current"
                         " entry")
                 continue
 
-            # Check for mapping
+            # Validate `mapping` format # 
             mapping: dict[str, list[str] | str] | None
             if "mapping" not in sub_spec:
                 askokcancel(message=f"The given spec file is missing field "
@@ -2429,9 +2433,6 @@ class FileHandler:
 
             progress_window.destroy()
 
-            if write_patch_to_root:
-                continue
-
             out: str | None = None
             if "write_patch_to" not in sub_spec:
                 return
@@ -2452,10 +2453,7 @@ class FileHandler:
                 askokcancel(message="Write patch operation failed. Check "
                             "log.txt for detailed.")
 
-        if not write_patch_to_root:
-            return
-
-        out = specs["write_patch_to"]
+        out = root_spec["write_patch_to"]
         if not isinstance(out, str):
             askokcancel(message="field `write_patch_to` has an invalid data "
                         "type. Write patch operation cancelled.")
