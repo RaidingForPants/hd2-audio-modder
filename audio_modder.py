@@ -8,6 +8,7 @@ import struct
 import tkinter
 import shutil
 import wave
+import sys
 import xml.etree.ElementTree as etree
 
 from functools import partial
@@ -61,6 +62,8 @@ LANGUAGE_MAPPING = ({
 
 # constants (set once on runtime)
 DIR = os.path.dirname(__file__)
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    DIR = os.path.dirname(sys.argv[0])
 FFMPEG = ""
 VGMSTREAM = ""
 WWISE_CLI = os.path.join(os.environ["WWISEROOT"], 
