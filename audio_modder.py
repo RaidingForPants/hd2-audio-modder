@@ -69,7 +69,7 @@ VGMSTREAM = ""
 WWISE_CLI = os.path.join(os.environ["WWISEROOT"], 
                          "Authoring\\x64\\Release\\bin\\WwiseConsole.exe")
 GAME_FILE_LOCATION = ""
-DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate") 
+DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
 DEFAULT_CONVERSION_SETTING = "Main"
 CACHE = os.path.join(DIR, ".cache")
 
