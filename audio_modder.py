@@ -1946,6 +1946,68 @@ class FileHandler:
             progress_window.step()
         progress_window.destroy()
 
+    def load_wav_by_mapping(self,
+                 project: str,
+                 wems: list[tuple[str, AudioSource]],
+                 schema: etree.Element) -> bool:
+        tree = etree.ElementTree(schema)
+        schema_path = os.path.join(CACHE, "schema.xml")
+        tree.write(schema_path, encoding="utf-8", xml_declaration=True)
+
+        convert_ok = True
+        convert_dest = os.path.join(CACHE, system)
+        try:
+            if system == "Linux":
+                subprocess.run([
+                    WWISE_CLI,
+                    "convert-external-source",
+                    project,
+                    "--platform", "Linux",
+                    "--source-file",
+                    schema_path,
+                    "--output",
+                    CACHE,
+                ]).check_returncode()
+            elif system == "Windows":
+                subprocess.run([
+                    WWISE_CLI,
+                    "convert-external-source",
+                    project,
+                    "--platform", "Windows",
+                    "--source-file",
+                    schema_path,
+                    "--output",
+                    CACHE,
+                ]).check_returncode()
+            else:
+                convert_ok = False
+                askokcancel("The current operating system does not supported "
+                            "this feature yet")
+        except Exception as e:
+            convert_ok = False
+            logger.error(e)
+            askokcancel("Error occurs during conversion. Please check log.txt.")
+
+        if not convert_ok:
+            return False
+
+        for wem in wems:
+            try:
+                dest_path = os.path.join(convert_dest, wem[0])
+                assert(os.path.exists(dest_path))
+                with open(dest_path, "rb") as f:
+                    wem[1].set_data(f.read())
+            except Exception as e:
+                logger.error(e)
+
+        try:
+            os.remove(schema_path)
+            shutil.rmtree(os.path.join(convert_dest))
+        except Exception as e:
+            logger.error(e)
+
+        return True
+
     def load_convert_spec(self):
         spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
                                           filetypes=[("json", "")])
@@ -1983,7 +2045,7 @@ class FileHandler:
                     "operation cancelled.")
             return
         if specs["v"] != 2:
-            askokcancel(message="The given spec file contain invalid version " + 
+            askokcancel(message="The given spec file contain invalid version "
                         f'number {specs["v"]}.')
             logger.warning("The given spec file contain invalid version "
                     f'number {specs["v"]}. Import operation cancelled')
@@ -1993,6 +2055,7 @@ class FileHandler:
             askokcancel(message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
+            return
         if not isinstance(specs["specs"], list):
             askokcancel(message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
@@ -2015,6 +2078,7 @@ class FileHandler:
             askokcancel("The default Wwise Project does not exist.")
             logger.warning("The default Wwise Project does not exist. Import "
                            "operation cancelled.")
+            return
 
         conversion = DEFAULT_CONVERSION_SETTING
         if project != DEFAULT_WWISE_PROJECT:
@@ -2030,59 +2094,62 @@ class FileHandler:
                 return
             conversion = specs["conversion"]
 
+        write_patch_to_root = True
+        if "write_patch_to" not in specs:
+            write_patch_to_root = False
+
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": os.path.dirname(spec_path)
             })
         wems: list[tuple[str, AudioSource]] = []
-        for spec in specs["specs"]:
-            if not isinstance(spec, dict):
+        for sub_spec in specs["specs"]:
+            if not isinstance(sub_spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
                                "current entry.")
                 continue
             # Check for work space
-            if "workspace" not in spec:
+            if "workspace" not in sub_spec:
                 logger.warning("The given spec file is missing field "
                                "`workspace`. Use the current directory of the "
                                "given spec file is in instead.")
                 workspace = os.path.dirname(spec_path)
             else:
-                workspace = spec["workspace"]
+                workspace = sub_spec["workspace"]
             if not os.path.exists(workspace):
                 askokcancel(message=f"{workspace} does not exist.")
-                logger.warning(f"{workspace} does not exist. Import operation "
-                        "cancelled")
-                return
-
+                logger.warning(f"{workspace} does not exist. Skipping current "
+                               "entry.")
+                continue
             # Check for mapping
             mapping: dict[str, list[str] | str] | None
-            if "mapping" not in spec:
+            if "mapping" not in sub_spec:
                 askokcancel(message=f"The given spec file is missing field "
                             "`mapping`")
                 logger.warning("The given spec file is missing field `mapping`. "
-                        "Import operation cancelled.")
-                return
-            mapping = spec["mapping"]
+                        "Skipping current entry.")
+                continue
+            mapping = sub_spec["mapping"]
             if mapping == None or not isinstance(mapping, dict):
                 askokcancel(message="field `mapping` has an invalid data type")
-                logger.warning("field `mapping` has an invalid data type. Import "
-                        "operation cancelled")
-                return
+                logger.warning("field `mapping` has an invalid data type. Skipping "
+                        "current entry.")
+                continue
 
             suffix: str = ""
-            if "suffix" in spec:
-                if not isinstance(spec["suffix"], str):
+            if "suffix" in sub_spec:
+                if not isinstance(sub_spec["suffix"], str):
                     logger.warning("`suffix` is not a str. Disable "
                             "substring filtering")
                 else:
-                    suffix = spec["suffix"]
+                    suffix = sub_spec["suffix"]
             prefix: str = ""
-            if "prefix" in spec:
-                if not isinstance(spec["prefix"], str):
+            if "prefix" in sub_spec:
+                if not isinstance(sub_spec["prefix"], str):
                     logger.warning("`prefix` is not a str. Disable "
                             "substring filtering")
                 else:
-                    prefix = spec["prefix"]
+                    prefix = sub_spec["prefix"]
 
             for src, dest in mapping.items():
                 src = prefix + src + suffix
@@ -2144,10 +2211,14 @@ class FileHandler:
                 else:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
-            out: str | None = None
-            if "write_patch_to" not in spec:
+
+            if write_patch_to_root:
                 continue
-            out = spec["write_patch_to"]
+
+            out: str | None = None
+            if "write_patch_to" not in sub_spec:
+                continue
+            out = sub_spec["write_patch_to"]
             if not isinstance(out, str):
                 askokcancel(message="field `write_patch_to` has an invalid data "
                             "type. Write patch operation cancelled.")
@@ -2160,69 +2231,16 @@ class FileHandler:
                 logger.warning(f"{out} does not exist. Write patch operation "
                                "cancelled.")
                 continue
+            if not self.load_wav_by_mapping(project, wems, root):
+                continue
             if not self.write_patch(folder=out):
                 askokcancel(message="Write patch operation failed. Check "
                             "log.txt for detailed.")
-
-        tree = etree.ElementTree(root)
-        schema_path = os.path.join(CACHE, "schema.xml")
-        tree.write(schema_path, encoding="utf-8", xml_declaration=True)
-
-        convert_ok = True
-        convert_dest = os.path.join(CACHE, system)
-        try:
-            if system == "Linux":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    project,
-                    "--platform", "Linux",
-                    "--source-file",
-                    schema_path,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            elif system == "Windows":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    project,
-                    "--platform", "Windows",
-                    "--source-file",
-                    schema_path,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            else:
-                convert_ok = False
-                askokcancel("The current operating system does not supported "
-                            "this feature yet")
-        except Exception as e:
-            convert_ok = False
-            logger.error(e)
-            askokcancel("Error occurs during conversion. Please check log.txt.")
-
-        if not convert_ok:
+            wems.clear()
+        
+        if not write_patch_to_root:
             return
 
-        for wem in wems:
-            try:
-                dest_path = os.path.join(convert_dest, wem[0])
-                assert(os.path.exists(dest_path))
-                with open(dest_path, "rb") as f:
-                    wem[1].set_data(f.read())
-            except Exception as e:
-                logger.error(e)
-
-        try:
-            os.remove(schema_path)
-            shutil.rmtree(os.path.join(convert_dest))
-        except Exception as e:
-            logger.error(e)
-
-        out: str | None = None
-        if "write_patch_to" not in specs:
-            return
         out = specs["write_patch_to"]
         if not isinstance(out, str):
             askokcancel(message="field `write_patch_to` has an invalid data "
@@ -2236,10 +2254,11 @@ class FileHandler:
             logger.warning(f"{out} does not exist. Write patch operation "
                            "cancelled.")
             return
+        if not self.load_wav_by_mapping(project, wems, root):
+            return
         if not self.write_patch(folder=out):
             askokcancel(message="Write patch operation failed. Check "
-                        "log.txt for detailed.")
-
+                            "log.txt for detailed.")
 
     def load_wems_spec(self):
         spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
@@ -2288,63 +2307,68 @@ class FileHandler:
             askokcancel(message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
+            return
         if not isinstance(specs["specs"], list):
             askokcancel(message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
 
-        for spec in specs["specs"]:
-            if not isinstance(spec, dict):
+        write_patch_to_root = True
+        if "write_patch_to" not in specs:
+            write_patch_to_root = False
+
+        for sub_spec in specs["specs"]:
+            if not isinstance(sub_spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
                                "current entry.")
                 continue
             # Check for work space
-            if "workspace" not in spec:
+            if "workspace" not in sub_spec:
                 logger.warning("The given spec file is missing field "
                                "`workspace`. Use the current directory of the "
                                "given spec file is in instead.")
                 workspace = os.path.dirname(spec_path)
             else:
-                workspace = spec["workspace"]
+                workspace = sub_spec["workspace"]
             if not os.path.exists(workspace):
                 askokcancel(message=f"{workspace} does not exist.")
-                logger.warning(f"{workspace} does not exist. Import operation "
-                        "cancelled")
-                return
+                logger.warning(f"{workspace} does not exist. Skipping current"
+                        " entry")
+                continue
 
             # Check for mapping
             mapping: dict[str, list[str] | str] | None
-            if "mapping" not in spec:
+            if "mapping" not in sub_spec:
                 askokcancel(message=f"The given spec file is missing field "
                             "`mapping`")
                 logger.warning("The given spec file is missing field `mapping`. "
-                        "Import operation cancelled.")
-                return
-            mapping = spec["mapping"]
+                        "Skipping current entry")
+                continue
+            mapping = sub_spec["mapping"]
             if mapping == None or not isinstance(mapping, dict):
                 askokcancel(message="field `mapping` has an invalid data type")
-                logger.warning("field `mapping` has an invalid data type. Import "
-                        "operation cancelled")
-                return
+                logger.warning("field `mapping` has an invalid data type. "
+                        "Skipping current entry")
+                continue
 
             suffix: str = ""
-            if "suffix" in spec:
-                if not isinstance(spec["suffix"], str):
+            if "suffix" in sub_spec:
+                if not isinstance(sub_spec["suffix"], str):
                     logger.warning("`suffix` is not a str. Disable "
                             "substring filtering")
                 else:
-                    suffix = spec["suffix"]
+                    suffix = sub_spec["suffix"]
             prefix: str = ""
-            if "prefix" in spec:
-                if not isinstance(spec["prefix"], str):
+            if "prefix" in sub_spec:
+                if not isinstance(sub_spec["prefix"], str):
                     logger.warning("`prefix` is not a str. Disable "
                             "substring filtering")
                 else:
-                    prefix = spec["prefix"]
+                    prefix = sub_spec["prefix"]
 
             progress_window = ProgressWindow(title="Loading Files",
-                                             max_progress=len(spec.items()))
+                                             max_progress=len(sub_spec.items()))
             progress_window.show()
 
             for src, dest in mapping.items():
@@ -2405,24 +2429,47 @@ class FileHandler:
 
             progress_window.destroy()
 
+            if write_patch_to_root:
+                continue
+
             out: str | None = None
-            if "write_patch_to" not in spec:
+            if "write_patch_to" not in sub_spec:
                 return
-            out = spec["write_patch_to"]
+            out = sub_spec["write_patch_to"]
             if not isinstance(out, str):
                 askokcancel(message="field `write_patch_to` has an invalid data "
                             "type. Write patch operation cancelled.")
                 logger.warning("field `write_patch_to` has an invalid data "
                                "type. Write patch operation cancelled.")
-                return
+                continue
             if not os.path.exists(out):
                 askokcancel(message=f"{out} does not exist. Write patch "
                             "operation cancelled.")
                 logger.warning(f"{out} does not exist. Write patch operation "
                                "cancelled.")
-                return
+                continue
             if not self.write_patch(folder=out):
                 askokcancel(message="Write patch operation failed. Check "
+                            "log.txt for detailed.")
+
+        if not write_patch_to_root:
+            return
+
+        out = specs["write_patch_to"]
+        if not isinstance(out, str):
+            askokcancel(message="field `write_patch_to` has an invalid data "
+                        "type. Write patch operation cancelled.")
+            logger.warning("field `write_patch_to` has an invalid data "
+                           "type. Write patch operation cancelled.")
+            return
+        if not os.path.exists(out):
+            askokcancel(message=f"{out} does not exist. Write patch "
+                        "operation cancelled.")
+            logger.warning(f"{out} does not exist. Write patch operation "
+                           "cancelled.")
+            return
+        if not self.write_patch(folder=out):
+            askokcancel(message="Write patch operation failed. Check "
                             "log.txt for detailed.")
 
 
