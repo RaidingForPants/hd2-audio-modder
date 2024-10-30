@@ -2319,10 +2319,10 @@ class ArchiveSearch(ttk.Entry):
         self.cmp_list: tkinter.Listbox | None = None
 
         self.bind("<KeyRelease>", self.on_key_release)
-        self.bind("<FocusIn>", self.destory_cmp)
-        self.bind("<FocusOut>", self.destory_cmp)
+        self.bind("<FocusIn>", self.destroy_cmp)
+        self.bind("<FocusOut>", self.destroy_cmp)
         self.bind("<Return>", self.on_return)
-        self.bind("<Escape>", self.destory_cmp)
+        self.bind("<Escape>", self.destroy_cmp)
         self.bind("<Up>", self.on_arrow_up)
         self.bind("<Down>", self.on_arrow_down)
 
@@ -2334,9 +2334,9 @@ class ArchiveSearch(ttk.Entry):
 
         if self.cmp_root != None:
             if self.cmp_list == None:
-                logger.error("Something went wrong witht the autocomplete. \
-                        cmp_list should not be None with cmp_root is still \
-                        acitve", stack_info=True)
+                logger.error("Autocomplete error!" \
+                        "cmp_list should not be None with cmp_root still" \
+                        "active", stack_info=True)
                 self.cmp_root.destroy()
                 return
             archives = []
@@ -2383,24 +2383,29 @@ class ArchiveSearch(ttk.Entry):
 
         self.cmp_list.selection_set(0)
 
-        self.cmp_list.bind("<ButtonRelease-1>", self.destory_cmp)
+        self.cmp_list.bind("<ButtonRelease-1>", self.destroy_cmp)
 
         self.cmp_root.geometry(f"{self.winfo_width()}x128")
         self.cmp_root.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
-
-    def on_arrow_up(self, _: tkinter.Event) -> str | None:
+        
+    def error_check(self):
         if self.cmp_root == None:
-            return
+            return 1
         if self.cmp_list == None:
-            logger.critical("Something went wrong with the autocomplete. \
-                    Autocomplete list is not initialized", stack_info=True)
-            return
+            logger.critical("Autocomplete error!" \
+                    "Autocomplete list is not initialized", stack_info=True)
+            return 1
         curr_select = self.cmp_list.curselection()
         if len(curr_select) == 0:
-            return
+            return 1
         if len(curr_select) != 1:
-            logger.warning("Something went wrong with the autocomplete. There \
-                    are more than one item is selected.", stack_info=True)
+            logger.warning("Something went wrong with autocomplete: " \
+                    "more than one item is selected.", stack_info=True)
+        return 0
+
+    def on_arrow_up(self, _: tkinter.Event) -> str | None:
+        if self.error_check() != 0:
+            return
         cur_idx = curr_select[0]
         prev_idx = (cur_idx - 1) % self.cmp_list.size()
         self.cmp_list.selection_clear(0, tkinter.END)
@@ -2410,18 +2415,8 @@ class ArchiveSearch(ttk.Entry):
         return "break" # Prevent default like in JS
 
     def on_arrow_down(self, _: tkinter.Event):
-        if self.cmp_root == None:
+        if self.error_check() != 0:
             return
-        if self.cmp_list == None:
-            logger.critical("Something went wrong with the autocomplete. \
-                    Autocomplete list is not initialized", stack_info=True)
-            return
-        curr_select = self.cmp_list.curselection()
-        if len(curr_select) == 0:
-            return
-        if len(curr_select) != 1:
-            logger.warning("Something went wrong with the autocomplete. \
-                    There are more than one item is selected.", stack_info=True)
         curr_idx = curr_select[0]
         next_idx = (curr_idx + 1) % self.cmp_list.size()
         self.cmp_list.selection_clear(0, tkinter.END)
@@ -2431,28 +2426,18 @@ class ArchiveSearch(ttk.Entry):
         return "break" # Prevent default like in JS
 
     def on_return(self, _: tkinter.Event):
-        if self.cmp_root == None:
+        if self.error_check() != 0:
             return
-        if self.cmp_list == None:
-            logger.critical("Something went wrong with the autocomplete. \
-                    Autocomplete list is not initialized", stack_info=True)
-            return
-        curr_select = self.cmp_list.curselection()
-        if len(curr_select) == 0:
-            return
-        if len(curr_select) != 1:
-            logger.warning("Something went wrong with the autocomplete. There \
-                    are more than one item is selected.", stack_info=True)
         value = self.cmp_list.get(curr_select[0])
         self.delete(0, tkinter.END)
         self.insert(0, value)
         self.icursor(tkinter.END)
-        self.destory_cmp(None)
+        self.destroy_cmp(None)
         if self.on_select_cb == None:
             return
         self.on_select_cb(value)
 
-    def destory_cmp(self, _: tkinter.Event | None):
+    def destroy_cmp(self, _: tkinter.Event | None):
         if self.cmp_list != None:
             self.cmp_list.destroy()
             self.cmp_list = None
@@ -3313,7 +3298,8 @@ if __name__ == "__main__":
         FFMPEG = "ffmpeg"
         
     if not os.path.exists(VGMSTREAM):
-        logger.error(f"Cannot find vgmstream distribution! Ensure the {os.path.dirname(VGMSTREAM)} folder is in the same folder as the executable")
+        logger.error(f"Cannot find vgmstream distribution! Ensure the {os.path.dirname(VGMSTREAM)} " \
+                "folder is in the same folder as the executable")
 
     lookup_store: db.LookupStore | None = None
     if os.path.exists("hd_audio_db.db"):
@@ -3325,10 +3311,10 @@ if __name__ == "__main__":
                          stack_info=True)
             lookup_store = None
     else:
-        logger.warning("Please ensure `hd_audio_db.db` is in the same folder as \
-                the executable to enable builtin audio archive search.")
-        logger.warning("Builtin audio archive search is disabled. \
-                Please refer to the information in Google spreadsheet.")
+        logger.warning("Please ensure `hd_audio_db.db` is in the same folder as " \
+                "the executable to enable built-in audio archive search.")
+        logger.warning("Built-in audio archive search is disabled. " \
+                "Please refer to the information in Google spreadsheet.")
         
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
