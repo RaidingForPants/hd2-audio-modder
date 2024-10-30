@@ -7,14 +7,15 @@ from log import logger
 
 class Config:
 
-    def __init__(self, game_data_path: str,
-                 workspace_paths: set[str] = set(),
+    def __init__(self,
+                 game_data_path: str,
                  recent_files: list[str] = [],
-                 theme: str = "dark_mode",):
+                 theme: str = "dark_mode",
+                 workspace_paths: set[str] = set()):
         self.game_data_path = game_data_path
-        self.workspace_paths = workspace_paths
-        self.theme = theme
         self.recent_files = recent_files
+        self.theme = theme
+        self.workspace_paths = workspace_paths
 
     """
     @return (int): A status code to tell whether there are new workspace being 
@@ -66,12 +67,14 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             cfg.game_data_path = game_data_path
             cfg.workspace_paths = set([p for p in cfg.workspace_paths 
                                    if os.path.exists(p)])
-        try: # for backwards compatibility with configs created before these were added
-            t = cfg.theme
+        # For backwards compatibility with configuration created before these 
+        # were added
+        try: 
+            _ = cfg.theme
         except:
             cfg.theme = "dark_mode"
         try:
-            f = cfg.recent_files
+            _ = cfg.recent_files
         except:
             cfg.recent_files = []
         cfg.save_config()

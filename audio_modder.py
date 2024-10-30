@@ -1,4 +1,3 @@
-import copy
 import json
 import numpy
 import os
@@ -7,7 +6,10 @@ import pyaudio
 import subprocess
 import struct
 import tkinter
+import shutil
 import wave
+import sys
+import xml.etree.ElementTree as etree
 
 from functools import partial
 from itertools import takewhile
@@ -15,8 +17,9 @@ from math import ceil
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
+from tkinter.messagebox import askokcancel
 from tkinter.filedialog import askopenfilename
-from typing import Any, Literal, Tuple, Union
+from typing import Any, Literal, Union
 
 import config as cfg
 import log
@@ -24,7 +27,7 @@ import fileutil
 
 from log import logger
 
-#constants
+# constants
 MUSIC_TRACK = 11
 SOUND = 2
 BANK = 0
@@ -57,12 +60,20 @@ LANGUAGE_MAPPING = ({
     "Русский": 3317373165
 })
 
-#"constants" (set once on runtime)
+# constants (set once on runtime)
+DIR = os.path.dirname(__file__)
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    DIR = os.path.dirname(sys.argv[0])
 FFMPEG = ""
-GAME_FILE_LOCATION = ""
 VGMSTREAM = ""
+WWISE_CLI = os.path.join(os.environ["WWISEROOT"], 
+                         "Authoring\\x64\\Release\\bin\\WwiseConsole.exe")
+GAME_FILE_LOCATION = ""
+DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
+DEFAULT_CONVERSION_SETTING = "Main"
+CACHE = os.path.join(DIR, ".cache")
 
-#global variables
+# global variables
 language = 0
 num_segments = 0
 
@@ -813,10 +824,6 @@ class WwiseBank(Subscriber):
                             count += 1
                         if audio.get_track_info() is not None: #is this needed?
                             entry.track_info[count] = audio.get_track_info()
-                        else:
-                            pass
-                            #print(audio.get_id())
-                            #print(entry.track_info[count])
                     except: #exception because there may be no original track info struct
                         pass
                     if source.stream_type == PREFETCH_STREAM:
@@ -966,8 +973,9 @@ class TextBank:
             stream.write(offset.to_bytes(4, byteorder="little"))
             initial_position = stream.tell()
             stream.seek(offset)
-            stream.write(entries[i].text.encode('utf-8') + b'\x00')
-            offset += len(entries[i].text) + 1
+            text_bytes = entries[i].text.encode('utf-8') + b'\x00'
+            stream.write(text_bytes)
+            offset += len(text_bytes)
             stream.seek(initial_position)
         self.data = stream.data
         self.toc_header.toc_data_size = len(self.data)
@@ -1161,6 +1169,8 @@ class FileReader:
         self.string_entries.clear()
         self.music_segments.clear()
         
+        media_index = MediaIndex()
+        
         self.magic      = toc_file.uint32_read()
         if self.magic != 4026531857: return False
 
@@ -1194,7 +1204,6 @@ class FileReader:
                 toc_data_size = toc_header.toc_data_size
                 toc_file.seek(toc_data_offset)
                 entry.toc_data_header = toc_file.read(16)
-                #-------------------------------------
                 bank = BankParser()
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
@@ -1203,22 +1212,12 @@ class FileReader:
                 try:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
-                    continue
-                entry.hierarchy = hirc    
-                #-------------------------------------
+                    pass
+                entry.hierarchy = hirc
                 #Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
                     bank_id = entry.toc_header.file_id
-                    media_index = MediaIndex()
                     media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
-                    for e in hirc.entries.values():
-                        for source in e.sources:
-                            if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
-                                audio = AudioSource()
-                                audio.stream_type = BANK
-                                audio.short_id = source.source_id
-                                audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
-                                self.audio_sources[source.source_id] = audio
                 
                 entry.bank_misc_data = b''
                 for chunk in bank.chunks.keys():
@@ -1263,9 +1262,7 @@ class FileReader:
                     self.string_entries[language][string_id] = entry
                 self.text_banks[text_bank.get_id()] = text_bank
         
-        
-        #checks for backwards compatibility with patches created in older version(s) of the tool
-        #that didn't save data needed for computing resource_id hashes
+        # ---------- Backwards compatibility checks ----------
         for bank in self.wwise_banks.values():
             if bank.dep == None: #can be None because older versions didn't save the dep along with the bank
                 if not self.load_deps():
@@ -1285,12 +1282,22 @@ class FileReader:
                 self.text_banks.clear()
                 self.audio_sources.clear()
                 return
+        # ---------- End backwards compatibility checks ----------
         
-        #Add all stream entries to the AudioSource list, using their short_id (requires mapping via the dep)
+        # Create all AudioSource objects
         for bank in self.wwise_banks.values():
             for entry in bank.hierarchy.entries.values():
                 for source in entry.sources:
-                    if source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
+                    if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
+                        try:
+                            audio = AudioSource()
+                            audio.stream_type = BANK
+                            audio.short_id = source.source_id
+                            audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
+                            self.audio_sources[source.source_id] = audio
+                        except KeyError:
+                            pass
+                    elif source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
                         try:
                             stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
                             audio = self.wwise_streams[stream_resource_id].content
@@ -1303,7 +1310,6 @@ class FileReader:
                         self.music_track_events[info.event_id] = info
                 if isinstance(entry, MusicSegment):
                     self.music_segments[entry.get_id()] = entry
-        
 
         #construct list of audio sources in each bank
         #add track_info to audio sources?
@@ -1871,8 +1877,9 @@ class FileHandler:
         progress_window.destroy()
         return True
 
-    def write_patch(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
+    def write_patch(self, folder=None):
+        if folder == None:
+            folder = filedialog.askdirectory(title="Select folder to save files to")
         if os.path.exists(folder):
             patch_file_reader = FileReader()
             patch_file_reader.name = self.file_reader.name + ".patch_0"
@@ -1939,60 +1946,551 @@ class FileHandler:
             progress_window.step()
         progress_window.destroy()
 
-    def load_wems_spec(self):
-        spec = filedialog.askopenfilename(title="Choose .wem files to import", 
+    def load_wav_by_mapping(self,
+                 project: str,
+                 wems: list[tuple[str, AudioSource]],
+                 schema: etree.Element) -> bool:
+        tree = etree.ElementTree(schema)
+        schema_path = os.path.join(CACHE, "schema.xml")
+        tree.write(schema_path, encoding="utf-8", xml_declaration=True)
+
+        convert_ok = True
+        convert_dest = os.path.join(CACHE, system)
+        try:
+            if system == "Linux":
+                subprocess.run([
+                    WWISE_CLI,
+                    "convert-external-source",
+                    project,
+                    "--platform", "Linux",
+                    "--source-file",
+                    schema_path,
+                    "--output",
+                    CACHE,
+                ]).check_returncode()
+            elif system == "Windows":
+                subprocess.run([
+                    WWISE_CLI,
+                    "convert-external-source",
+                    project,
+                    "--platform", "Windows",
+                    "--source-file",
+                    schema_path,
+                    "--output",
+                    CACHE,
+                ]).check_returncode()
+            else:
+                convert_ok = False
+                askokcancel("The current operating system does not supported "
+                            "this feature yet")
+        except Exception as e:
+            convert_ok = False
+            logger.error(e)
+            askokcancel("Error occurs during conversion. Please check log.txt.")
+
+        if not convert_ok:
+            return False
+
+        for wem in wems:
+            try:
+                dest_path = os.path.join(convert_dest, wem[0])
+                assert(os.path.exists(dest_path))
+                with open(dest_path, "rb") as f:
+                    wem[1].set_data(f.read())
+            except Exception as e:
+                logger.error(e)
+
+        try:
+            os.remove(schema_path)
+            shutil.rmtree(os.path.join(convert_dest))
+        except Exception as e:
+            logger.error(e)
+
+        return True
+
+    def load_convert_spec(self):
+        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
                                           filetypes=[("json", "")])
-        if spec == "":
+        if spec_path == "":
             logger.warning("Import operation cancelled")
             return
-
-        if not os.path.exists(spec):
-            logger.warning("Specification file does not exist in disk. Import operation cancelled")
+        if not os.path.exists(spec_path):
+            askokcancel(f"{spec_path} does not exist.")
+            logger.warning(f"{spec_path} does not exist. Import operation "
+                    "cancelled")
             return
 
-        mapping: Any 
-        workspace = ""
-        with open(spec, mode="r") as f:
-            mapping = json.load(f)
-            if not isinstance(mapping, dict):
-                logger.warning("Invalid data form in the provided specification file. Import operation cancelled")
-                return
-            if "workspace" not in mapping:
-                logger.warning("Specification file does not contain workspace for importing files. Fallback to the directory this specification file resides")
-                workspace = os.path.dirname(spec)
+        root_spec: Any = None
+        try:
+            with open(spec_path, mode="r") as f:
+                root_spec = json.load(f)
+        except json.JSONDecodeError as err:
+            logger.warning(err)
+            root_spec = None
+
+        if root_spec == None:
+            return
+
+        if not isinstance(root_spec, dict):
+            askokcancel(message="Invalid data format in the given spec file.") 
+            logger.warning("Invalid data format in the given spec file. Import "
+                    "operation cancelled")
+            return
+
+        # Validate version number #
+        if "v" not in root_spec:
+            askokcancel(message="The given spec file is missing field `v`") 
+            logger.warning("The given spec file is missing field `v`. Import "
+                    "operation cancelled.")
+            return
+        if root_spec["v"] != 2:
+            askokcancel(message="The given spec file contain invalid version "
+                        f'number {root_spec["v"]}.')
+            logger.warning("The given spec file contain invalid version "
+                    f'number {root_spec["v"]}. Import operation cancelled')
+            return
+
+        # Validate `specs` field #
+        if "specs" not in root_spec:
+            askokcancel(message="The given spec file is missing field `specs`.")
+            logger.warning("The given spec file is missing field `specs`."
+                            " Import operation cancelled.")
+            return
+        if not isinstance(root_spec["specs"], list):
+            askokcancel(message="Field `specs` is not an array.")
+            logger.warning("Field `specs` is not an array. Import operation "
+                           "cancelled.")
+            return
+
+        # Validate `project` path #
+        project = DEFAULT_WWISE_PROJECT
+        if "project" not in root_spec:
+            logger.warning("Missing field `project`. Using default Wwise project")
+        else:
+            if not isinstance(root_spec["project"], str):
+                logger.warning("Field `project` is not a string. Using default"
+                               " Wwise project")
+            elif not os.path.exists(root_spec["project"]):
+                logger.warning("The given Wwise project does not exist. Using "
+                               "default Wwise project")
             else:
-                workspace = mapping["workspace"]
+                project = root_spec["project"]
+        if not os.path.exists(project):
+            askokcancel("The default Wwise Project does not exist.")
+            logger.warning("The default Wwise Project does not exist. Import "
+                           "operation cancelled.")
+            return
 
-            if not os.path.exists(workspace):
-                logger.warning("Workspace does not exist in disk. Import operation cancelled")
+        # Validate project `conversion` setting #
+        conversion = DEFAULT_CONVERSION_SETTING
+        if project != DEFAULT_WWISE_PROJECT:
+            if "conversion" not in root_spec:
+                askokcancel("Missing field `conversion`.")
+                logger.warning("Missing field `conversion`. Import operation"
+                               " cancelled.")
                 return
+            if not isinstance(root_spec["conversion"], str):
+                askokcancel("Field `conversion` is not a string.")
+                logger.warning("Field `conversion` is not a string. Import "
+                               "operation cancelled.")
+                return
+            conversion = root_spec["conversion"]
 
-        progress_window = ProgressWindow(title="Loading Files",
-                                         max_progress=len(mapping.items()))
-        progress_window.show()
-        for src, dest in mapping.items():
-            logger.info(f"Loading {src} into {dest}")
-            progress_window.set_text(f"Loading {src} into {dest}")
-            file_id: int | None = self.get_number_prefix(dest)
-            if file_id == None:
-                logger.warning(f"{dest} does not contain a valid game asset file id. Skipping the current entry.")
+        spec_dir = os.path.dirname(spec_path)
+        root = etree.Element("ExternalSourcesList", attrib={
+            "SchemaVersion": "1",
+            "Root": spec_dir
+        })
+        wems: list[tuple[str, AudioSource]] = []
+        for sub_spec in root_spec["specs"]:
+            # Validate spec format #
+            if not isinstance(sub_spec, dict):
+                logger.warning("Current entry is not an object. Skipping "
+                               "current entry.")
                 continue
-            audio: str | None = self.get_audio_by_id(file_id)
-            if audio == None:
-                logger.warning(f"No audio source is associated with game asset file id {file_id}. Skipping the current entry.")
+
+            # Validate work space #
+            workspace = ""
+            if "workspace" not in sub_spec:
+                logger.warning("The given spec file is missing field "
+                               "`workspace`. Use the current directory of the "
+                               "given spec file is in instead.")
+                workspace = spec_dir 
+            else:
+                workspace = sub_spec["workspace"]
+                # Relative path
+                if not os.path.exists(workspace): 
+                    workspace = os.path.join(spec_dir, workspace) 
+            if not os.path.exists(workspace):
+                askokcancel(message=f"{workspace} does not exist.")
+                logger.warning(f"{workspace} does not exist. Skipping current "
+                               "entry.")
                 continue
-            abs_src = os.path.join(workspace, src)
-            if not abs_src.endswith(".wem"):
-                logger.info(f"Require import file missing .wem extension. Adding extension.")
-                abs_src += ".wem"
-            if not os.path.exists(abs_src):
-                logger.warning(f"Required import file does not exist in disk. Skipping the current entry.")
+
+            # Validate `mapping` format #
+            mapping: dict[str, list[str] | str] | None
+            if "mapping" not in sub_spec:
+                askokcancel(message=f"The given spec file is missing field "
+                            "`mapping`")
+                logger.warning("The given spec file is missing field `mapping`. "
+                        "Skipping current entry.")
                 continue
-            with open(abs_src, "rb") as f:
-                audio.set_data(f.read())
-            progress_window.step()
-        progress_window.destroy()
-      
+            mapping = sub_spec["mapping"]
+            if mapping == None or not isinstance(mapping, dict):
+                askokcancel(message="field `mapping` has an invalid data type")
+                logger.warning("field `mapping` has an invalid data type. Skipping "
+                        "current entry.")
+                continue
+
+            suffix: str = ""
+            if "suffix" in sub_spec:
+                if not isinstance(sub_spec["suffix"], str):
+                    logger.warning("`suffix` is not a str. Disable "
+                            "substring filtering")
+                else:
+                    suffix = sub_spec["suffix"]
+            prefix: str = ""
+            if "prefix" in sub_spec:
+                if not isinstance(sub_spec["prefix"], str):
+                    logger.warning("`prefix` is not a str. Disable "
+                            "substring filtering")
+                else:
+                    prefix = sub_spec["prefix"]
+
+            for src, dest in mapping.items():
+                src = prefix + src + suffix
+
+                abs_src = os.path.join(workspace, src)
+                if not abs_src.endswith(".wav"):
+                    logger.info("Require import file missing .wav extension. "
+                            "Adding extension.")
+                    abs_src += ".wav"
+                if not os.path.exists(abs_src):
+                    logger.warning(f"Required import file does not exist "
+                            "Skipping the current entry.")
+                    continue
+
+                if isinstance(dest, str):
+                    file_id: int | None = self.get_number_prefix(dest)
+                    if file_id == None:
+                        logger.warning(f"{dest} does not contain a valid game "
+                                       "asset file id. Skipping the current "
+                                       "entry.")
+                        continue
+                    audio = self.get_audio_by_id(file_id)
+                    convert_dest = f"{file_id}.wem"
+                    if audio == None:
+                        logger.warning(f"No audio source is associated with "
+                                       f"game asset file id {file_id}. Skipping "
+                                       "the current entry.")
+                        continue
+                    etree.SubElement(root, "Source", attrib={
+                        "Path": abs_src,
+                        "Conversion": conversion,
+                        "Destination": convert_dest 
+                    })
+                    wems.append((convert_dest, audio))
+                elif isinstance(dest, list):
+                    for d in dest:
+                        if not isinstance(d, str):
+                            logger.warning(f"{d} is not a string. Skipping the "
+                                    "current entry.")
+                        file_id: int | None = self.get_number_prefix(d)
+                        if file_id == None:
+                            logger.warning(f"{d} does not contain a valid game "
+                                           "asset file id. Skipping the current "
+                                           "entry.")
+                            continue
+                        audio = self.get_audio_by_id(file_id)
+                        if audio == None:
+                            logger.warning(f"No audio source is associated with "
+                                           f"game asset file id {file_id}. "
+                                           "Skipping the current entry.")
+                            continue
+                        convert_dest = f"{file_id}.wem"
+                        etree.SubElement(root, "Source", attrib={
+                            "Path": abs_src,
+                            "Conversion": conversion,
+                            "Destination": convert_dest
+                        })
+                        wems.append((convert_dest, audio))
+                else:
+                    logger.warning(f"{dest} is not a string or list of string. "
+                            "Skipping the current entry.")
+
+            out: str | None = None
+            if "write_patch_to" not in sub_spec:
+                continue
+            out = sub_spec["write_patch_to"]
+            if not isinstance(out, str):
+                askokcancel(message="field `write_patch_to` has an invalid data "
+                            "type. Write patch operation cancelled.")
+                logger.warning("field `write_patch_to` has an invalid data "
+                               "type. Write patch operation cancelled.")
+                continue
+            if not os.path.exists(out):
+                # Relative patch write #
+                out = os.path.join(spec_dir, out)
+                if not os.path.exists(out):
+                    askokcancel(message=f"{out} does not exist. Write patch "
+                                "operation cancelled.")
+                    logger.warning(f"{out} does not exist. Write patch operation "
+                                   "cancelled.")
+                    continue
+            if not self.load_wav_by_mapping(project, wems, root):
+                continue
+            if not self.write_patch(folder=out):
+                askokcancel(message="Write patch operation failed. Check "
+                            "log.txt for detailed.")
+            root = etree.Element("ExternalSourcesList", attrib={
+                "SchemaVersion": "1",
+                "Root": spec_dir 
+            })
+            wems.clear()
+
+        out: str | None = None
+        if "write_patch_to" not in root_spec:
+            return
+        out = root_spec["write_patch_to"]
+        if not isinstance(out, str):
+            askokcancel(message="field `write_patch_to` has an invalid data "
+                        "type. Write patch operation cancelled.")
+            logger.warning("field `write_patch_to` has an invalid data "
+                           "type. Write patch operation cancelled.")
+            return
+        if not os.path.exists(out):
+            # Relative path patch writing #
+            out = os.path.join(spec_dir, out)
+            if not os.path.exists(out):
+                askokcancel(message=f"{out} does not exist. Write patch "
+                            "operation cancelled.")
+                logger.warning(f"{out} does not exist. Write patch operation "
+                              "cancelled.")
+                return
+        if not self.load_wav_by_mapping(project, wems, root):
+            return
+        if not self.write_patch(folder=out):
+            askokcancel(message="Write patch operation failed. Check "
+                            "log.txt for detailed.")
+
+    def load_wems_spec(self):
+        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
+                                          filetypes=[("json", "")])
+        if spec_path == "":
+            logger.warning("Import operation cancelled")
+            return
+        if not os.path.exists(spec_path):
+            askokcancel(f"{spec_path} does not exist.")
+            logger.warning(f"{spec_path} does not exist. Import operation "
+                    "cancelled")
+            return
+
+        root_spec: Any = None
+        try:
+            with open(spec_path, mode="r") as f:
+                root_spec = json.load(f)
+        except json.JSONDecodeError as err:
+            logger.warning(err)
+            root_spec = None
+
+        if root_spec == None:
+            return
+
+        if not isinstance(root_spec, dict):
+            askokcancel(message="Invalid data format in the given spec file.") 
+            logger.warning("Invalid data format in the given spec file. Import "
+                    "operation cancelled")
+            return
+
+        # Validate version number # 
+        if "v" not in root_spec:
+            askokcancel(message="The given spec file is missing field `v`") 
+            logger.warning("The given spec file is missing field `v`. Import "
+                    "operation cancelled.")
+            return
+        if root_spec["v"] != 2:
+            askokcancel(message="The given spec file contain invalid version " + 
+                        f'number {root_spec["v"]}.')
+            logger.warning("The given spec file contain invalid version "
+                    f'number {root_spec["v"]}. Import operation cancelled')
+            return
+
+        # Validate `specs` format #
+        if "specs" not in root_spec:
+            askokcancel(message="The given spec file is missing field `specs`.")
+            logger.warning("The given spec file is missing field `specs`."
+                            " Import operation cancelled.")
+            return
+        if not isinstance(root_spec["specs"], list):
+            askokcancel(message="Field `specs` is not an array.")
+            logger.warning("Field `specs` is not an array. Import operation "
+                           "cancelled.")
+            return
+
+        spec_dir = os.path.dirname(spec_path)
+        for sub_spec in root_spec["specs"]:
+            if not isinstance(sub_spec, dict):
+                logger.warning("Current entry is not an object. Skipping "
+                               "current entry.")
+                continue
+
+            workspace = ""
+            # Validate work space # 
+            if "workspace" not in sub_spec:
+                logger.warning("The given spec file is missing field "
+                               "`workspace`. Use the current directory of the "
+                               "given spec file is in instead.")
+                workspace = spec_dir
+            else:
+                workspace = sub_spec["workspace"]
+                # Relative path
+                if not os.path.exists(workspace): 
+                    workspace = os.path.join(spec_dir, workspace) 
+            if not os.path.exists(workspace):
+                askokcancel(message=f"{workspace} does not exist.")
+                logger.warning(f"{workspace} does not exist. Skipping current"
+                        " entry")
+                continue
+
+            # Validate `mapping` format # 
+            mapping: dict[str, list[str] | str] | None
+            if "mapping" not in sub_spec:
+                askokcancel(message=f"The given spec file is missing field "
+                            "`mapping`")
+                logger.warning("The given spec file is missing field `mapping`. "
+                        "Skipping current entry")
+                continue
+            mapping = sub_spec["mapping"]
+            if mapping == None or not isinstance(mapping, dict):
+                askokcancel(message="field `mapping` has an invalid data type")
+                logger.warning("field `mapping` has an invalid data type. "
+                        "Skipping current entry")
+                continue
+
+            suffix: str = ""
+            if "suffix" in sub_spec:
+                if not isinstance(sub_spec["suffix"], str):
+                    logger.warning("`suffix` is not a str. Disable "
+                            "substring filtering")
+                else:
+                    suffix = sub_spec["suffix"]
+            prefix: str = ""
+            if "prefix" in sub_spec:
+                if not isinstance(sub_spec["prefix"], str):
+                    logger.warning("`prefix` is not a str. Disable "
+                            "substring filtering")
+                else:
+                    prefix = sub_spec["prefix"]
+
+            progress_window = ProgressWindow(title="Loading Files",
+                                             max_progress=len(sub_spec.items()))
+            progress_window.show()
+
+            for src, dest in mapping.items():
+                logger.info(f"Loading {src} into {dest}")
+                progress_window.set_text(f"Loading {src} into {dest}")
+
+                src = prefix + src + suffix
+
+                abs_src = os.path.join(workspace, src)
+                if not abs_src.endswith(".wem"):
+                    logger.info("Require import file missing .wem extension. "
+                            "Adding extension.")
+                    abs_src += ".wem"
+                if not os.path.exists(abs_src):
+                    logger.warning(f"Required import file does not exist "
+                            "Skipping the current entry.")
+                    continue
+
+                if isinstance(dest, str):
+                    file_id: int | None = self.get_number_prefix(dest)
+                    if file_id == None:
+                        logger.warning(f"{dest} does not contain a valid game "
+                                       "asset file id. Skipping the current "
+                                       "entry.")
+                        continue
+                    audio: str | None = self.get_audio_by_id(file_id)
+                    if audio == None:
+                        logger.warning(f"No audio source is associated with "
+                                       "game asset file id {file_id}. Skipping "
+                                       "the current entry.")
+                        continue
+                    with open(abs_src, "rb") as f:
+                        audio.set_data(f.read())
+                    progress_window.step()
+                elif isinstance(dest, list):
+                    for d in dest:
+                        if not isinstance(d, str):
+                            logger.warning(f"{d} is not a string. Skipping the "
+                                    "current entry.")
+                        file_id: int | None = self.get_number_prefix(d)
+                        if file_id == None:
+                            logger.warning(f"{d} does not contain a valid game "
+                                           "asset file id. Skipping the current "
+                                           "entry.")
+                            continue
+                        audio: str | None = self.get_audio_by_id(file_id)
+                        if audio == None:
+                            logger.warning(f"No audio source is associated with "
+                                    "game asset file id {file_id}. Skipping the "
+                                    "current entry.")
+                            continue
+                        with open(abs_src, "rb") as f:
+                            audio.set_data(f.read())
+                        progress_window.step()
+                else:
+                    logger.warning(f"{dest} is not a string or list of string. "
+                            "Skipping the current entry.")
+
+            progress_window.destroy()
+
+            out: str | None = None
+            if "write_patch_to" not in sub_spec:
+                return
+            out = sub_spec["write_patch_to"]
+            if not isinstance(out, str):
+                askokcancel(message="field `write_patch_to` has an invalid data "
+                            "type. Write patch operation cancelled.")
+                logger.warning("field `write_patch_to` has an invalid data "
+                               "type. Write patch operation cancelled.")
+                continue
+            if not os.path.exists(out):
+                # Relative path
+                out = os.path.join(spec_dir, out)
+                if not os.path.exists(out):
+                    askokcancel(message=f"{out} does not exist. Write patch "
+                                "operation cancelled.")
+                    logger.warning(f"{out} does not exist. Write patch operation "
+                                   "cancelled.")
+                    continue
+            if not self.write_patch(folder=out):
+                askokcancel(message="Write patch operation failed. Check "
+                            "log.txt for detailed.")
+
+        out: str | None = None
+        if "write_patch_to" not in root_spec:
+            return
+        out = root_spec["write_patch_to"]
+        if not isinstance(out, str):
+            askokcancel(message="field `write_patch_to` has an invalid data "
+                        "type. Write patch operation cancelled.")
+            logger.warning("field `write_patch_to` has an invalid data "
+                           "type. Write patch operation cancelled.")
+            return
+        if not os.path.exists(out):
+            # Relative path
+            out = os.path.join(spec_dir, out)
+            if not os.path.exists(out):
+                askokcancel(message=f"{out} does not exist. Write patch "
+                            "operation cancelled.")
+                logger.warning(f"{out} does not exist. Write patch operation "
+                               "cancelled.")
+                return
+        if not self.write_patch(folder=out):
+            askokcancel(message="Write patch operation failed. Check "
+                            "log.txt for detailed.")
+
+
 class ProgressWindow:
     def __init__(self, title, max_progress):
         self.title = title
@@ -2511,10 +3009,21 @@ class MainWindow:
             command=self.load_wems
         )
         self.import_menu.add_command(
-            label="From spec.json",
+            label="From spec.json (.wem)",
             command=lambda: self.file_handler.load_wems_spec() or 
                 self.check_modified()
         )
+        if os.path.exists(WWISE_CLI):
+            self.import_menu.add_command(
+                label="From spec.json (.wav)",
+                command=lambda: self.file_handler.load_convert_spec() or 
+                    self.check_modified()
+            )
+        else:
+            askokcancel("Failed to locate WwiseConsole. Importing wave files "
+                        "directly into an archive is disabled.")
+            logger.warning("Failed to locate WwiseConsole. Importing wave files "
+                        "directly into an archive is disabled.")
         self.file_menu.add_cascade(
             menu=self.import_menu,
             label="Import"
@@ -3148,7 +3657,16 @@ if __name__ == "__main__":
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)
+
     GAME_FILE_LOCATION = app_state.game_data_path
+
+    try:
+        if not os.path.exists(CACHE):
+            os.mkdir(CACHE, mode=0o777)
+    except Exception as e:
+        askokcancel("Error when initiating application", 
+                    "Failed to create application caching space")
+        exit(1)
 
     system = platform.system()
     if system == "Windows":
@@ -3162,7 +3680,9 @@ if __name__ == "__main__":
         FFMPEG = "ffmpeg"
         
     if not os.path.exists(VGMSTREAM):
-        logger.error(f"Cannot find vgmstream distribution! Ensure the {os.path.dirname(VGMSTREAM)} folder is in the same folder as the executable")
+        logger.error("Cannot find vgmstream distribution! "
+                     f"Ensure the {os.path.dirname(VGMSTREAM)} folder is "
+                     "in the same folder as the executable")
         
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
@@ -3171,3 +3691,5 @@ if __name__ == "__main__":
     
     app_state.save_config()
 
+    if os.path.exists(CACHE):
+        shutil.rmtree(CACHE)

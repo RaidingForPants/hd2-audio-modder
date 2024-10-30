@@ -1,2 +1,13 @@
-numpy==2.0.1
+altgraph==0.17.4
+attrs==24.2.0
+jsonschema==4.23.0
+jsonschema-specifications==2024.10.1
+numpy==2.1.2
+packaging==24.1
 PyAudio==0.2.14
+pyinstaller==6.11.0
+pyinstaller-hooks-contrib==2024.9
+pyproject-toml==0.0.10
+referencing==0.35.1
+rpds-py==0.20.0
+toml==0.10.2
