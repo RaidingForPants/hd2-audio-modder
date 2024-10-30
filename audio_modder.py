@@ -1956,8 +1956,6 @@ class FileHandler:
             "Root": __file__
         })
         file = etree.ElementTree(root)
-        if len(destinations) > 0 and len(destinations) != len(sources):
-            logger.warning("Non-matching number of external sources and destinations!")
         for source in sources:
             etree.SubElement(root, "Source", attrib={
                 "Path": source,
@@ -1977,7 +1975,6 @@ class FileHandler:
             
         source_list = self.create_external_sources_list(wavs)
         
-        convert_ok = True
         convert_dest = os.path.join(CACHE, system)
         try:
             if system == "Linux":
@@ -2005,15 +2002,13 @@ class FileHandler:
                     CACHE,
                 ]).check_returncode()
             else:
-                convert_ok = False
                 showerror(title="Operation Failed",
                     message="The current operating system does not support this feature yet")
         except Exception as e:
-            convert_ok = False
             logger.error(e)
             showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
             
-        wems = [os.path.join(CACHE, system, x) for x in os.listdir(os.path.join(CACHE, system))]
+        wems = [os.path.join(convert_dest, x) for x in os.listdir(convert_dest)]
         
         self.load_wems(wems)
         
