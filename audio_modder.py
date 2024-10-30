@@ -3038,8 +3038,9 @@ class ArchiveSearch(ttk.Entry):
     def on_arrow_up(self, _: tkinter.Event) -> str | None:
         if self.error_check() != 0:
             return
-        cur_idx = curr_select[0]
-        prev_idx = (cur_idx - 1) % self.cmp_list.size()
+        curr_select = self.cmp_list.curselection()
+        curr_idx = curr_select[0]
+        prev_idx = (curr_idx - 1) % self.cmp_list.size()
         self.cmp_list.selection_clear(0, tkinter.END)
         self.cmp_list.selection_set(prev_idx)
         self.cmp_list.activate(prev_idx)
@@ -3049,6 +3050,7 @@ class ArchiveSearch(ttk.Entry):
     def on_arrow_down(self, _: tkinter.Event):
         if self.error_check() != 0:
             return
+        curr_select = self.cmp_list.curselection()
         curr_idx = curr_select[0]
         next_idx = (curr_idx + 1) % self.cmp_list.size()
         self.cmp_list.selection_clear(0, tkinter.END)
