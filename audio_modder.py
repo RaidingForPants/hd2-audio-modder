@@ -15,13 +15,12 @@ from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
 from tkinter.filedialog import askopenfilename
-from typing import Any, Literal, Tuple, Union
+from typing import Any, Literal, Callable, Union
 
 import config as cfg
+import db
 import log
 import fileutil
-
-import config as cfg
 
 from log import logger
 
@@ -2296,6 +2295,178 @@ class EventWindow:
         self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
         self.update_modified()
 
+"""
+Not suggested to use this as a generic autocomplete widget for other searches.
+Currently it's only used specifically for search archive.
+"""
+class ArchiveSearch(ttk.Entry):
+
+    ignore_keys: list[str] = ["Up", "Down", "Left", "Right", "Escape", "Return"]
+
+    def __init__(self, 
+                 fmt: str,
+                 entries: dict[str, str] = {}, 
+                 on_select_cb: Callable[[Any], None] | None = None,
+                 master: Misc | None = None,
+                 **options):
+        super().__init__(master, **options)
+
+        self.on_select_cb = on_select_cb
+        self.entries = entries
+        self.fmt = fmt
+
+        self.cmp_root: tkinter.Toplevel | None = None
+        self.cmp_list: tkinter.Listbox | None = None
+
+        self.bind("<KeyRelease>", self.on_key_release)
+        self.bind("<FocusIn>", self.destory_cmp)
+        self.bind("<FocusOut>", self.destory_cmp)
+        self.bind("<Return>", self.on_return)
+        self.bind("<Escape>", self.destory_cmp)
+        self.bind("<Up>", self.on_arrow_up)
+        self.bind("<Down>", self.on_arrow_down)
+
+    def on_key_release(self, event: tkinter.Event):
+        if event.keysym in self.ignore_keys:
+            return
+
+        query = self.get()
+
+        if self.cmp_root != None:
+            if self.cmp_list == None:
+                logger.error("Something went wrong witht the autocomplete. \
+                        cmp_list should not be None with cmp_root is still \
+                        acitve", stack_info=True)
+                self.cmp_root.destroy()
+                return
+            archives = []
+            if query == "":
+                archives = [self.fmt.format(k, v) 
+                            for k, v in self.entries.items()]
+            else:
+                unique: set[str] = set()
+                for archive_id, tag in self.entries.items():
+                    match = archive_id.find(query) != -1 or \
+                            tag.find(query) != -1
+                    if not match or archive_id in unique:
+                        continue
+                    archives.append(self.fmt.format(archive_id, tag))
+                    unique.add(archive_id)
+            self.cmp_list.delete(0, tkinter.END)
+            for archive in archives:
+                self.cmp_list.insert(tkinter.END, archive)
+            self.cmp_list.selection_clear(0, tkinter.END)
+            self.cmp_list.selection_set(0)
+            return
+
+        archives = []
+        if query == "":
+            archives = [self.fmt.format(k, v) for k, v in self.entries.items()]
+        else:
+            unique: set[str] = set()
+            for archive_id, tag in self.entries.items():
+                match = archive_id.find(query) != -1 or tag.find(query) != -1
+                if not match or archive_id in unique:
+                    continue
+                archives.append(self.fmt.format(archive_id, tag))
+                unique.add(archive_id)
+
+        self.cmp_root = tkinter.Toplevel(self)
+        self.cmp_root.wm_overrideredirect(True) # Hide title bar
+
+        self.cmp_list = tkinter.Listbox(self.cmp_root, borderwidth=0)
+
+        self.cmp_list.pack(side=tkinter.LEFT, fill=tkinter.BOTH, expand=True)
+
+        for archive in archives:
+            self.cmp_list.insert(tkinter.END, archive)
+
+        self.cmp_list.selection_set(0)
+
+        self.cmp_list.bind("<ButtonRelease-1>", self.destory_cmp)
+
+        self.cmp_root.geometry(f"{self.winfo_width()}x128")
+        self.cmp_root.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
+
+    def on_arrow_up(self, _: tkinter.Event) -> str | None:
+        if self.cmp_root == None:
+            return
+        if self.cmp_list == None:
+            logger.critical("Something went wrong with the autocomplete. \
+                    Autocomplete list is not initialized", stack_info=True)
+            return
+        curr_select = self.cmp_list.curselection()
+        if len(curr_select) == 0:
+            return
+        if len(curr_select) != 1:
+            logger.warning("Something went wrong with the autocomplete. There \
+                    are more than one item is selected.", stack_info=True)
+        cur_idx = curr_select[0]
+        prev_idx = (cur_idx - 1) % self.cmp_list.size()
+        self.cmp_list.selection_clear(0, tkinter.END)
+        self.cmp_list.selection_set(prev_idx)
+        self.cmp_list.activate(prev_idx)
+        self.cmp_list.see(prev_idx)
+        return "break" # Prevent default like in JS
+
+    def on_arrow_down(self, _: tkinter.Event):
+        if self.cmp_root == None:
+            return
+        if self.cmp_list == None:
+            logger.critical("Something went wrong with the autocomplete. \
+                    Autocomplete list is not initialized", stack_info=True)
+            return
+        curr_select = self.cmp_list.curselection()
+        if len(curr_select) == 0:
+            return
+        if len(curr_select) != 1:
+            logger.warning("Something went wrong with the autocomplete. \
+                    There are more than one item is selected.", stack_info=True)
+        curr_idx = curr_select[0]
+        next_idx = (curr_idx + 1) % self.cmp_list.size()
+        self.cmp_list.selection_clear(0, tkinter.END)
+        self.cmp_list.selection_set(next_idx)
+        self.cmp_list.activate(next_idx)
+        self.cmp_list.see(next_idx)
+        return "break" # Prevent default like in JS
+
+    def on_return(self, _: tkinter.Event):
+        if self.cmp_root == None:
+            return
+        if self.cmp_list == None:
+            logger.critical("Something went wrong with the autocomplete. \
+                    Autocomplete list is not initialized", stack_info=True)
+            return
+        curr_select = self.cmp_list.curselection()
+        if len(curr_select) == 0:
+            return
+        if len(curr_select) != 1:
+            logger.warning("Something went wrong with the autocomplete. There \
+                    are more than one item is selected.", stack_info=True)
+        value = self.cmp_list.get(curr_select[0])
+        self.delete(0, tkinter.END)
+        self.insert(0, value)
+        self.icursor(tkinter.END)
+        self.destory_cmp(None)
+        if self.on_select_cb == None:
+            return
+        self.on_select_cb(value)
+
+    def destory_cmp(self, _: tkinter.Event | None):
+        if self.cmp_list != None:
+            self.cmp_list.destroy()
+            self.cmp_list = None
+
+        if self.cmp_root != None:
+            self.cmp_root.destroy()
+            self.cmp_root = None
+
+    def set_entries(self, entries: dict[str, str], fmt: str | None = None):
+        if fmt != None:
+            self.fmt = fmt
+        self.entries = entries
+        self.delete(0, tkinter.END)
+
 class MainWindow:
 
     dark_mode_bg = "#333333"
@@ -2307,9 +2478,13 @@ class MainWindow:
     light_mode_modified_bg = "#7CFC00"
     light_mode_modified_fg = "#000000"
 
-    def __init__(self, app_state: cfg.Config, file_handler, sound_handler):
+    def __init__(self, 
+                 app_state: cfg.Config, 
+                 lookup_store: db.LookupStore | None,
+                 file_handler, 
+                 sound_handler):
         self.app_state = app_state
-
+        self.lookup_store = lookup_store
         self.file_handler = file_handler
         self.sound_handler = sound_handler
         
@@ -2327,6 +2502,8 @@ class MainWindow:
         self.search_text_var = tkinter.StringVar(self.root)
         self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
         self.top_bar.pack(side="top", fill='x')
+        if lookup_store != None:
+            self.init_archive_search_bar()
 
         self.up_button = ttk.Button(self.top_bar, text='\u25b2',
                                     width=2, command=self.search_up)
@@ -2643,6 +2820,56 @@ class MainWindow:
         self.workspace_scroll_bar.pack(side="left", pady=8, fill="y")
         self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
         self.render_workspace()
+
+    def init_archive_search_bar(self):
+        if self.lookup_store == None:
+            logger.critical("Audio archive database connection is None after \
+                    bypassing all check.", stack_info=True)
+            return
+        archives = self.lookup_store.query_helldiver_audio_archive()
+        entries: dict[str, str] = {
+                archive.audio_archive_id: archive.audio_archive_name 
+                for archive in archives}
+        self.archive_search = ArchiveSearch("{1} || {0}", 
+                                            entries=entries,
+                                            on_select_cb=self.on_archive_search_bar_return,
+                                            master=self.top_bar, 
+                                            width=64)
+        categories = self.lookup_store.query_helldiver_audio_archive_category()
+        categories = [""] + categories
+        self.category_search = ttk.Combobox(self.top_bar,
+                                            state="readonly",
+                                            font=('Segoe UI', 10),
+                                            width=18, height=10,
+                                            values=categories) 
+        self.archive_search.pack(side="left", padx=4, pady=8)
+        self.category_search.pack(side="left", padx=4, pady=8)
+        self.category_search.bind("<<ComboboxSelected>>",
+                                  self.on_category_search_bar_select)
+
+    def on_archive_search_bar_return(self, value: str):
+        splits = value.split(" || ")
+        if len(splits) != 2:
+            logger.critical("Something went wrong with the archive search \
+                    autocomplete.", stack_info=True)
+            return
+        archive_file = os.path.join(self.app_state.game_data_path, splits[1])
+        self.load_archive(initialdir="", archive_file=archive_file)
+
+    def on_category_search_bar_select(self, event):
+        if self.lookup_store == None:
+            logger.critical("Audio archive database connection is None after \
+                    bypassing all check.", stack_info=True)
+            return
+        category: str = self.category_search.get()
+        archives = self.lookup_store.query_helldiver_audio_archive(category)
+        entries: dict[str, str] = {
+                archive.audio_archive_id: archive.audio_archive_name 
+                for archive in archives
+        }
+        self.archive_search.set_entries(entries)
+        self.archive_search.focus_set()
+        self.category_search.selection_clear()
 
     def treeview_on_right_click(self, event):
         try:
@@ -3087,11 +3314,26 @@ if __name__ == "__main__":
         
     if not os.path.exists(VGMSTREAM):
         logger.error(f"Cannot find vgmstream distribution! Ensure the {os.path.dirname(VGMSTREAM)} folder is in the same folder as the executable")
+
+    lookup_store: db.LookupStore | None = None
+    if os.path.exists("hd_audio_db.db"):
+        sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
+        try:
+            lookup_store = db.SQLiteLookupStore(sqlite_initializer, logger)
+        except Exception as err:
+            logger.error("Failed to connect to audio archive database", 
+                         stack_info=True)
+            lookup_store = None
+    else:
+        logger.warning("Please ensure `hd_audio_db.db` is in the same folder as \
+                the executable to enable builtin audio archive search.")
+        logger.warning("Builtin audio archive search is disabled. \
+                Please refer to the information in Google spreadsheet.")
         
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
     file_handler = FileHandler()
-    window = MainWindow(app_state, file_handler, sound_handler)
+    window = MainWindow(app_state, lookup_store, file_handler, sound_handler)
     
     app_state.save_config()
 
