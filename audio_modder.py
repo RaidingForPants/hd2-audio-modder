@@ -18,6 +18,8 @@ from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
 from tkinter.messagebox import askokcancel
+from tkinter.messagebox import showwarning
+from tkinter.messagebox import showerror
 from tkinter.filedialog import askopenfilename
 from typing import Any, Literal, Union
 
@@ -66,9 +68,8 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     DIR = os.path.dirname(sys.argv[0])
 FFMPEG = ""
 VGMSTREAM = ""
-WWISE_CLI = os.path.join(os.environ["WWISEROOT"], 
-                         "Authoring\\x64\\Release\\bin\\WwiseConsole.exe")
 GAME_FILE_LOCATION = ""
+WWISE_CLI = ""
 DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
 DEFAULT_CONVERSION_SETTING = "Main"
 CACHE = os.path.join(DIR, ".cache")
@@ -1478,6 +1479,8 @@ class SoundHandler:
             self.audio_process = None
         
     def play_audio(self, sound_id, sound_data, callback=None):
+        if not os.path.exists(VGMSTREAM):
+            return
         self.kill_sound()
         self.callback = callback
         if self.audio_id == sound_id:
@@ -1945,6 +1948,84 @@ class FileHandler:
                 audio.set_data(f.read())
             progress_window.step()
         progress_window.destroy()
+        
+    def create_external_sources_list(self, sources: list[str]):
+        root = etree.Element("ExternalSourcesList", attrib={
+            "SchemaVersion": "1",
+            "Root": __file__
+        })
+        file = etree.ElementTree(root)
+        if len(destinations) > 0 and len(destinations) != len(sources):
+            logger.warning("Non-matching number of external sources and destinations!")
+        for source in sources:
+            etree.SubElement(root, "Source", attrib={
+                "Path": source,
+                "Conversion": DEFAULT_CONVERSION_SETTING,
+                "Destination": os.path.basename(source)
+            })
+        file.write(os.path.join(CACHE, "external_sources.wsources"))
+        
+        return os.path.join(CACHE, "external_sources.wsources")
+        
+        
+    def load_wavs(self, wavs: list[str] | None = None):
+        if wavs == None:
+            wavs = filedialog.askopenfilenames(title="Choose .wem files to import")
+        if wavs == "":
+            return
+            
+        source_list = self.create_external_sources_list(wavs)
+        
+        convert_ok = True
+        convert_dest = os.path.join(CACHE, system)
+        try:
+            if system == "Linux":
+                subprocess.run([
+                    WWISE_CLI,
+                    "convert-external-source",
+                    DEFAULT_WWISE_PROJECT,
+                    "--no-wwise-dat",
+                    "--platform", system,
+                    "--source-file",
+                    source_list,
+                    "--output",
+                    CACHE,
+                ]).check_returncode()
+            elif system == "Windows":
+                subprocess.run([
+                    WWISE_CLI,
+                    "convert-external-source",
+                    DEFAULT_WWISE_PROJECT,
+                    "--no-wwise-dat",
+                    "--platform", system,
+                    "--source-file",
+                    source_list,
+                    "--output",
+                    CACHE,
+                ]).check_returncode()
+            else:
+                convert_ok = False
+                showerror(title="Operation Failed",
+                    message="The current operating system does not support this feature yet")
+        except Exception as e:
+            convert_ok = False
+            logger.error(e)
+            showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
+            
+        wems = [os.path.join(CACHE, system, x) for x in os.listdir(os.path.join(CACHE, system))]
+        
+        self.load_wems(wems)
+        
+        for wem in wems:
+            try:
+                os.remove(wem)
+            except:
+                pass
+                
+        try:
+            os.remove(source_list)
+        except:
+            pass
 
     def load_wav_by_mapping(self,
                  project: str,
@@ -1953,7 +2034,6 @@ class FileHandler:
         tree = etree.ElementTree(schema)
         schema_path = os.path.join(CACHE, "schema.xml")
         tree.write(schema_path, encoding="utf-8", xml_declaration=True)
-
         convert_ok = True
         convert_dest = os.path.join(CACHE, system)
         try:
@@ -1962,6 +2042,7 @@ class FileHandler:
                     WWISE_CLI,
                     "convert-external-source",
                     project,
+                    "--no-wwise-dat",
                     "--platform", "Linux",
                     "--source-file",
                     schema_path,
@@ -1973,6 +2054,7 @@ class FileHandler:
                     WWISE_CLI,
                     "convert-external-source",
                     project,
+                    "--no-wwise-dat",
                     "--platform", "Windows",
                     "--source-file",
                     schema_path,
@@ -1981,12 +2063,12 @@ class FileHandler:
                 ]).check_returncode()
             else:
                 convert_ok = False
-                askokcancel("The current operating system does not supported "
-                            "this feature yet")
+                showerror(title="Operation Failed",
+                    message="The current operating system does not support this feature yet")
         except Exception as e:
             convert_ok = False
             logger.error(e)
-            askokcancel("Error occurs during conversion. Please check log.txt.")
+            showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
 
         if not convert_ok:
             return False
@@ -2015,8 +2097,8 @@ class FileHandler:
             logger.warning("Import operation cancelled")
             return
         if not os.path.exists(spec_path):
-            askokcancel(f"{spec_path} does not exist.")
-            logger.warning(f"{spec_path} does not exist. Import operation "
+            showerror(title="Operation Failed", message=f"{spec_path} does not exist.")
+            logger.warning(f"{spec_path} does not exist. Import operation " \
                     "cancelled")
             return
 
@@ -2032,19 +2114,19 @@ class FileHandler:
             return
 
         if not isinstance(root_spec, dict):
-            askokcancel(message="Invalid data format in the given spec file.") 
+            showerror(title="Operation Failed", message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
         # Validate version number #
         if "v" not in root_spec:
-            askokcancel(message="The given spec file is missing field `v`") 
+            showerror(title="Operation Failed", message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
         if root_spec["v"] != 2:
-            askokcancel(message="The given spec file contain invalid version "
+            showerror(title="Operation Failed", message="The given spec file contain invalid version "
                         f'number {root_spec["v"]}.')
             logger.warning("The given spec file contain invalid version "
                     f'number {root_spec["v"]}. Import operation cancelled')
@@ -2052,12 +2134,12 @@ class FileHandler:
 
         # Validate `specs` field #
         if "specs" not in root_spec:
-            askokcancel(message="The given spec file is missing field `specs`.")
+            showerror(title="Operation Failed", message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
             return
         if not isinstance(root_spec["specs"], list):
-            askokcancel(message="Field `specs` is not an array.")
+            showerror(title="Operation Failed", message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
@@ -2076,21 +2158,20 @@ class FileHandler:
             else:
                 project = root_spec["project"]
         if not os.path.exists(project):
-            askokcancel("The default Wwise Project does not exist.")
+            showerror(title="Operation Failed", message="The default Wwise Project does not exist.")
             logger.warning("The default Wwise Project does not exist. Import "
                            "operation cancelled.")
             return
-
         # Validate project `conversion` setting #
         conversion = DEFAULT_CONVERSION_SETTING
         if project != DEFAULT_WWISE_PROJECT:
             if "conversion" not in root_spec:
-                askokcancel("Missing field `conversion`.")
+                showerror(title="Operation Failed", message="Missing field `conversion`.")
                 logger.warning("Missing field `conversion`. Import operation"
                                " cancelled.")
                 return
             if not isinstance(root_spec["conversion"], str):
-                askokcancel("Field `conversion` is not a string.")
+                showerror(title="Operation Failed", message="Field `conversion` is not a string.")
                 logger.warning("Field `conversion` is not a string. Import "
                                "operation cancelled.")
                 return
@@ -2122,7 +2203,7 @@ class FileHandler:
                 if not os.path.exists(workspace): 
                     workspace = os.path.join(spec_dir, workspace) 
             if not os.path.exists(workspace):
-                askokcancel(message=f"{workspace} does not exist.")
+                showwarning(title="Operation Skipped", message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current "
                                "entry.")
                 continue
@@ -2130,14 +2211,14 @@ class FileHandler:
             # Validate `mapping` format #
             mapping: dict[str, list[str] | str] | None
             if "mapping" not in sub_spec:
-                askokcancel(message=f"The given spec file is missing field "
+                showwarning(title="Operation Skipped", message=f"The given spec file is missing field "
                             "`mapping`")
                 logger.warning("The given spec file is missing field `mapping`. "
                         "Skipping current entry.")
                 continue
             mapping = sub_spec["mapping"]
             if mapping == None or not isinstance(mapping, dict):
-                askokcancel(message="field `mapping` has an invalid data type")
+                showwarning(title="Operation Skipped", message="field `mapping` has an invalid data type")
                 logger.warning("field `mapping` has an invalid data type. Skipping "
                         "current entry.")
                 continue
@@ -2217,13 +2298,12 @@ class FileHandler:
                 else:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
-
             out: str | None = None
             if "write_patch_to" not in sub_spec:
                 continue
             out = sub_spec["write_patch_to"]
             if not isinstance(out, str):
-                askokcancel(message="field `write_patch_to` has an invalid data "
+                showwarning(title="Operation Skipped", message="field `write_patch_to` has an invalid data "
                             "type. Write patch operation cancelled.")
                 logger.warning("field `write_patch_to` has an invalid data "
                                "type. Write patch operation cancelled.")
@@ -2232,7 +2312,7 @@ class FileHandler:
                 # Relative patch write #
                 out = os.path.join(spec_dir, out)
                 if not os.path.exists(out):
-                    askokcancel(message=f"{out} does not exist. Write patch "
+                    showwarning(title="Operation Skipped", message=f"{out} does not exist. Write patch "
                                 "operation cancelled.")
                     logger.warning(f"{out} does not exist. Write patch operation "
                                    "cancelled.")
@@ -2240,20 +2320,19 @@ class FileHandler:
             if not self.load_wav_by_mapping(project, wems, root):
                 continue
             if not self.write_patch(folder=out):
-                askokcancel(message="Write patch operation failed. Check "
+                showerror(title="Operation Failed", message="Write patch operation failed. Check "
                             "log.txt for detailed.")
             root = etree.Element("ExternalSourcesList", attrib={
                 "SchemaVersion": "1",
                 "Root": spec_dir 
             })
             wems.clear()
-
         out: str | None = None
         if "write_patch_to" not in root_spec:
             return
         out = root_spec["write_patch_to"]
         if not isinstance(out, str):
-            askokcancel(message="field `write_patch_to` has an invalid data "
+            showerror(title="Operation Failed", message="field `write_patch_to` has an invalid data "
                         "type. Write patch operation cancelled.")
             logger.warning("field `write_patch_to` has an invalid data "
                            "type. Write patch operation cancelled.")
@@ -2262,7 +2341,7 @@ class FileHandler:
             # Relative path patch writing #
             out = os.path.join(spec_dir, out)
             if not os.path.exists(out):
-                askokcancel(message=f"{out} does not exist. Write patch "
+                showerror(title="Operation Failed", message=f"{out} does not exist. Write patch "
                             "operation cancelled.")
                 logger.warning(f"{out} does not exist. Write patch operation "
                               "cancelled.")
@@ -2270,7 +2349,7 @@ class FileHandler:
         if not self.load_wav_by_mapping(project, wems, root):
             return
         if not self.write_patch(folder=out):
-            askokcancel(message="Write patch operation failed. Check "
+            showerror(title="Operation Failed", message="Write patch operation failed. Check "
                             "log.txt for detailed.")
 
     def load_wems_spec(self):
@@ -2280,7 +2359,7 @@ class FileHandler:
             logger.warning("Import operation cancelled")
             return
         if not os.path.exists(spec_path):
-            askokcancel(f"{spec_path} does not exist.")
+            showerror(title="Operation Failed", message=f"{spec_path} does not exist.")
             logger.warning(f"{spec_path} does not exist. Import operation "
                     "cancelled")
             return
@@ -2297,19 +2376,19 @@ class FileHandler:
             return
 
         if not isinstance(root_spec, dict):
-            askokcancel(message="Invalid data format in the given spec file.") 
+            showerror(title="Operation Failed", message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
         # Validate version number # 
         if "v" not in root_spec:
-            askokcancel(message="The given spec file is missing field `v`") 
+            showerror(title="Operation Failed", message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
         if root_spec["v"] != 2:
-            askokcancel(message="The given spec file contain invalid version " + 
+            showerror(title="Operation Failed", message="The given spec file contain invalid version " + 
                         f'number {root_spec["v"]}.')
             logger.warning("The given spec file contain invalid version "
                     f'number {root_spec["v"]}. Import operation cancelled')
@@ -2317,12 +2396,12 @@ class FileHandler:
 
         # Validate `specs` format #
         if "specs" not in root_spec:
-            askokcancel(message="The given spec file is missing field `specs`.")
+            showerror(title="Operation Failed", message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
             return
         if not isinstance(root_spec["specs"], list):
-            askokcancel(message="Field `specs` is not an array.")
+            showerror(title="Operation Failed", message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
@@ -2347,7 +2426,7 @@ class FileHandler:
                 if not os.path.exists(workspace): 
                     workspace = os.path.join(spec_dir, workspace) 
             if not os.path.exists(workspace):
-                askokcancel(message=f"{workspace} does not exist.")
+                showwarning(title="Operation Skipped", message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current"
                         " entry")
                 continue
@@ -2355,14 +2434,14 @@ class FileHandler:
             # Validate `mapping` format # 
             mapping: dict[str, list[str] | str] | None
             if "mapping" not in sub_spec:
-                askokcancel(message=f"The given spec file is missing field "
+                showwarning(title="Operation Skipped", message=f"The given spec file is missing field "
                             "`mapping`")
                 logger.warning("The given spec file is missing field `mapping`. "
                         "Skipping current entry")
                 continue
             mapping = sub_spec["mapping"]
             if mapping == None or not isinstance(mapping, dict):
-                askokcancel(message="field `mapping` has an invalid data type")
+                showwarning(title="Operation Skipped", message="field `mapping` has an invalid data type")
                 logger.warning("field `mapping` has an invalid data type. "
                         "Skipping current entry")
                 continue
@@ -2449,7 +2528,7 @@ class FileHandler:
                 return
             out = sub_spec["write_patch_to"]
             if not isinstance(out, str):
-                askokcancel(message="field `write_patch_to` has an invalid data "
+                showwarning(title="Operation Skipped", message="field `write_patch_to` has an invalid data "
                             "type. Write patch operation cancelled.")
                 logger.warning("field `write_patch_to` has an invalid data "
                                "type. Write patch operation cancelled.")
@@ -2458,13 +2537,13 @@ class FileHandler:
                 # Relative path
                 out = os.path.join(spec_dir, out)
                 if not os.path.exists(out):
-                    askokcancel(message=f"{out} does not exist. Write patch "
+                    showwarning(title="Operation Skipped", message=f"{out} does not exist. Write patch "
                                 "operation cancelled.")
                     logger.warning(f"{out} does not exist. Write patch operation "
                                    "cancelled.")
                     continue
             if not self.write_patch(folder=out):
-                askokcancel(message="Write patch operation failed. Check "
+                showerror(title="Operation Failed", message="Write patch operation failed. Check "
                             "log.txt for detailed.")
 
         out: str | None = None
@@ -2472,7 +2551,7 @@ class FileHandler:
             return
         out = root_spec["write_patch_to"]
         if not isinstance(out, str):
-            askokcancel(message="field `write_patch_to` has an invalid data "
+            showerror(title="Operation Failed", message="field `write_patch_to` has an invalid data "
                         "type. Write patch operation cancelled.")
             logger.warning("field `write_patch_to` has an invalid data "
                            "type. Write patch operation cancelled.")
@@ -2481,13 +2560,13 @@ class FileHandler:
             # Relative path
             out = os.path.join(spec_dir, out)
             if not os.path.exists(out):
-                askokcancel(message=f"{out} does not exist. Write patch "
+                showerror(title="Operation Failed", message=f"{out} does not exist. Write patch "
                             "operation cancelled.")
                 logger.warning(f"{out} does not exist. Write patch operation "
                                "cancelled.")
                 return
         if not self.write_patch(folder=out):
-            askokcancel(message="Write patch operation failed. Check "
+            showerror(title="Operation Failed", message="Write patch operation failed. Check "
                             "log.txt for detailed.")
 
 
@@ -3008,6 +3087,11 @@ class MainWindow:
             label="From .wems",
             command=self.load_wems
         )
+        if os.path.exists(WWISE_CLI):
+            self.import_menu.add_command(
+                label="From .wavs",
+                command=self.load_wavs
+            )
         self.import_menu.add_command(
             label="From spec.json (.wem)",
             command=lambda: self.file_handler.load_wems_spec() or 
@@ -3019,11 +3103,6 @@ class MainWindow:
                 command=lambda: self.file_handler.load_convert_spec() or 
                     self.check_modified()
             )
-        else:
-            askokcancel("Failed to locate WwiseConsole. Importing wave files "
-                        "directly into an archive is disabled.")
-            logger.warning("Failed to locate WwiseConsole. Importing wave files "
-                        "directly into an archive is disabled.")
         self.file_menu.add_cascade(
             menu=self.import_menu,
             label="Import"
@@ -3622,6 +3701,12 @@ class MainWindow:
         self.check_modified()
         self.show_info_window()
         
+    def load_wavs(self, wavs: list[str] | None = None):
+        self.sound_handler.kill_sound()
+        self.file_handler.load_wavs(wavs=wavs)
+        self.check_modified()
+        self.show_info_window()
+        
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
         self.file_handler.dump_all_as_wem()
@@ -3664,7 +3749,7 @@ if __name__ == "__main__":
         if not os.path.exists(CACHE):
             os.mkdir(CACHE, mode=0o777)
     except Exception as e:
-        askokcancel("Error when initiating application", 
+        showerror("Error when initiating application", 
                     "Failed to create application caching space")
         exit(1)
 
@@ -3672,17 +3757,38 @@ if __name__ == "__main__":
     if system == "Windows":
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
         FFMPEG = "ffmpeg.exe"
+        try:
+            WWISE_CLI = os.path.join(os.environ["WWISEROOT"],
+                             "Authoring\\x64\\Release\\bin\\WwiseConsole.exe")
+        except:
+            pass
     elif system == "Linux":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
         FFMPEG = "ffmpeg"
+        try:
+            WWISE_CLI = os.path.join(os.environ["WWISEROOT"],
+                             "Authoring/x64/Release/bin/WwiseConsole.sh")
+        except:
+            pass
     elif system == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
         FFMPEG = "ffmpeg"
+        try:
+            WWISE_CLI = os.path.join(os.environ["WWISEROOT"],
+                             "Authoring/x64/Release/bin/WwiseConsole.sh")
+        except:
+            pass
         
     if not os.path.exists(VGMSTREAM):
-        logger.error("Cannot find vgmstream distribution! "
-                     f"Ensure the {os.path.dirname(VGMSTREAM)} folder is "
+        logger.error("Cannot find vgmstream distribution! " \
+                     f"Ensure the {os.path.dirname(VGMSTREAM)} folder is " \
                      "in the same folder as the executable")
+        showwarning(title="Missing Plugin", message="Cannot find vgmstream distribution! " \
+                    "Audio playback is disabled.")
+                     
+    if not os.path.exists(WWISE_CLI):
+        logger.warning("Wwise installation not found. WAV file import is disabled.")
+        showwarning(title="Missing Plugin", message="Wwise installation not found. WAV file import is disabled.")
         
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
