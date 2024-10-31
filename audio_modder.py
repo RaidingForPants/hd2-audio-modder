@@ -2027,6 +2027,8 @@ class FileHandler:
                  project: str,
                  wems: list[tuple[str, AudioSource]],
                  schema: etree.Element) -> bool:
+        if len(wems) == 0:
+            return True
         tree = etree.ElementTree(schema)
         schema_path = os.path.join(CACHE, "schema.xml")
         tree.write(schema_path, encoding="utf-8", xml_declaration=True)
@@ -2080,7 +2082,7 @@ class FileHandler:
 
         try:
             os.remove(schema_path)
-            shutil.rmtree(os.path.join(convert_dest))
+            shutil.rmtree(convert_dest)
         except Exception as e:
             logger.error(e)
 
@@ -2323,6 +2325,7 @@ class FileHandler:
                 "Root": spec_dir 
             })
             wems.clear()
+        self.load_wav_by_mapping(project, wems, root)
         out: str | None = None
         if "write_patch_to" not in root_spec:
             return
@@ -2342,8 +2345,6 @@ class FileHandler:
                 logger.warning(f"{out} does not exist. Write patch operation "
                               "cancelled.")
                 return
-        if not self.load_wav_by_mapping(project, wems, root):
-            return
         if not self.write_patch(folder=out):
             showerror(title="Operation Failed", message="Write patch operation failed. Check "
                             "log.txt for detailed.")
@@ -3062,6 +3063,7 @@ class ArchiveSearch(ttk.Entry):
     def on_return(self, _: tkinter.Event):
         if self.error_check() != 0:
             return
+        curr_select = self.cmp_list.curselection()
         value = self.cmp_list.get(curr_select[0])
         self.delete(0, tkinter.END)
         self.insert(0, value)
