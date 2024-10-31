@@ -1489,18 +1489,18 @@ class SoundHandler:
             return
         filename = f"temp{sound_id}"
         if not os.path.isfile(f"{filename}.wav"):
-            with open(f'{filename}.wem', 'wb') as f:
+            with open(f'{os.path.join(CACHE, filename)}.wem', 'wb') as f:
                 f.write(sound_data)
-            process = subprocess.run([VGMSTREAM, "-o", f"{filename}.wav", f"{filename}.wem"], stdout=subprocess.DEVNULL)
-            os.remove(f"{filename}.wem")
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, filename)}.wav", f"{os.path.join(CACHE, filename)}.wem"], stdout=subprocess.DEVNULL)
+            os.remove(f"{os.path.join(CACHE, filename)}.wem")
             if process.returncode != 0:
                 logger.error(f"Encountered error when converting {sound_id}.wem for playback")
                 self.callback = None
                 return
             
         self.audio_id = sound_id
-        self.wave_file = wave.open(f"{filename}.wav")
-        self.audio_file = f"{filename}.wav"
+        self.wave_file = wave.open(f"{os.path.join(CACHE, filename)}.wav")
+        self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
         self.frame_count = 0
         self.max_frames = self.wave_file.getnframes()
         
@@ -1527,7 +1527,7 @@ class SoundHandler:
                 rate=self.wave_file.getframerate(),
                 output=True,
                 stream_callback=read_stream)
-        self.audio_file = f"{filename}.wav"
+        self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
         
     def downmix_to_stereo(self, data, channels, channel_width, frame_count):
         if channel_width == 2:
@@ -1545,11 +1545,20 @@ class SoundHandler:
             for index, frame in enumerate(arr):
                 stereo_array[index][0] = int(0.42265 * frame[0] + 0.366025 * frame[2] + 0.211325 * frame[3])
                 stereo_array[index][1] = int(0.42265 * frame[1] + 0.366025 * frame[3] + 0.211325 * frame[2])
+        
+            return stereo_array.tobytes()
                 
         if channels == 6:
             for index, frame in enumerate(arr):
                 stereo_array[index][0] = int(0.374107*frame[1] + 0.529067*frame[0] + 0.458186*frame[3] + 0.264534*frame[4] + 0.374107*frame[5])
                 stereo_array[index][1] = int(0.374107*frame[1] + 0.529067*frame[2] + 0.458186*frame[4] + 0.264534*frame[3] + 0.374107*frame[5])
+        
+            return stereo_array.tobytes()
+        
+        #if not 4 or 6 channel, default to taking the L and R channels rather than mixing
+        for index, frame in enumerate(arr):
+            stereo_array[index][0] = frame[0]
+            stereo_array[index][1] = frame[1]
         
         return stereo_array.tobytes()
      
@@ -3038,6 +3047,7 @@ class ArchiveSearch(ttk.Entry):
     def on_arrow_up(self, _: tkinter.Event) -> str | None:
         if self.error_check() != 0:
             return
+        curr_select = self.cmp_list.curselection()
         cur_idx = curr_select[0]
         prev_idx = (cur_idx - 1) % self.cmp_list.size()
         self.cmp_list.selection_clear(0, tkinter.END)
@@ -3049,6 +3059,7 @@ class ArchiveSearch(ttk.Entry):
     def on_arrow_down(self, _: tkinter.Event):
         if self.error_check() != 0:
             return
+        curr_select = self.cmp_list.curselection()
         curr_idx = curr_select[0]
         next_idx = (curr_idx + 1) % self.cmp_list.size()
         self.cmp_list.selection_clear(0, tkinter.END)
@@ -3060,6 +3071,7 @@ class ArchiveSearch(ttk.Entry):
     def on_return(self, _: tkinter.Event):
         if self.error_check() != 0:
             return
+        curr_select = self.cmp_list.curselection()
         value = self.cmp_list.get(curr_select[0])
         self.delete(0, tkinter.END)
         self.insert(0, value)
@@ -3218,14 +3230,6 @@ class MainWindow:
             label="From File Explorer",
             command=self.load_archive
         )
-        self.file_menu.add_cascade(
-            menu=self.load_archive_menu, 
-            label="Open"
-        )
-        self.file_menu.add_cascade(
-            menu=self.recent_file_menu,
-            label="Open Recent"
-        )
 
         for item in reversed(self.app_state.recent_files):
             item = os.path.normpath(item)
@@ -3234,38 +3238,47 @@ class MainWindow:
                 command=partial(self.load_archive, "", item)
             )
 
-        self.file_menu.add_command(label="Save", command=self.save_archive)
-        self.file_menu.add_command(label="Write Patch", command=self.write_patch)
-
         self.import_menu = Menu(self.menu, tearoff=0)
         self.import_menu.add_command(
-            label="From Patch File",
+            label="Import Patch File",
             command=self.load_patch
         )
         self.import_menu.add_command(
-            label="From .wems",
+            label="Import .wems",
             command=self.load_wems
         )
         if os.path.exists(WWISE_CLI):
             self.import_menu.add_command(
-                label="From .wavs",
+                label="Import .wavs",
                 command=self.load_wavs
             )
         self.import_menu.add_command(
-            label="From spec.json (.wem)",
+            label="Import using spec.json (.wem)",
             command=lambda: self.file_handler.load_wems_spec() or 
                 self.check_modified()
         )
         if os.path.exists(WWISE_CLI):
             self.import_menu.add_command(
-                label="From spec.json (.wav)",
+                label="Import using spec.json (.wav)",
                 command=lambda: self.file_handler.load_convert_spec() or 
                     self.check_modified()
             )
+            
+        self.file_menu.add_cascade(
+            menu=self.load_archive_menu, 
+            label="Open"
+        )
+        self.file_menu.add_cascade(
+            menu=self.recent_file_menu,
+            label="Open Recent"
+        )
         self.file_menu.add_cascade(
             menu=self.import_menu,
             label="Import"
         )
+        
+        self.file_menu.add_command(label="Save", command=self.save_archive)
+        self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         
         self.file_menu.add_command(label="Refresh Workspace",
                                    command=self.render_workspace)
@@ -3276,7 +3289,8 @@ class MainWindow:
         self.edit_menu.add_command(label="Revert All Changes", command=self.revert_all)
         
         self.dump_menu = Menu(self.menu, tearoff=0)
-        self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
+        if os.path.exists(VGMSTREAM):
+            self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
         self.dump_menu.add_command(label="Dump all as .wem", command=self.dump_all_as_wem)
         
         self.menu.add_cascade(label="File", menu=self.file_menu)
@@ -3446,11 +3460,14 @@ class MainWindow:
     def import_from_workspace(self, files):
         patches = [file for file in files if "patch" in os.path.splitext(file)[1]]
         wems = [file for file in files if os.path.splitext(file)[1] == ".wem"]
+        wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
         for patch in patches:
             self.file_handler.load_patch(patch_file=patch)
         if len(wems) > 0:
             self.load_wems(wems=wems)
-        else:
+        if len(wavs) > 0:
+            self.load_wavs(wavs=wavs)
+        if len(wems) == 0 and len(wavs) == 0:
             self.check_modified()
         self.show_info_window()
 
@@ -3548,15 +3565,15 @@ class MainWindow:
                 label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
                 command=self.dump_as_wem
             )
-
-            self.right_click_menu.add_command(
-                label=("Dump As .wav" if is_single else "Dump Selected As .wav"),
-                command=self.dump_as_wav,
-            )
-            self.right_click_menu.add_command(
-                label="Dump As .wav with Sequence Number",
-                command=lambda: self.dump_as_wav(with_seq=True)
-            )
+            if os.path.exists(VGMSTREAM):
+                self.right_click_menu.add_command(
+                    label=("Dump As .wav" if is_single else "Dump Selected As .wav"),
+                    command=self.dump_as_wav,
+                )
+                self.right_click_menu.add_command(
+                    label="Dump As .wav with Sequence Number",
+                    command=lambda: self.dump_as_wav(with_seq=True)
+                )
             self.right_click_menu.add_command(
                 label="Dump muted .wav with same ID",
                 command=lambda: self.dump_as_wav(muted=True)
@@ -4013,6 +4030,7 @@ if __name__ == "__main__":
                 "the executable to enable built-in audio archive search.")
         logger.warning("Built-in audio archive search is disabled. " \
                 "Please refer to the information in Google spreadsheet.")
+        showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled")
         
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
