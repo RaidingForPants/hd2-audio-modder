@@ -2026,6 +2026,8 @@ class FileHandler:
                  project: str,
                  wems: list[tuple[str, AudioSource]],
                  schema: etree.Element) -> bool:
+        if len(wems) == 0:
+            return True
         tree = etree.ElementTree(schema)
         schema_path = os.path.join(CACHE, "schema.xml")
         tree.write(schema_path, encoding="utf-8", xml_declaration=True)
@@ -2079,7 +2081,7 @@ class FileHandler:
 
         try:
             os.remove(schema_path)
-            shutil.rmtree(os.path.join(convert_dest))
+            shutil.rmtree(convert_dest)
         except Exception as e:
             logger.error(e)
 
@@ -2322,6 +2324,7 @@ class FileHandler:
                 "Root": spec_dir 
             })
             wems.clear()
+        self.load_wav_by_mapping(project, wems, root)
         out: str | None = None
         if "write_patch_to" not in root_spec:
             return
@@ -2341,8 +2344,6 @@ class FileHandler:
                 logger.warning(f"{out} does not exist. Write patch operation "
                               "cancelled.")
                 return
-        if not self.load_wav_by_mapping(project, wems, root):
-            return
         if not self.write_patch(folder=out):
             showerror(title="Operation Failed", message="Write patch operation failed. Check "
                             "log.txt for detailed.")
@@ -3038,8 +3039,8 @@ class ArchiveSearch(ttk.Entry):
         if self.error_check() != 0:
             return
         curr_select = self.cmp_list.curselection()
-        cur_idx = curr_select[0]
-        prev_idx = (cur_idx - 1) % self.cmp_list.size()
+        curr_idx = curr_select[0]
+        prev_idx = (curr_idx - 1) % self.cmp_list.size()
         self.cmp_list.selection_clear(0, tkinter.END)
         self.cmp_list.selection_set(prev_idx)
         self.cmp_list.activate(prev_idx)
