@@ -77,6 +77,7 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             _ = cfg.recent_files
         except:
             cfg.recent_files = []
+        cfg.recent_files = [file for file in cfg.recent_files if os.path.exists(file)]
         cfg.save_config()
         return cfg
 
@@ -97,6 +98,6 @@ def _select_game_data_path() -> str | None:
         if os.path.exists(game_data_path) \
                 and game_data_path.lower().endswith("steamapps/common/helldivers 2/data"):
             return game_data_path
-        res = message_box.askretrycancel(message="Invalid game data directory")
+        res = message_box.askretrycancel(title="Invalid Folder", message="Failed to locate valid Helldivers 2 install in this folder.")
         if not res:
-            return None
+            return ""
