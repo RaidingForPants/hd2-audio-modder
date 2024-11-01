@@ -77,6 +77,7 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             _ = cfg.recent_files
         except:
             cfg.recent_files = []
+        cfg.recent_files = [file for file in cfg.recent_files if os.path.exists(file)]
         cfg.save_config()
         return cfg
 
