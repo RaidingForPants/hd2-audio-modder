@@ -2951,18 +2951,23 @@ class ArchiveSearch(ttk.Entry):
         self.cmp_list: tkinter.Listbox | None = None
 
         self.bind("<KeyRelease>", self.on_key_release)
-        self.bind("<FocusIn>", self.destroy_cmp)
-        self.bind("<FocusOut>", self.destroy_cmp)
+        self.bind("<FocusOut>", self.on_focus_out)
         self.bind("<Return>", self.on_return)
         self.bind("<Escape>", self.destroy_cmp)
         self.bind("<Up>", self.on_arrow_up)
         self.bind("<Down>", self.on_arrow_down)
+        self.winfo_toplevel().bind("<Configure>", self.sync_windows)
+
+    def sync_windows(self, event=None):
+        if self.cmp_root is not None and self.winfo_toplevel() is not None:
+            self.cmp_root.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
+            self.cmp_root.lift()
 
     def on_key_release(self, event: tkinter.Event):
         if event.keysym in self.ignore_keys:
             return
 
-        query = self.get()
+        query = self.get().lower()
 
         if self.cmp_root != None:
             if self.cmp_list == None:
@@ -2979,7 +2984,7 @@ class ArchiveSearch(ttk.Entry):
                 unique: set[str] = set()
                 for archive_id, tag in self.entries.items():
                     match = archive_id.find(query) != -1 or \
-                            tag.find(query) != -1
+                            tag.lower().find(query) != -1
                     if not match or archive_id in unique:
                         continue
                     archives.append(self.fmt.format(archive_id, tag))
@@ -2997,7 +3002,7 @@ class ArchiveSearch(ttk.Entry):
         else:
             unique: set[str] = set()
             for archive_id, tag in self.entries.items():
-                match = archive_id.find(query) != -1 or tag.find(query) != -1
+                match = archive_id.find(query) != -1 or tag.lower().find(query) != -1
                 if not match or archive_id in unique:
                     continue
                 archives.append(self.fmt.format(archive_id, tag))
@@ -3006,7 +3011,7 @@ class ArchiveSearch(ttk.Entry):
         self.cmp_root = tkinter.Toplevel(self)
         self.cmp_root.wm_overrideredirect(True) # Hide title bar
 
-        self.cmp_list = tkinter.Listbox(self.cmp_root, borderwidth=0)
+        self.cmp_list = tkinter.Listbox(self.cmp_root, borderwidth=1)
 
         self.cmp_list.pack(side=tkinter.LEFT, fill=tkinter.BOTH, expand=True)
 
@@ -3015,7 +3020,7 @@ class ArchiveSearch(ttk.Entry):
 
         self.cmp_list.selection_set(0)
 
-        self.cmp_list.bind("<ButtonRelease-1>", self.destroy_cmp)
+        self.cmp_list.bind("<Double-Button-1>", self.on_return)
 
         self.cmp_root.geometry(f"{self.winfo_width()}x128")
         self.cmp_root.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
@@ -3080,6 +3085,14 @@ class ArchiveSearch(ttk.Entry):
         if self.cmp_root != None:
             self.cmp_root.destroy()
             self.cmp_root = None
+
+    def on_focus_out(self, event):
+        if self.cmp_root is not None:
+            self.cmp_root.after(1, self.check_should_destroy)
+
+    def check_should_destroy(self):
+        if self.cmp_root.focus_get() != self.cmp_list:
+            self.destroy_cmp(None)
 
     def set_entries(self, entries: dict[str, str], fmt: str | None = None):
         if fmt != None:
@@ -3488,7 +3501,7 @@ class MainWindow:
         self.archive_search = ArchiveSearch("{1} || {0}", 
                                             entries=entries,
                                             on_select_cb=self.on_archive_search_bar_return,
-                                            master=self.top_bar, 
+                                            master=self.top_bar,
                                             width=64)
         categories = self.lookup_store.query_helldiver_audio_archive_category()
         categories = [""] + categories
