@@ -9,6 +9,7 @@ import tkinter
 import shutil
 import wave
 import sys
+import pathlib
 import xml.etree.ElementTree as etree
 
 from functools import partial
@@ -39,7 +40,6 @@ STREAM = 2
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
 VORBIS = 0x00040001
-DRIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 WWISE_BANK = 6006249203084351385
 WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
@@ -73,23 +73,13 @@ GAME_FILE_LOCATION = ""
 WWISE_CLI = ""
 DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
 DEFAULT_CONVERSION_SETTING = "Main"
+SYSTEM = ""
 CACHE = os.path.join(DIR, ".cache")
 
 # global variables
 language = 0
 num_segments = 0
 
-
-def look_for_steam_install_windows():
-    path = "C:\\Program Files (x86)\\steam\\steamapps\\common\\Helldivers 2\\data"
-    if os.path.exists(path):
-        return path
-    for letter in DRIVE_LETTERS:
-        path = f"{letter}:\\SteamLibrary\\steamapps\\common\\Helldivers 2\\data"
-        if os.path.exists(path):
-            return path
-    return ""
-    
 def language_lookup(lang_string):
     try:
         return LANGUAGE_MAPPING[lang_string]
@@ -1332,7 +1322,7 @@ class FileReader:
         
     def load_deps(self):
         archive_file = ""
-        if GAME_FILE_LOCATION != "":
+        if os.path.exists(GAME_FILE_LOCATION):
             archive_file = os.path.join(GAME_FILE_LOCATION, strip_patch_index(self.name))
         if not os.path.exists(archive_file):
             warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
@@ -1373,7 +1363,7 @@ class FileReader:
         
     def load_banks(self):
         archive_file = ""
-        if GAME_FILE_LOCATION != "":
+        if os.path.exists(GAME_FILE_LOCATION):
             archive_file = os.path.join(GAME_FILE_LOCATION, strip_patch_index(self.name))
         if not os.path.exists(archive_file):
             warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
@@ -1984,27 +1974,27 @@ class FileHandler:
             
         source_list = self.create_external_sources_list(wavs)
         
-        convert_dest = os.path.join(CACHE, system)
+        convert_dest = os.path.join(CACHE, SYSTEM)
         try:
-            if system == "Linux":
+            if SYSTEM == "Darwin":
                 subprocess.run([
                     WWISE_CLI,
                     "convert-external-source",
                     DEFAULT_WWISE_PROJECT,
                     "--no-wwise-dat",
-                    "--platform", system,
+                    "--platform", "Windows",
                     "--source-file",
                     source_list,
                     "--output",
                     CACHE,
                 ]).check_returncode()
-            elif system == "Windows":
+            elif SYSTEM == "Windows":
                 subprocess.run([
                     WWISE_CLI,
                     "convert-external-source",
                     DEFAULT_WWISE_PROJECT,
                     "--no-wwise-dat",
-                    "--platform", system,
+                    "--platform", "Windows",
                     "--source-file",
                     source_list,
                     "--output",
@@ -2040,21 +2030,21 @@ class FileHandler:
         schema_path = os.path.join(CACHE, "schema.xml")
         tree.write(schema_path, encoding="utf-8", xml_declaration=True)
         convert_ok = True
-        convert_dest = os.path.join(CACHE, system)
+        convert_dest = os.path.join(CACHE, SYSTEM)
         try:
-            if system == "Linux":
+            if SYSTEM == "Darwin":
                 subprocess.run([
                     WWISE_CLI,
                     "convert-external-source",
                     project,
                     "--no-wwise-dat",
-                    "--platform", "Linux",
+                    "--platform", "Windows",
                     "--source-file",
                     schema_path,
                     "--output",
                     CACHE,
                 ]).check_returncode()
-            elif system == "Windows":
+            elif SYSTEM == "Windows":
                 subprocess.run([
                     WWISE_CLI,
                     "convert-external-source",
@@ -3131,7 +3121,7 @@ class MainWindow:
         self.search_text_var = tkinter.StringVar(self.root)
         self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
         self.top_bar.pack(side="top", fill='x')
-        if lookup_store != None:
+        if lookup_store != None and os.path.exists(GAME_FILE_LOCATION):
             self.init_archive_search_bar()
 
         self.up_button = ttk.Button(self.top_bar, text='\u25b2',
@@ -3222,10 +3212,11 @@ class MainWindow:
         self.recent_file_menu = Menu(self.file_menu, tearoff=0)
 
         self.load_archive_menu = Menu(self.menu, tearoff=0)
-        self.load_archive_menu.add_command(
-            label="From HD2 Data Folder",
-            command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
-        )
+        if os.path.exists(GAME_FILE_LOCATION):
+            self.load_archive_menu.add_command(
+                label="From HD2 Data Folder",
+                command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
+            )
         self.load_archive_menu.add_command(
             label="From File Explorer",
             command=self.load_archive
@@ -3979,8 +3970,8 @@ if __name__ == "__main__":
                     "Failed to create application caching space")
         exit(1)
 
-    system = platform.system()
-    if system == "Windows":
+    SYSTEM = platform.system()
+    if SYSTEM == "Windows":
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
         FFMPEG = "ffmpeg.exe"
         try:
@@ -3988,20 +3979,18 @@ if __name__ == "__main__":
                              "Authoring\\x64\\Release\\bin\\WwiseConsole.exe")
         except:
             pass
-    elif system == "Linux":
+    elif SYSTEM == "Linux":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
         FFMPEG = "ffmpeg"
-        try:
-            WWISE_CLI = os.path.join(os.environ["WWISEROOT"],
-                             "Authoring/x64/Release/bin/WwiseConsole.sh")
-        except:
-            pass
-    elif system == "Darwin":
+        WWISE_CLI = ""
+        showwarning(title="Unsupported", message="Wwise integration is not " \
+            "supported for Linux. WAV file import is disabled")
+    elif SYSTEM == "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
         FFMPEG = "ffmpeg"
         try:
-            WWISE_CLI = os.path.join(os.environ["WWISEROOT"],
-                             "Authoring/x64/Release/bin/WwiseConsole.sh")
+            p = next(pathlib.Path("/Applications/Audiokinetic").glob("Wwise*"))
+            WWISE_CLI = os.path.join(p, "Wwise.app/Contents/Tools/WwiseConsole.sh")
         except:
             pass
         
@@ -4012,12 +4001,16 @@ if __name__ == "__main__":
         showwarning(title="Missing Plugin", message="Cannot find vgmstream distribution! " \
                     "Audio playback is disabled.")
                      
-    if not os.path.exists(WWISE_CLI):
+    if not os.path.exists(WWISE_CLI) and SYSTEM != "Linux":
         logger.warning("Wwise installation not found. WAV file import is disabled.")
         showwarning(title="Missing Plugin", message="Wwise installation not found. WAV file import is disabled.")
 
     lookup_store: db.LookupStore | None = None
-    if os.path.exists("hd_audio_db.db"):
+    
+    if not os.path.exists(GAME_FILE_LOCATION):
+        showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
+            " Audio archive search is disabled.")
+    elif os.path.exists("hd_audio_db.db"):
         sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
         try:
             lookup_store = db.SQLiteLookupStore(sqlite_initializer, logger)
@@ -4030,7 +4023,7 @@ if __name__ == "__main__":
                 "the executable to enable built-in audio archive search.")
         logger.warning("Built-in audio archive search is disabled. " \
                 "Please refer to the information in Google spreadsheet.")
-        showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled")
+        showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
         
     language = language_lookup("English (US)")
     sound_handler = SoundHandler()
