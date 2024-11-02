@@ -15,6 +15,7 @@ import xml.etree.ElementTree as etree
 from functools import partial
 from itertools import takewhile
 from math import ceil
+from tkinterdnd2 import *
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
@@ -94,6 +95,19 @@ def strip_patch_index(filename):
             break
     filename = ".".join(split)
     return filename
+    
+def list_files_recursive(path="."):
+    files = []
+    if os.path.isfile(path):
+        return [path]
+    else:
+        for entry in os.listdir(path):
+            full_path = os.path.join(path, entry)
+            if os.path.isdir(full_path):
+                files.extend(list_files_recursive(full_path))
+            else:
+                files.append(full_path)
+        return files
 
 class MemoryStream:
     '''
@@ -3121,7 +3135,11 @@ class MainWindow:
         self.file_handler = file_handler
         self.sound_handler = sound_handler
         
-        self.root = Tk()
+        self.root = TkinterDnD.Tk()
+        
+        self.drag_source_widget = None
+        self.workspace_selection = []
+        
         try:
             self.root.tk.call("source", "azure.tcl")
         except Exception as e:
@@ -3304,15 +3322,56 @@ class MainWindow:
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
         self.root.config(menu=self.menu)
+        
+        self.treeview.drop_target_register(DND_FILES)
+        self.workspace.drop_target_register(DND_FILES)
+        self.workspace.drag_source_register(1, DND_FILES)
 
         self.treeview.bind("<Button-3>", self.treeview_on_right_click)
         self.workspace.bind("<Button-3>", self.workspace_on_right_click)
         self.workspace.bind("<Double-Button-1>", self.workspace_on_double_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
+        self.treeview.dnd_bind("<<Drop>>", self.drop_import)
+        self.workspace.dnd_bind("<<Drop>>", self.drop_add_to_workspace)
+        self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
+        self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
+        self.workspace.bind("<Button-1>", self.workspace_save_selection)
 
         self.root.resizable(False, False)
         self.root.mainloop()
-        
+
+    def workspace_drag_assist(self, event):
+        selected_item = self.workspace.identify_row(event.y)
+        if selected_item in self.workspace_selection:
+            self.workspace.selection_set(self.workspace_selection)
+
+    def workspace_save_selection(self, event):
+        self.workspace_selection = self.workspace.selection()
+
+    def drop_import(self, event):
+        if event.data:
+            import_files = []
+            dropped_files = event.widget.tk.splitlist(event.data)
+            for file in dropped_files:
+                import_files.extend(list_files_recursive(file))
+            self.import_from_workspace(import_files)
+        self.drag_source_widget = None
+
+    def drop_add_to_workspace(self, event):
+        if self.drag_source_widget is not self.workspace and event.data:
+            dropped_files = event.widget.tk.splitlist(event.data)
+            for file in dropped_files:
+                if os.path.isdir(file):
+                    self.add_new_workspace(file)
+        self.drag_source_widget = None
+
+    def drag_init_workspace(self, event):
+        self.drag_source_widget = self.workspace
+        data = ()
+        if self.workspace.selection():
+            data = tuple([self.workspace.item(i, option="values")[0] for i in self.workspace.selection()])
+        return ((ASK, COPY), (DND_FILES,), data)
+
     def search_bar_on_enter_key(self, event):
         self.search()
         
@@ -3379,11 +3438,12 @@ class MainWindow:
                         inode_stack.append(node)
                         id_stack.append(id)
 
-    def add_new_workspace(self):
-        workspace_path = filedialog.askdirectory(
-            mustexist=True,
-            title="Select a folder to open as workspace"
-        )
+    def add_new_workspace(self, workspace_path=""):
+        if workspace_path == "":
+            workspace_path = filedialog.askdirectory(
+                mustexist=True,
+                title="Select a folder to open as workspace"
+            )
         if self.app_state.add_new_workspace(workspace_path) == 1:
             return
         inode = fileutil.generate_file_tree(workspace_path)

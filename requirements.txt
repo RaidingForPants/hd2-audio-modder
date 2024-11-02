@@ -10,4 +10,5 @@ pyinstaller-hooks-contrib==2024.9
 pyproject-toml==0.0.10
 referencing==0.35.1
 rpds-py==0.20.0
+tkinterdnd2==0.4.2
 toml==0.10.2
