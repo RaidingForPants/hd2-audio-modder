@@ -2340,6 +2340,12 @@ class FileHandler:
             is_revert = "revert" in sub_spec and \
                     isinstance(sub_spec["revert"], bool) and \
                     sub_spec["revert"]
+            is_revert_all = "revert_all" in sub_spec and \
+                    isinstance(sub_spec["revert_all"], bool) and \
+                    sub_spec["revert_all"]
+            if is_revert_all:
+                self.revert_all()
+                continue
             if is_revert:
                 for wem in wems:
                     self.revert_audio(wem[2])
