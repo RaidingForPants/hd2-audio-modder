@@ -2024,7 +2024,7 @@ class FileHandler:
 
     def load_wav_by_mapping(self,
                  project: str,
-                 wems: list[tuple[str, AudioSource]],
+                 wems: list[tuple[str, AudioSource, int]],
                  schema: etree.Element) -> bool:
         if len(wems) == 0:
             return True
@@ -2111,32 +2111,38 @@ class FileHandler:
             return
 
         if not isinstance(root_spec, dict):
-            showerror(title="Operation Failed", message="Invalid data format in the given spec file.") 
+            showerror(title="Operation Failed",
+                      message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
-                    "operation cancelled")
+                           "operation cancelled")
             return
 
         # Validate version number #
         if "v" not in root_spec:
-            showerror(title="Operation Failed", message="The given spec file is missing field `v`") 
+            showerror(title="Operation Failed", 
+                      message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
-                    "operation cancelled.")
+                           "operation cancelled.")
             return
-        if root_spec["v"] != 2:
-            showerror(title="Operation Failed", message="The given spec file contain invalid version "
-                        f'number {root_spec["v"]}.')
+        v = root_spec["v"]
+        if v != 2:
+            showerror(title="Operation Failed", 
+                      message="The given spec file contain invalid version " 
+                      f'number {v}.')
             logger.warning("The given spec file contain invalid version "
-                    f'number {root_spec["v"]}. Import operation cancelled')
+                           f'number {v}. Import operation cancelled')
             return
 
         # Validate `specs` field #
         if "specs" not in root_spec:
-            showerror(title="Operation Failed", message="The given spec file is missing field `specs`.")
+            showerror(title="Operation Failed", 
+                      message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
             return
         if not isinstance(root_spec["specs"], list):
-            showerror(title="Operation Failed", message="Field `specs` is not an array.")
+            showerror(title="Operation Failed",
+                      message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
@@ -2155,7 +2161,8 @@ class FileHandler:
             else:
                 project = root_spec["project"]
         if not os.path.exists(project):
-            showerror(title="Operation Failed", message="The default Wwise Project does not exist.")
+            showerror(title="Operation Failed",
+                      message="The default Wwise Project does not exist.")
             logger.warning("The default Wwise Project does not exist. Import "
                            "operation cancelled.")
             return
@@ -2163,12 +2170,14 @@ class FileHandler:
         conversion = DEFAULT_CONVERSION_SETTING
         if project != DEFAULT_WWISE_PROJECT:
             if "conversion" not in root_spec:
-                showerror(title="Operation Failed", message="Missing field `conversion`.")
+                showerror(title="Operation Failed",
+                          message="Missing field `conversion`.")
                 logger.warning("Missing field `conversion`. Import operation"
                                " cancelled.")
                 return
             if not isinstance(root_spec["conversion"], str):
-                showerror(title="Operation Failed", message="Field `conversion` is not a string.")
+                showerror(title="Operation Failed",
+                          message="Field `conversion` is not a string.")
                 logger.warning("Field `conversion` is not a string. Import "
                                "operation cancelled.")
                 return
@@ -2179,7 +2188,7 @@ class FileHandler:
             "SchemaVersion": "1",
             "Root": spec_dir
         })
-        wems: list[tuple[str, AudioSource]] = []
+        wems: list[tuple[str, AudioSource, int]] = []
         for sub_spec in root_spec["specs"]:
             # Validate spec format #
             if not isinstance(sub_spec, dict):
@@ -2200,7 +2209,8 @@ class FileHandler:
                 if not os.path.exists(workspace): 
                     workspace = os.path.join(spec_dir, workspace) 
             if not os.path.exists(workspace):
-                showwarning(title="Operation Skipped", message=f"{workspace} does not exist.")
+                showwarning(title="Operation Skipped",
+                            message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current "
                                "entry.")
                 continue
@@ -2208,14 +2218,16 @@ class FileHandler:
             # Validate `mapping` format #
             mapping: dict[str, list[str] | str] | None
             if "mapping" not in sub_spec:
-                showwarning(title="Operation Skipped", message=f"The given spec file is missing field "
+                showwarning(title="Operation Skipped", 
+                            message=f"The given spec file is missing field " 
                             "`mapping`")
                 logger.warning("The given spec file is missing field `mapping`. "
                         "Skipping current entry.")
                 continue
             mapping = sub_spec["mapping"]
             if mapping == None or not isinstance(mapping, dict):
-                showwarning(title="Operation Skipped", message="field `mapping` has an invalid data type")
+                showwarning(title="Operation Skipped", 
+                            message="field `mapping` has an invalid data type")
                 logger.warning("field `mapping` has an invalid data type. Skipping "
                         "current entry.")
                 continue
@@ -2267,7 +2279,7 @@ class FileHandler:
                         "Conversion": conversion,
                         "Destination": convert_dest 
                     })
-                    wems.append((convert_dest, audio))
+                    wems.append((convert_dest, audio, file_id))
                 elif isinstance(dest, list):
                     for d in dest:
                         if not isinstance(d, str):
@@ -2291,7 +2303,7 @@ class FileHandler:
                             "Conversion": conversion,
                             "Destination": convert_dest
                         })
-                        wems.append((convert_dest, audio))
+                        wems.append((convert_dest, audio, file_id))
                 else:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
@@ -2300,7 +2312,8 @@ class FileHandler:
                 continue
             out = sub_spec["write_patch_to"]
             if not isinstance(out, str):
-                showwarning(title="Operation Skipped", message="field `write_patch_to` has an invalid data "
+                showwarning(title="Operation Skipped", 
+                            message="field `write_patch_to` has an invalid data "
                             "type. Write patch operation cancelled.")
                 logger.warning("field `write_patch_to` has an invalid data "
                                "type. Write patch operation cancelled.")
@@ -2309,7 +2322,8 @@ class FileHandler:
                 # Relative patch write #
                 out = os.path.join(spec_dir, out)
                 if not os.path.exists(out):
-                    showwarning(title="Operation Skipped", message=f"{out} does not exist. Write patch "
+                    showwarning(title="Operation Skipped",
+                                message=f"{out} does not exist. Write patch "
                                 "operation cancelled.")
                     logger.warning(f"{out} does not exist. Write patch operation "
                                    "cancelled.")
@@ -2323,15 +2337,23 @@ class FileHandler:
                 "SchemaVersion": "1",
                 "Root": spec_dir 
             })
+            is_revert = "revert" in sub_spec and \
+                    isinstance(sub_spec["revert"], bool) and \
+                    sub_spec["revert"]
+            if is_revert:
+                for wem in wems:
+                    self.revert_audio(wem[2])
             wems.clear()
+
         self.load_wav_by_mapping(project, wems, root)
         out: str | None = None
         if "write_patch_to" not in root_spec:
             return
         out = root_spec["write_patch_to"]
         if not isinstance(out, str):
-            showerror(title="Operation Failed", message="field `write_patch_to` has an invalid data "
-                        "type. Write patch operation cancelled.")
+            showerror(title="Operation Failed", 
+                      message="field `write_patch_to` has an invalid data "
+                      "type. Write patch operation cancelled.")
             logger.warning("field `write_patch_to` has an invalid data "
                            "type. Write patch operation cancelled.")
             return
@@ -2339,14 +2361,23 @@ class FileHandler:
             # Relative path patch writing #
             out = os.path.join(spec_dir, out)
             if not os.path.exists(out):
-                showerror(title="Operation Failed", message=f"{out} does not exist. Write patch "
-                            "operation cancelled.")
+                showerror(title="Operation Failed",
+                          message=f"{out} does not exist. Write patch "
+                          "operation cancelled.")
                 logger.warning(f"{out} does not exist. Write patch operation "
                               "cancelled.")
                 return
         if not self.write_patch(folder=out):
-            showerror(title="Operation Failed", message="Write patch operation failed. Check "
-                            "log.txt for detailed.")
+            showerror(title="Operation Failed",
+                      message="Write patch operation failed. Check "
+                      "log.txt for detailed.")
+
+        is_revert = "revert" in root_spec and \
+                isinstance(root_spec["revert"], bool) and \
+                root_spec["revert"]
+        if is_revert:
+            for wem in wems:
+                self.revert_audio(wem[2])
 
     def load_wems_spec(self):
         spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
@@ -2355,9 +2386,10 @@ class FileHandler:
             logger.warning("Import operation cancelled")
             return
         if not os.path.exists(spec_path):
-            showerror(title="Operation Failed", message=f"{spec_path} does not exist.")
+            showerror(title="Operation Failed", 
+                      message=f"{spec_path} does not exist.")
             logger.warning(f"{spec_path} does not exist. Import operation "
-                    "cancelled")
+                           "cancelled")
             return
 
         root_spec: Any = None
@@ -2372,19 +2404,22 @@ class FileHandler:
             return
 
         if not isinstance(root_spec, dict):
-            showerror(title="Operation Failed", message="Invalid data format in the given spec file.") 
+            showerror(title="Operation Failed",
+                      message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
         # Validate version number # 
         if "v" not in root_spec:
-            showerror(title="Operation Failed", message="The given spec file is missing field `v`") 
+            showerror(title="Operation Failed",
+                      message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
         if root_spec["v"] != 2:
-            showerror(title="Operation Failed", message="The given spec file contain invalid version " + 
+            showerror(title="Operation Failed",
+                      message="The given spec file contain invalid version " + 
                         f'number {root_spec["v"]}.')
             logger.warning("The given spec file contain invalid version "
                     f'number {root_spec["v"]}. Import operation cancelled')
@@ -2392,17 +2427,20 @@ class FileHandler:
 
         # Validate `specs` format #
         if "specs" not in root_spec:
-            showerror(title="Operation Failed", message="The given spec file is missing field `specs`.")
+            showerror(title="Operation Failed",
+                      message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
             return
         if not isinstance(root_spec["specs"], list):
-            showerror(title="Operation Failed", message="Field `specs` is not an array.")
+            showerror(title="Operation Failed",
+                      message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
 
         spec_dir = os.path.dirname(spec_path)
+        patched_ids: list[int] = []
         for sub_spec in root_spec["specs"]:
             if not isinstance(sub_spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
@@ -2422,7 +2460,8 @@ class FileHandler:
                 if not os.path.exists(workspace): 
                     workspace = os.path.join(spec_dir, workspace) 
             if not os.path.exists(workspace):
-                showwarning(title="Operation Skipped", message=f"{workspace} does not exist.")
+                showwarning(title="Operation Skipped",
+                            message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current"
                         " entry")
                 continue
@@ -2430,14 +2469,16 @@ class FileHandler:
             # Validate `mapping` format # 
             mapping: dict[str, list[str] | str] | None
             if "mapping" not in sub_spec:
-                showwarning(title="Operation Skipped", message=f"The given spec file is missing field "
+                showwarning(title="Operation Skipped",
+                            message=f"The given spec file is missing field "
                             "`mapping`")
                 logger.warning("The given spec file is missing field `mapping`. "
                         "Skipping current entry")
                 continue
             mapping = sub_spec["mapping"]
             if mapping == None or not isinstance(mapping, dict):
-                showwarning(title="Operation Skipped", message="field `mapping` has an invalid data type")
+                showwarning(title="Operation Skipped",
+                            message="field `mapping` has an invalid data type")
                 logger.warning("field `mapping` has an invalid data type. "
                         "Skipping current entry")
                 continue
@@ -2493,6 +2534,8 @@ class FileHandler:
                     with open(abs_src, "rb") as f:
                         audio.set_data(f.read())
                     progress_window.step()
+
+                    patched_ids.append(file_id)
                 elif isinstance(dest, list):
                     for d in dest:
                         if not isinstance(d, str):
@@ -2513,6 +2556,8 @@ class FileHandler:
                         with open(abs_src, "rb") as f:
                             audio.set_data(f.read())
                         progress_window.step()
+
+                        patched_ids.append(file_id)
                 else:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
@@ -2524,7 +2569,8 @@ class FileHandler:
                 return
             out = sub_spec["write_patch_to"]
             if not isinstance(out, str):
-                showwarning(title="Operation Skipped", message="field `write_patch_to` has an invalid data "
+                showwarning(title="Operation Skipped",
+                            message="field `write_patch_to` has an invalid data "
                             "type. Write patch operation cancelled.")
                 logger.warning("field `write_patch_to` has an invalid data "
                                "type. Write patch operation cancelled.")
@@ -2533,15 +2579,24 @@ class FileHandler:
                 # Relative path
                 out = os.path.join(spec_dir, out)
                 if not os.path.exists(out):
-                    showwarning(title="Operation Skipped", message=f"{out} does not exist. Write patch "
+                    showwarning(title="Operation Skipped", 
+                                message=f"{out} does not exist. Write patch "
                                 "operation cancelled.")
                     logger.warning(f"{out} does not exist. Write patch operation "
                                    "cancelled.")
                     continue
             if not self.write_patch(folder=out):
-                showerror(title="Operation Failed", message="Write patch operation failed. Check "
-                            "log.txt for detailed.")
-
+                showerror(title="Operation Failed",
+                          message="Write patch operation failed. Check "
+                          "log.txt for detailed.")
+            is_revert = "revert" in sub_spec and \
+                    isinstance(sub_spec["revert"], bool) and \
+                    sub_spec["revert"]
+            if is_revert:
+                for patched_id in patched_ids:
+                    self.revert_audio(patched_id)
+            patched_ids.clear()
+            
         out: str | None = None
         if "write_patch_to" not in root_spec:
             return
@@ -2564,6 +2619,14 @@ class FileHandler:
         if not self.write_patch(folder=out):
             showerror(title="Operation Failed", message="Write patch operation failed. Check "
                             "log.txt for detailed.")
+
+        is_revert = "revert" in root_spec and \
+                isinstance(root_spec["revert"], bool) and \
+                root_spec["revert"]
+        if is_revert:
+            for patched_id in patched_ids:
+                self.revert_audio(patched_id)
+        patched_ids.clear()
 
 
 class ProgressWindow:
