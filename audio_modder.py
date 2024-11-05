@@ -2963,8 +2963,9 @@ class ArchiveSearch(ttk.Entry):
 
         self.cmp_root: tkinter.Toplevel | None = None
         self.cmp_list: tkinter.Listbox | None = None
+        self.cmp_scrollbar: ttk.Scrollbar | None = None
 
-        self.bind("<KeyRelease>", self.on_key_release)
+        self.bind("<Key>", self.on_key_release)
         self.bind("<FocusOut>", self.on_focus_out)
         self.bind("<Return>", self.on_return)
         self.bind("<Escape>", self.destroy_cmp)
@@ -2980,7 +2981,6 @@ class ArchiveSearch(ttk.Entry):
     def on_key_release(self, event: tkinter.Event):
         if event.keysym in self.ignore_keys:
             return
-
         query = self.get().lower()
 
         if self.cmp_root != None:
@@ -3006,6 +3006,19 @@ class ArchiveSearch(ttk.Entry):
             self.cmp_list.delete(0, tkinter.END)
             for archive in archives:
                 self.cmp_list.insert(tkinter.END, archive)
+            height="128"
+            if len(archives) < 7:
+                height=str(2+18*len(archives))
+                try:
+                    self.cmp_scrollbar.pack_forget()
+                except:
+                    pass
+            elif len(archives) > 7:
+                try:
+                    self.cmp_scrollbar.pack(side="left", fill="y")
+                except:
+                    pass
+            self.cmp_root.geometry(f"{self.winfo_width()}x{height}")
             self.cmp_list.selection_clear(0, tkinter.END)
             self.cmp_list.selection_set(0)
             return
@@ -3024,10 +3037,17 @@ class ArchiveSearch(ttk.Entry):
 
         self.cmp_root = tkinter.Toplevel(self)
         self.cmp_root.wm_overrideredirect(True) # Hide title bar
+        
 
         self.cmp_list = tkinter.Listbox(self.cmp_root, borderwidth=1)
 
         self.cmp_list.pack(side=tkinter.LEFT, fill=tkinter.BOTH, expand=True)
+        
+        if len(archives) > 7:
+            self.cmp_scrollbar = ttk.Scrollbar(self.cmp_root, orient=VERTICAL)
+            self.cmp_scrollbar.pack(side="left", fill="y")
+            self.cmp_list.configure(yscrollcommand=self.cmp_scrollbar.set)
+            self.cmp_scrollbar['command'] = self.cmp_list.yview
 
         for archive in archives:
             self.cmp_list.insert(tkinter.END, archive)
@@ -3035,8 +3055,10 @@ class ArchiveSearch(ttk.Entry):
         self.cmp_list.selection_set(0)
 
         self.cmp_list.bind("<Double-Button-1>", self.on_return)
-
-        self.cmp_root.geometry(f"{self.winfo_width()}x128")
+        height="128"
+        if len(archives) < 7:
+            height=str(2+18*len(archives))
+        self.cmp_root.geometry(f"{self.winfo_width()}x{height}")
         self.cmp_root.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
         
     def error_check(self):
@@ -3105,7 +3127,8 @@ class ArchiveSearch(ttk.Entry):
             self.cmp_root.after(1, self.check_should_destroy)
 
     def check_should_destroy(self):
-        if self.cmp_root.focus_get() != self.cmp_list:
+        new_focus = self.cmp_root.focus_get()
+        if new_focus != self.cmp_list and new_focus != self.cmp_root:
             self.destroy_cmp(None)
 
     def set_entries(self, entries: dict[str, str], fmt: str | None = None):
