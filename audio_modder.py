@@ -23,6 +23,8 @@ from tkinter.messagebox import showwarning
 from tkinter.messagebox import showerror
 from tkinter.filedialog import askopenfilename
 from typing import Any, Literal, Callable, Union
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
+from watchdog.observers import Observer
 
 import config as cfg
 import db
@@ -94,6 +96,81 @@ def strip_patch_index(filename):
             break
     filename = ".".join(split)
     return filename
+    
+class WorkspaceEventHandler(FileSystemEventHandler):
+
+    # TO-DO: Change get_item_by_path to return all matches, not just the first
+
+    def __init__(self, workspace):
+        self.workspace = workspace
+
+    def on_created(self, event: FileSystemEvent) -> None:
+        src_ext = os.path.splitext(event.src_path)[1]
+        if ".patch" in src_ext or src_ext in [".wav", ".wem"] or event.is_directory:
+            parent = pathlib.Path(event.src_path).parents[0]
+            parent_item = self.get_item_by_path(parent)
+            new_item_name = os.path.basename(event.src_path)
+            idx = 0
+            for i in self.workspace.get_children(parent_item):
+                name = self.workspace.item(i)["text"]
+                if name < new_item_name:
+                    idx+=1
+                else:
+                    break
+            self.workspace.insert(parent_item, idx,
+                                               text=new_item_name,
+                                               values=[event.src_path],
+                                               tags="dir" if event.is_directory else "file")
+        
+    def on_deleted(self, event: FileSystemEvent) -> None:
+        item = self.get_item_by_path(event.src_path)
+        if item is not None:
+            self.workspace.delete(item)
+        
+    # moved/renamed WITHIN SAME DIRECTORY
+    # changing directories will fire a created and deleted event
+    def on_moved(self, event: FileSystemEvent) -> None:
+        item = self.get_item_by_path(event.src_path)
+        new_item_name = os.path.basename(event.dest_path)
+        new_parent_item = self.get_item_by_path(pathlib.Path(event.dest_path).parents[0])
+        dest_ext = os.path.splitext(event.dest_path)[1]
+        if ".patch" in dest_ext or dest_ext in [".wav", ".wem"] or event.is_directory:
+            idx = 0
+            if item is not None: self.workspace.detach(item)
+            for i in self.workspace.get_children(new_parent_item):
+                name = self.workspace.item(i)["text"]
+                if name < new_item_name:
+                    idx+=1
+                else:
+                    break
+            if item is not None:
+                self.workspace.move(item, new_parent_item, idx)
+                self.workspace.item(item, text=new_item_name)
+                self.workspace.item(item, values=[event.dest_path])
+            else:
+                self.workspace.insert(new_parent_item, idx,
+                                               text=new_item_name,
+                                               values=[event.dest_path],
+                                               tags="dir" if event.is_directory else "file")
+        elif item is not None:
+            self.workspace.delete(item)
+        
+    def get_item_by_path(self, path):
+        path = pathlib.Path(path)
+        for item in self.workspace.get_children():
+            child_path = pathlib.Path(self.workspace.item(item, option="values")[0])
+            if child_path in path.parents:
+                return self.get_item_by_path_recursion(item, path)
+            elif str(child_path) == str(path):
+                return item
+                    
+    def get_item_by_path_recursion(self, node, path):
+        for item in self.workspace.get_children(node):
+            child_path = pathlib.Path(self.workspace.item(item, option="values")[0])
+            if child_path in path.parents:
+                return self.get_item_by_path_recursion(item, path)
+            elif str(child_path) == str(path):
+                return item
 
 class MemoryStream:
     '''
@@ -472,12 +549,9 @@ class MusicSegment(HircEntry):
     
     @classmethod
     def from_memory_stream(cls, stream):
-        global num_segments
-        num_segments += 1
         entry = MusicSegment()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
-        start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
         entry.unused_sections.append(stream.read(15))
         n = stream.uint8_read() #number of props
@@ -3477,6 +3551,9 @@ class MainWindow:
         self.show_info_window()
 
     def init_workspace(self):
+    
+        # TO-DO: Ensure subfolders do not get watched
+    
         self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
         self.workspace.heading("#0", text="Workspace Folders")
         self.workspace.column("#0", width=256+16)
@@ -3488,6 +3565,11 @@ class MainWindow:
         self.workspace_scroll_bar.pack(side="left", pady=8, fill="y")
         self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
         self.render_workspace()
+        event_handler = WorkspaceEventHandler(self.workspace)
+        observer = Observer()
+        for p in sorted(self.app_state.get_workspace_paths()):
+            observer.schedule(event_handler, p, recursive=True)
+        observer.start()
 
     def init_archive_search_bar(self):
         if self.lookup_store == None:
