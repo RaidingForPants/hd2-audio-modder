@@ -3553,6 +3553,8 @@ class MainWindow:
     def init_workspace(self):
     
         # TO-DO: Ensure subfolders do not get watched
+        # Keep track of watches and add/remove them when folders
+        # are added/removed from the workspace
     
         self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
         self.workspace.heading("#0", text="Workspace Folders")
