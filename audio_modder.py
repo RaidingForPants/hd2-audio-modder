@@ -112,6 +112,9 @@ class WorkspaceEventHandler(FileSystemEventHandler):
             new_item_name = os.path.basename(event.src_path)
             idx = 0
             for i in self.workspace.get_children(parent_item):
+                if not event.is_directory and self.workspace.item(i, option="tags")[0] == "dir":
+                    idx+=1
+                    continue
                 name = self.workspace.item(i)["text"]
                 if name < new_item_name:
                     idx+=1
@@ -138,6 +141,9 @@ class WorkspaceEventHandler(FileSystemEventHandler):
             idx = 0
             if item is not None: self.workspace.detach(item)
             for i in self.workspace.get_children(new_parent_item):
+                if not event.is_directory and self.workspace.item(i, option="tags")[0] == "dir":
+                    idx+=1
+                    continue
                 name = self.workspace.item(i)["text"]
                 if name < new_item_name:
                     idx+=1
