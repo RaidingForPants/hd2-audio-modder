@@ -13,6 +13,7 @@ import pathlib
 import xml.etree.ElementTree as etree
 
 from functools import partial
+from functools import cmp_to_key
 from itertools import takewhile
 from math import ceil
 from tkinter import *
@@ -108,39 +109,45 @@ class WorkspaceEventHandler(FileSystemEventHandler):
         src_ext = os.path.splitext(event.src_path)[1]
         if ".patch" in src_ext or src_ext in [".wav", ".wem"] or event.is_directory:
             parent = pathlib.Path(event.src_path).parents[0]
-            parent_item = self.get_item_by_path(parent)
+            parent_items = self.get_items_by_path(parent)
             new_item_name = os.path.basename(event.src_path)
-            idx = 0
-            for i in self.workspace.get_children(parent_item):
-                if not event.is_directory and self.workspace.item(i, option="tags")[0] == "dir":
-                    idx+=1
-                    continue
-                name = self.workspace.item(i)["text"]
-                if name < new_item_name:
-                    idx+=1
-                else:
-                    break
-            self.workspace.insert(parent_item, idx,
-                                               text=new_item_name,
-                                               values=[event.src_path],
-                                               tags="dir" if event.is_directory else "file")
+            for parent_item in parent_items:
+                idx = 0
+                for i in self.workspace.get_children(parent_item):
+                    if event.is_directory and self.workspace.item(i, option="tags")[0] != "dir":
+                        break
+                    if not event.is_directory and self.workspace.item(i, option="tags")[0] == "dir":
+                        idx+=1
+                        continue
+                    name = self.workspace.item(i)["text"]
+                    if name < new_item_name:
+                        idx+=1
+                    else:
+                        break
+                self.workspace.insert(parent_item, idx,
+                                                   text=new_item_name,
+                                                   values=[event.src_path],
+                                                   tags="dir" if event.is_directory else "file")
         
     def on_deleted(self, event: FileSystemEvent) -> None:
-        item = self.get_item_by_path(event.src_path)
-        if item is not None:
+        matching_items = self.get_items_by_path(event.src_path)
+        for item in matching_items:
             self.workspace.delete(item)
         
     # moved/renamed WITHIN SAME DIRECTORY
     # changing directories will fire a created and deleted event
     def on_moved(self, event: FileSystemEvent) -> None:
-        item = self.get_item_by_path(event.src_path)
+        matching_items = self.get_items_by_path(event.src_path)
         new_item_name = os.path.basename(event.dest_path)
-        new_parent_item = self.get_item_by_path(pathlib.Path(event.dest_path).parents[0])
+        new_parent_items = self.get_items_by_path(pathlib.Path(event.dest_path).parents[0])
         dest_ext = os.path.splitext(event.dest_path)[1]
-        if ".patch" in dest_ext or dest_ext in [".wav", ".wem"] or event.is_directory:
+        for item in matching_items:
+            self.workspace.delete(item)
+        if ".patch" in dest_ext or dest_ext in [".wav", ".wem"] or event.is_directory: 
             idx = 0
-            if item is not None: self.workspace.detach(item)
-            for i in self.workspace.get_children(new_parent_item):
+            for i in self.workspace.get_children(new_parent_items[0]):
+                if event.is_directory and self.workspace.item(i, option="tags")[0] != "dir":
+                    break
                 if not event.is_directory and self.workspace.item(i, option="tags")[0] == "dir":
                     idx+=1
                     continue
@@ -149,26 +156,22 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                     idx+=1
                 else:
                     break
-            if item is not None:
-                self.workspace.move(item, new_parent_item, idx)
-                self.workspace.item(item, text=new_item_name)
-                self.workspace.item(item, values=[event.dest_path])
-            else:
-                self.workspace.insert(new_parent_item, idx,
+            for parent_item in new_parent_items:
+                self.workspace.insert(parent_item, idx,
                                                text=new_item_name,
                                                values=[event.dest_path],
                                                tags="dir" if event.is_directory else "file")
-        elif item is not None:
-            self.workspace.delete(item)
         
-    def get_item_by_path(self, path):
+    def get_items_by_path(self, path):
+        items = []
         path = pathlib.Path(path)
         for item in self.workspace.get_children():
             child_path = pathlib.Path(self.workspace.item(item, option="values")[0])
             if child_path in path.parents:
-                return self.get_item_by_path_recursion(item, path)
+                items.append(self.get_item_by_path_recursion(item, path))
             elif str(child_path) == str(path):
-                return item
+                items.append(item)
+        return items
                     
     def get_item_by_path_recursion(self, node, path):
         for item in self.workspace.get_children(node):
@@ -3200,6 +3203,7 @@ class MainWindow:
         self.lookup_store = lookup_store
         self.file_handler = file_handler
         self.sound_handler = sound_handler
+        self.watched_paths = []
         
         self.root = Tk()
         try:
@@ -3488,11 +3492,42 @@ class MainWindow:
                 if node.isdir:
                     inode_stack.append(node)
                     id_stack.append(id)
+                    
+        # I'm too lazy so I'm just going to unschedule and then reschedule all the watches
+        # instead of locating all subfolders and then figuring out which ones to not schedule
+        self.reload_watched_paths()
+            
+    def reload_watched_paths(self):
+        for p in self.watched_paths:
+            self.observer.unschedule(p)
+        self.watched_paths = []
+        # only track top-most folder if subfolders are added:
+        # sort by number of levels
+        paths = [pathlib.Path(p) for p in self.app_state.get_workspace_paths()]
+        paths = sorted(paths, key=cmp_to_key(lambda item1, item2: len(item1.parents) - len(item2.parents)))
+
+        # skip adding a folder if a parent folder has already been added
+        trimmed_paths = []
+        for p in paths:
+            add = True
+            for item in trimmed_paths:
+                if item in p.parents:
+                    add = False
+                    break
+            if add:
+                trimmed_paths.append(p)
+                
+        for path in trimmed_paths:
+            self.watched_paths.append(self.observer.schedule(self.event_handler, path, recursive=True))
 
     def remove_workspace(self, workspace_item):
         values = self.workspace.item(workspace_item, option="values")
         self.app_state.workspace_paths.remove(values[0])
         self.workspace.delete(workspace_item)
+
+        # I'm too lazy so I'm just going to unschedule and then reschedule all the watches
+        # instead of locating all subfolders and then figuring out which ones to not schedule
+        self.reload_watched_paths()
 
     def workspace_on_right_click(self, event):
         self.workspace_popup_menu.delete(0, "end")
@@ -3557,11 +3592,6 @@ class MainWindow:
         self.show_info_window()
 
     def init_workspace(self):
-    
-        # TO-DO: Ensure subfolders do not get watched
-        # Keep track of watches and add/remove them when folders
-        # are added/removed from the workspace
-    
         self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
         self.workspace.heading("#0", text="Workspace Folders")
         self.workspace.column("#0", width=256+16)
@@ -3573,11 +3603,10 @@ class MainWindow:
         self.workspace_scroll_bar.pack(side="left", pady=8, fill="y")
         self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
         self.render_workspace()
-        event_handler = WorkspaceEventHandler(self.workspace)
-        observer = Observer()
-        for p in sorted(self.app_state.get_workspace_paths()):
-            observer.schedule(event_handler, p, recursive=True)
-        observer.start()
+        self.event_handler = WorkspaceEventHandler(self.workspace)
+        self.observer = Observer()
+        self.reload_watched_paths()
+        self.observer.start()
 
     def init_archive_search_bar(self):
         if self.lookup_store == None:
