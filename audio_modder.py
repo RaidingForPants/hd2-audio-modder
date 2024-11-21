@@ -16,6 +16,7 @@ from functools import partial
 from functools import cmp_to_key
 from itertools import takewhile
 from math import ceil
+from tkinterdnd2 import *
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
@@ -180,6 +181,20 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                 return self.get_item_by_path_recursion(item, path)
             elif str(child_path) == str(path):
                 return item
+
+def list_files_recursive(path="."):
+    files = []
+    if os.path.isfile(path):
+        return [path]
+    else:
+        for entry in os.listdir(path):
+            full_path = os.path.join(path, entry)
+            if os.path.isdir(full_path):
+                files.extend(list_files_recursive(full_path))
+            else:
+                files.append(full_path)
+        return files
+
 
 class MemoryStream:
     '''
@@ -2107,7 +2122,7 @@ class FileHandler:
 
     def load_wav_by_mapping(self,
                  project: str,
-                 wems: list[tuple[str, AudioSource]],
+                 wems: list[tuple[str, AudioSource, int]],
                  schema: etree.Element) -> bool:
         if len(wems) == 0:
             return True
@@ -2194,32 +2209,38 @@ class FileHandler:
             return
 
         if not isinstance(root_spec, dict):
-            showerror(title="Operation Failed", message="Invalid data format in the given spec file.") 
+            showerror(title="Operation Failed",
+                      message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
-                    "operation cancelled")
+                           "operation cancelled")
             return
 
         # Validate version number #
         if "v" not in root_spec:
-            showerror(title="Operation Failed", message="The given spec file is missing field `v`") 
+            showerror(title="Operation Failed", 
+                      message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
-                    "operation cancelled.")
+                           "operation cancelled.")
             return
-        if root_spec["v"] != 2:
-            showerror(title="Operation Failed", message="The given spec file contain invalid version "
-                        f'number {root_spec["v"]}.')
+        v = root_spec["v"]
+        if v != 2:
+            showerror(title="Operation Failed", 
+                      message="The given spec file contain invalid version " 
+                      f'number {v}.')
             logger.warning("The given spec file contain invalid version "
-                    f'number {root_spec["v"]}. Import operation cancelled')
+                           f'number {v}. Import operation cancelled')
             return
 
         # Validate `specs` field #
         if "specs" not in root_spec:
-            showerror(title="Operation Failed", message="The given spec file is missing field `specs`.")
+            showerror(title="Operation Failed", 
+                      message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
             return
         if not isinstance(root_spec["specs"], list):
-            showerror(title="Operation Failed", message="Field `specs` is not an array.")
+            showerror(title="Operation Failed",
+                      message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
@@ -2238,7 +2259,8 @@ class FileHandler:
             else:
                 project = root_spec["project"]
         if not os.path.exists(project):
-            showerror(title="Operation Failed", message="The default Wwise Project does not exist.")
+            showerror(title="Operation Failed",
+                      message="The default Wwise Project does not exist.")
             logger.warning("The default Wwise Project does not exist. Import "
                            "operation cancelled.")
             return
@@ -2246,12 +2268,14 @@ class FileHandler:
         conversion = DEFAULT_CONVERSION_SETTING
         if project != DEFAULT_WWISE_PROJECT:
             if "conversion" not in root_spec:
-                showerror(title="Operation Failed", message="Missing field `conversion`.")
+                showerror(title="Operation Failed",
+                          message="Missing field `conversion`.")
                 logger.warning("Missing field `conversion`. Import operation"
                                " cancelled.")
                 return
             if not isinstance(root_spec["conversion"], str):
-                showerror(title="Operation Failed", message="Field `conversion` is not a string.")
+                showerror(title="Operation Failed",
+                          message="Field `conversion` is not a string.")
                 logger.warning("Field `conversion` is not a string. Import "
                                "operation cancelled.")
                 return
@@ -2262,7 +2286,7 @@ class FileHandler:
             "SchemaVersion": "1",
             "Root": spec_dir
         })
-        wems: list[tuple[str, AudioSource]] = []
+        wems: list[tuple[str, AudioSource, int]] = []
         for sub_spec in root_spec["specs"]:
             # Validate spec format #
             if not isinstance(sub_spec, dict):
@@ -2283,7 +2307,8 @@ class FileHandler:
                 if not os.path.exists(workspace): 
                     workspace = os.path.join(spec_dir, workspace) 
             if not os.path.exists(workspace):
-                showwarning(title="Operation Skipped", message=f"{workspace} does not exist.")
+                showwarning(title="Operation Skipped",
+                            message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current "
                                "entry.")
                 continue
@@ -2291,14 +2316,16 @@ class FileHandler:
             # Validate `mapping` format #
             mapping: dict[str, list[str] | str] | None
             if "mapping" not in sub_spec:
-                showwarning(title="Operation Skipped", message=f"The given spec file is missing field "
+                showwarning(title="Operation Skipped", 
+                            message=f"The given spec file is missing field " 
                             "`mapping`")
                 logger.warning("The given spec file is missing field `mapping`. "
                         "Skipping current entry.")
                 continue
             mapping = sub_spec["mapping"]
             if mapping == None or not isinstance(mapping, dict):
-                showwarning(title="Operation Skipped", message="field `mapping` has an invalid data type")
+                showwarning(title="Operation Skipped", 
+                            message="field `mapping` has an invalid data type")
                 logger.warning("field `mapping` has an invalid data type. Skipping "
                         "current entry.")
                 continue
@@ -2350,7 +2377,7 @@ class FileHandler:
                         "Conversion": conversion,
                         "Destination": convert_dest 
                     })
-                    wems.append((convert_dest, audio))
+                    wems.append((convert_dest, audio, file_id))
                 elif isinstance(dest, list):
                     for d in dest:
                         if not isinstance(d, str):
@@ -2374,7 +2401,7 @@ class FileHandler:
                             "Conversion": conversion,
                             "Destination": convert_dest
                         })
-                        wems.append((convert_dest, audio))
+                        wems.append((convert_dest, audio, file_id))
                 else:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
@@ -2383,7 +2410,8 @@ class FileHandler:
                 continue
             out = sub_spec["write_patch_to"]
             if not isinstance(out, str):
-                showwarning(title="Operation Skipped", message="field `write_patch_to` has an invalid data "
+                showwarning(title="Operation Skipped", 
+                            message="field `write_patch_to` has an invalid data "
                             "type. Write patch operation cancelled.")
                 logger.warning("field `write_patch_to` has an invalid data "
                                "type. Write patch operation cancelled.")
@@ -2392,7 +2420,8 @@ class FileHandler:
                 # Relative patch write #
                 out = os.path.join(spec_dir, out)
                 if not os.path.exists(out):
-                    showwarning(title="Operation Skipped", message=f"{out} does not exist. Write patch "
+                    showwarning(title="Operation Skipped",
+                                message=f"{out} does not exist. Write patch "
                                 "operation cancelled.")
                     logger.warning(f"{out} does not exist. Write patch operation "
                                    "cancelled.")
@@ -2406,15 +2435,29 @@ class FileHandler:
                 "SchemaVersion": "1",
                 "Root": spec_dir 
             })
+            is_revert = "revert" in sub_spec and \
+                    isinstance(sub_spec["revert"], bool) and \
+                    sub_spec["revert"]
+            is_revert_all = "revert_all" in sub_spec and \
+                    isinstance(sub_spec["revert_all"], bool) and \
+                    sub_spec["revert_all"]
+            if is_revert_all:
+                self.revert_all()
+                continue
+            if is_revert:
+                for wem in wems:
+                    self.revert_audio(wem[2])
             wems.clear()
+
         self.load_wav_by_mapping(project, wems, root)
         out: str | None = None
         if "write_patch_to" not in root_spec:
             return
         out = root_spec["write_patch_to"]
         if not isinstance(out, str):
-            showerror(title="Operation Failed", message="field `write_patch_to` has an invalid data "
-                        "type. Write patch operation cancelled.")
+            showerror(title="Operation Failed", 
+                      message="field `write_patch_to` has an invalid data "
+                      "type. Write patch operation cancelled.")
             logger.warning("field `write_patch_to` has an invalid data "
                            "type. Write patch operation cancelled.")
             return
@@ -2422,14 +2465,23 @@ class FileHandler:
             # Relative path patch writing #
             out = os.path.join(spec_dir, out)
             if not os.path.exists(out):
-                showerror(title="Operation Failed", message=f"{out} does not exist. Write patch "
-                            "operation cancelled.")
+                showerror(title="Operation Failed",
+                          message=f"{out} does not exist. Write patch "
+                          "operation cancelled.")
                 logger.warning(f"{out} does not exist. Write patch operation "
                               "cancelled.")
                 return
         if not self.write_patch(folder=out):
-            showerror(title="Operation Failed", message="Write patch operation failed. Check "
-                            "log.txt for detailed.")
+            showerror(title="Operation Failed",
+                      message="Write patch operation failed. Check "
+                      "log.txt for detailed.")
+
+        is_revert = "revert" in root_spec and \
+                isinstance(root_spec["revert"], bool) and \
+                root_spec["revert"]
+        if is_revert:
+            for wem in wems:
+                self.revert_audio(wem[2])
 
     def load_wems_spec(self):
         spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
@@ -2438,9 +2490,10 @@ class FileHandler:
             logger.warning("Import operation cancelled")
             return
         if not os.path.exists(spec_path):
-            showerror(title="Operation Failed", message=f"{spec_path} does not exist.")
+            showerror(title="Operation Failed", 
+                      message=f"{spec_path} does not exist.")
             logger.warning(f"{spec_path} does not exist. Import operation "
-                    "cancelled")
+                           "cancelled")
             return
 
         root_spec: Any = None
@@ -2455,19 +2508,22 @@ class FileHandler:
             return
 
         if not isinstance(root_spec, dict):
-            showerror(title="Operation Failed", message="Invalid data format in the given spec file.") 
+            showerror(title="Operation Failed",
+                      message="Invalid data format in the given spec file.") 
             logger.warning("Invalid data format in the given spec file. Import "
                     "operation cancelled")
             return
 
         # Validate version number # 
         if "v" not in root_spec:
-            showerror(title="Operation Failed", message="The given spec file is missing field `v`") 
+            showerror(title="Operation Failed",
+                      message="The given spec file is missing field `v`") 
             logger.warning("The given spec file is missing field `v`. Import "
                     "operation cancelled.")
             return
         if root_spec["v"] != 2:
-            showerror(title="Operation Failed", message="The given spec file contain invalid version " + 
+            showerror(title="Operation Failed",
+                      message="The given spec file contain invalid version " + 
                         f'number {root_spec["v"]}.')
             logger.warning("The given spec file contain invalid version "
                     f'number {root_spec["v"]}. Import operation cancelled')
@@ -2475,17 +2531,20 @@ class FileHandler:
 
         # Validate `specs` format #
         if "specs" not in root_spec:
-            showerror(title="Operation Failed", message="The given spec file is missing field `specs`.")
+            showerror(title="Operation Failed",
+                      message="The given spec file is missing field `specs`.")
             logger.warning("The given spec file is missing field `specs`."
                             " Import operation cancelled.")
             return
         if not isinstance(root_spec["specs"], list):
-            showerror(title="Operation Failed", message="Field `specs` is not an array.")
+            showerror(title="Operation Failed",
+                      message="Field `specs` is not an array.")
             logger.warning("Field `specs` is not an array. Import operation "
                            "cancelled.")
             return
 
         spec_dir = os.path.dirname(spec_path)
+        patched_ids: list[int] = []
         for sub_spec in root_spec["specs"]:
             if not isinstance(sub_spec, dict):
                 logger.warning("Current entry is not an object. Skipping "
@@ -2505,7 +2564,8 @@ class FileHandler:
                 if not os.path.exists(workspace): 
                     workspace = os.path.join(spec_dir, workspace) 
             if not os.path.exists(workspace):
-                showwarning(title="Operation Skipped", message=f"{workspace} does not exist.")
+                showwarning(title="Operation Skipped",
+                            message=f"{workspace} does not exist.")
                 logger.warning(f"{workspace} does not exist. Skipping current"
                         " entry")
                 continue
@@ -2513,14 +2573,16 @@ class FileHandler:
             # Validate `mapping` format # 
             mapping: dict[str, list[str] | str] | None
             if "mapping" not in sub_spec:
-                showwarning(title="Operation Skipped", message=f"The given spec file is missing field "
+                showwarning(title="Operation Skipped",
+                            message=f"The given spec file is missing field "
                             "`mapping`")
                 logger.warning("The given spec file is missing field `mapping`. "
                         "Skipping current entry")
                 continue
             mapping = sub_spec["mapping"]
             if mapping == None or not isinstance(mapping, dict):
-                showwarning(title="Operation Skipped", message="field `mapping` has an invalid data type")
+                showwarning(title="Operation Skipped",
+                            message="field `mapping` has an invalid data type")
                 logger.warning("field `mapping` has an invalid data type. "
                         "Skipping current entry")
                 continue
@@ -2576,6 +2638,8 @@ class FileHandler:
                     with open(abs_src, "rb") as f:
                         audio.set_data(f.read())
                     progress_window.step()
+
+                    patched_ids.append(file_id)
                 elif isinstance(dest, list):
                     for d in dest:
                         if not isinstance(d, str):
@@ -2596,6 +2660,8 @@ class FileHandler:
                         with open(abs_src, "rb") as f:
                             audio.set_data(f.read())
                         progress_window.step()
+
+                        patched_ids.append(file_id)
                 else:
                     logger.warning(f"{dest} is not a string or list of string. "
                             "Skipping the current entry.")
@@ -2607,7 +2673,8 @@ class FileHandler:
                 return
             out = sub_spec["write_patch_to"]
             if not isinstance(out, str):
-                showwarning(title="Operation Skipped", message="field `write_patch_to` has an invalid data "
+                showwarning(title="Operation Skipped",
+                            message="field `write_patch_to` has an invalid data "
                             "type. Write patch operation cancelled.")
                 logger.warning("field `write_patch_to` has an invalid data "
                                "type. Write patch operation cancelled.")
@@ -2616,15 +2683,24 @@ class FileHandler:
                 # Relative path
                 out = os.path.join(spec_dir, out)
                 if not os.path.exists(out):
-                    showwarning(title="Operation Skipped", message=f"{out} does not exist. Write patch "
+                    showwarning(title="Operation Skipped", 
+                                message=f"{out} does not exist. Write patch "
                                 "operation cancelled.")
                     logger.warning(f"{out} does not exist. Write patch operation "
                                    "cancelled.")
                     continue
             if not self.write_patch(folder=out):
-                showerror(title="Operation Failed", message="Write patch operation failed. Check "
-                            "log.txt for detailed.")
-
+                showerror(title="Operation Failed",
+                          message="Write patch operation failed. Check "
+                          "log.txt for detailed.")
+            is_revert = "revert" in sub_spec and \
+                    isinstance(sub_spec["revert"], bool) and \
+                    sub_spec["revert"]
+            if is_revert:
+                for patched_id in patched_ids:
+                    self.revert_audio(patched_id)
+            patched_ids.clear()
+            
         out: str | None = None
         if "write_patch_to" not in root_spec:
             return
@@ -2647,6 +2723,14 @@ class FileHandler:
         if not self.write_patch(folder=out):
             showerror(title="Operation Failed", message="Write patch operation failed. Check "
                             "log.txt for detailed.")
+
+        is_revert = "revert" in root_spec and \
+                isinstance(root_spec["revert"], bool) and \
+                root_spec["revert"]
+        if is_revert:
+            for patched_id in patched_ids:
+                self.revert_audio(patched_id)
+        patched_ids.clear()
 
 
 class ProgressWindow:
@@ -3032,8 +3116,9 @@ class ArchiveSearch(ttk.Entry):
 
         self.cmp_root: tkinter.Toplevel | None = None
         self.cmp_list: tkinter.Listbox | None = None
+        self.cmp_scrollbar: ttk.Scrollbar | None = None
 
-        self.bind("<KeyRelease>", self.on_key_release)
+        self.bind("<Key>", self.on_key_release)
         self.bind("<FocusOut>", self.on_focus_out)
         self.bind("<Return>", self.on_return)
         self.bind("<Escape>", self.destroy_cmp)
@@ -3049,7 +3134,6 @@ class ArchiveSearch(ttk.Entry):
     def on_key_release(self, event: tkinter.Event):
         if event.keysym in self.ignore_keys:
             return
-
         query = self.get().lower()
 
         if self.cmp_root != None:
@@ -3075,6 +3159,19 @@ class ArchiveSearch(ttk.Entry):
             self.cmp_list.delete(0, tkinter.END)
             for archive in archives:
                 self.cmp_list.insert(tkinter.END, archive)
+            height="128"
+            if len(archives) < 7:
+                height=str(2+18*len(archives))
+                try:
+                    self.cmp_scrollbar.pack_forget()
+                except:
+                    pass
+            elif len(archives) > 7:
+                try:
+                    self.cmp_scrollbar.pack(side="left", fill="y")
+                except:
+                    pass
+            self.cmp_root.geometry(f"{self.winfo_width()}x{height}")
             self.cmp_list.selection_clear(0, tkinter.END)
             self.cmp_list.selection_set(0)
             return
@@ -3093,10 +3190,17 @@ class ArchiveSearch(ttk.Entry):
 
         self.cmp_root = tkinter.Toplevel(self)
         self.cmp_root.wm_overrideredirect(True) # Hide title bar
+        
 
         self.cmp_list = tkinter.Listbox(self.cmp_root, borderwidth=1)
 
         self.cmp_list.pack(side=tkinter.LEFT, fill=tkinter.BOTH, expand=True)
+        
+        if len(archives) > 7:
+            self.cmp_scrollbar = ttk.Scrollbar(self.cmp_root, orient=VERTICAL)
+            self.cmp_scrollbar.pack(side="left", fill="y")
+            self.cmp_list.configure(yscrollcommand=self.cmp_scrollbar.set)
+            self.cmp_scrollbar['command'] = self.cmp_list.yview
 
         for archive in archives:
             self.cmp_list.insert(tkinter.END, archive)
@@ -3104,8 +3208,10 @@ class ArchiveSearch(ttk.Entry):
         self.cmp_list.selection_set(0)
 
         self.cmp_list.bind("<Double-Button-1>", self.on_return)
-
-        self.cmp_root.geometry(f"{self.winfo_width()}x128")
+        height="128"
+        if len(archives) < 7:
+            height=str(2+18*len(archives))
+        self.cmp_root.geometry(f"{self.winfo_width()}x{height}")
         self.cmp_root.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
         
     def error_check(self):
@@ -3174,7 +3280,8 @@ class ArchiveSearch(ttk.Entry):
             self.cmp_root.after(1, self.check_should_destroy)
 
     def check_should_destroy(self):
-        if self.cmp_root.focus_get() != self.cmp_list:
+        new_focus = self.cmp_root.focus_get()
+        if new_focus != self.cmp_list and new_focus != self.cmp_root:
             self.destroy_cmp(None)
 
     def set_entries(self, entries: dict[str, str], fmt: str | None = None):
@@ -3205,7 +3312,11 @@ class MainWindow:
         self.sound_handler = sound_handler
         self.watched_paths = []
         
-        self.root = Tk()
+        self.root = TkinterDnD.Tk()
+        
+        self.drag_source_widget = None
+        self.workspace_selection = []
+        
         try:
             self.root.tk.call("source", "azure.tcl")
         except Exception as e:
@@ -3242,8 +3353,11 @@ class MainWindow:
 
         self.default_bg = "#333333"
         self.default_fg = "#ffffff"
+        
+        self.window = PanedWindow(self.root, orient=HORIZONTAL, borderwidth=0, background="white")
+        self.window.config(sashwidth=8, sashrelief="raised")
+        self.window.pack(fill=BOTH)
 
-        self.scroll_bar = ttk.Scrollbar(self.root, orient=VERTICAL)
         
         self.top_bar.pack(side="top")
         
@@ -3252,9 +3366,11 @@ class MainWindow:
 
         self.init_workspace()
         
-        self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
-        self.treeview.pack(side="left", padx=8, pady=8)
-        self.scroll_bar.pack(side="left", pady=8, fill="y")
+        self.treeview_panel = Frame(self.window)
+        self.scroll_bar = ttk.Scrollbar(self.treeview_panel, orient=VERTICAL)
+        self.treeview = ttk.Treeview(self.treeview_panel, columns=("type",), height=WINDOW_HEIGHT-100)
+        self.scroll_bar.pack(side="right", pady=8, fill="y")
+        self.treeview.pack(side="right", padx=8, pady=8, fill="x")
         self.treeview.heading("#0", text="File")
         self.treeview.column("#0", width=250)
         self.treeview.column("type", width=100)
@@ -3265,7 +3381,7 @@ class MainWindow:
         self.treeview.bind("<Return>", self.treeview_on_double_click)
         self.scroll_bar['command'] = self.treeview.yview
 
-        self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3))
+        self.entry_info_panel = Frame(self.window, width=int(WINDOW_WIDTH/3))
         self.entry_info_panel.pack(side="left", fill="both", padx=8, pady=8)
         
         self.audio_info_panel = AudioSourceWindow(self.entry_info_panel,
@@ -3277,6 +3393,9 @@ class MainWindow:
                                                    self.check_modified)
         self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
                                                      self.check_modified)
+                                                     
+        self.window.add(self.treeview_panel)
+        self.window.add(self.entry_info_panel)
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -3388,15 +3507,56 @@ class MainWindow:
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
         self.root.config(menu=self.menu)
+        
+        self.treeview.drop_target_register(DND_FILES)
+        self.workspace.drop_target_register(DND_FILES)
+        self.workspace.drag_source_register(1, DND_FILES)
 
         self.treeview.bind("<Button-3>", self.treeview_on_right_click)
         self.workspace.bind("<Button-3>", self.workspace_on_right_click)
         self.workspace.bind("<Double-Button-1>", self.workspace_on_double_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
+        self.treeview.dnd_bind("<<Drop>>", self.drop_import)
+        self.workspace.dnd_bind("<<Drop>>", self.drop_add_to_workspace)
+        self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
+        self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
+        self.workspace.bind("<Button-1>", self.workspace_save_selection)
 
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
         self.root.mainloop()
-        
+
+    def workspace_drag_assist(self, event):
+        selected_item = self.workspace.identify_row(event.y)
+        if selected_item in self.workspace_selection:
+            self.workspace.selection_set(self.workspace_selection)
+
+    def workspace_save_selection(self, event):
+        self.workspace_selection = self.workspace.selection()
+
+    def drop_import(self, event):
+        if event.data:
+            import_files = []
+            dropped_files = event.widget.tk.splitlist(event.data)
+            for file in dropped_files:
+                import_files.extend(list_files_recursive(file))
+            self.import_from_workspace(import_files)
+        self.drag_source_widget = None
+
+    def drop_add_to_workspace(self, event):
+        if self.drag_source_widget is not self.workspace and event.data:
+            dropped_files = event.widget.tk.splitlist(event.data)
+            for file in dropped_files:
+                if os.path.isdir(file):
+                    self.add_new_workspace(file)
+        self.drag_source_widget = None
+
+    def drag_init_workspace(self, event):
+        self.drag_source_widget = self.workspace
+        data = ()
+        if self.workspace.selection():
+            data = tuple([self.workspace.item(i, option="values")[0] for i in self.workspace.selection()])
+        return ((ASK, COPY), (DND_FILES,), data)
+
     def search_bar_on_enter_key(self, event):
         self.search()
         
@@ -3405,8 +3565,10 @@ class MainWindow:
         try:
             if theme == "dark_mode":
                 self.root.tk.call("set_theme", "dark")
+                self.window.configure(background="white")
             elif theme == "light_mode":
                 self.root.tk.call("set_theme", "light")
+                self.window.configure(background="black")
         except Exception as e:
             logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
         self.app_state.theme = theme
@@ -3463,11 +3625,12 @@ class MainWindow:
                         inode_stack.append(node)
                         id_stack.append(id)
 
-    def add_new_workspace(self):
-        workspace_path = filedialog.askdirectory(
-            mustexist=True,
-            title="Select a folder to open as workspace"
-        )
+    def add_new_workspace(self, workspace_path=""):
+        if workspace_path == "":
+            workspace_path = filedialog.askdirectory(
+                mustexist=True,
+                title="Select a folder to open as workspace"
+            )
         if self.app_state.add_new_workspace(workspace_path) == 1:
             return
         inode = fileutil.generate_file_tree(workspace_path)
@@ -3592,15 +3755,17 @@ class MainWindow:
         self.show_info_window()
 
     def init_workspace(self):
-        self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
+        self.workspace_panel = Frame(self.window)
+        self.window.add(self.workspace_panel)
+        self.workspace = ttk.Treeview(self.workspace_panel, height=WINDOW_HEIGHT - 100)
         self.workspace.heading("#0", text="Workspace Folders")
         self.workspace.column("#0", width=256+16)
-        self.workspace.pack(side="left", padx=8, pady=8)
+        self.workspace_scroll_bar = ttk.Scrollbar(self.workspace_panel, orient=VERTICAL)
+        self.workspace_scroll_bar['command'] = self.workspace.yview
+        self.workspace_scroll_bar.pack(side="right", pady=8, fill="y")
+        self.workspace.pack(side="right", padx=8, pady=8)
         self.workspace_inodes: list[fileutil.INode] = []
         self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
-        self.workspace_scroll_bar = ttk.Scrollbar(self.root, orient=VERTICAL)
-        self.workspace_scroll_bar['command'] = self.workspace.yview
-        self.workspace_scroll_bar.pack(side="left", pady=8, fill="y")
         self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
         self.render_workspace()
         self.event_handler = WorkspaceEventHandler(self.workspace)
