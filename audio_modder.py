@@ -3370,7 +3370,7 @@ class MainWindow:
         self.scroll_bar = ttk.Scrollbar(self.treeview_panel, orient=VERTICAL)
         self.treeview = ttk.Treeview(self.treeview_panel, columns=("type",), height=WINDOW_HEIGHT-100)
         self.scroll_bar.pack(side="right", pady=8, fill="y")
-        self.treeview.pack(side="right", padx=8, pady=8, fill="x")
+        self.treeview.pack(side="right", padx=8, pady=8, fill="x", expand=True)
         self.treeview.heading("#0", text="File")
         self.treeview.column("#0", width=250)
         self.treeview.column("type", width=100)
@@ -3761,7 +3761,7 @@ class MainWindow:
         self.workspace_scroll_bar = ttk.Scrollbar(self.workspace_panel, orient=VERTICAL)
         self.workspace_scroll_bar['command'] = self.workspace.yview
         self.workspace_scroll_bar.pack(side="right", pady=8, fill="y")
-        self.workspace.pack(side="right", padx=8, pady=8)
+        self.workspace.pack(side="right", padx=8, pady=8, fill="x", expand=True)
         self.workspace_inodes: list[fileutil.INode] = []
         self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
         self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
