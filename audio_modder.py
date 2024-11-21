@@ -3268,8 +3268,11 @@ class MainWindow:
 
         self.default_bg = "#333333"
         self.default_fg = "#ffffff"
+        
+        self.window = PanedWindow(self.root, orient=HORIZONTAL, borderwidth=0, background="white")
+        self.window.config(sashwidth=8, sashrelief="raised")
+        self.window.pack(fill=BOTH)
 
-        self.scroll_bar = ttk.Scrollbar(self.root, orient=VERTICAL)
         
         self.top_bar.pack(side="top")
         
@@ -3278,9 +3281,11 @@ class MainWindow:
 
         self.init_workspace()
         
-        self.treeview = ttk.Treeview(self.root, columns=("type",), height=WINDOW_HEIGHT-100)
-        self.treeview.pack(side="left", padx=8, pady=8)
-        self.scroll_bar.pack(side="left", pady=8, fill="y")
+        self.treeview_panel = Frame(self.window)
+        self.scroll_bar = ttk.Scrollbar(self.treeview_panel, orient=VERTICAL)
+        self.treeview = ttk.Treeview(self.treeview_panel, columns=("type",), height=WINDOW_HEIGHT-100)
+        self.scroll_bar.pack(side="right", pady=8, fill="y")
+        self.treeview.pack(side="right", padx=8, pady=8, fill="x")
         self.treeview.heading("#0", text="File")
         self.treeview.column("#0", width=250)
         self.treeview.column("type", width=100)
@@ -3291,7 +3296,7 @@ class MainWindow:
         self.treeview.bind("<Return>", self.treeview_on_double_click)
         self.scroll_bar['command'] = self.treeview.yview
 
-        self.entry_info_panel = Frame(self.root, width=int(WINDOW_WIDTH/3))
+        self.entry_info_panel = Frame(self.window, width=int(WINDOW_WIDTH/3))
         self.entry_info_panel.pack(side="left", fill="both", padx=8, pady=8)
         
         self.audio_info_panel = AudioSourceWindow(self.entry_info_panel,
@@ -3303,6 +3308,9 @@ class MainWindow:
                                                    self.check_modified)
         self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
                                                      self.check_modified)
+                                                     
+        self.window.add(self.treeview_panel)
+        self.window.add(self.entry_info_panel)
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -3429,7 +3437,7 @@ class MainWindow:
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
 
-        self.root.resizable(False, False)
+        self.root.resizable(True, True)
         self.root.mainloop()
 
     def workspace_drag_assist(self, event):
@@ -3472,8 +3480,10 @@ class MainWindow:
         try:
             if theme == "dark_mode":
                 self.root.tk.call("set_theme", "dark")
+                self.window.configure(background="white")
             elif theme == "light_mode":
                 self.root.tk.call("set_theme", "light")
+                self.window.configure(background="black")
         except Exception as e:
             logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
         self.app_state.theme = theme
@@ -3629,15 +3639,17 @@ class MainWindow:
         self.show_info_window()
 
     def init_workspace(self):
-        self.workspace = ttk.Treeview(self.root, height=WINDOW_HEIGHT - 100)
+        self.workspace_panel = Frame(self.window)
+        self.window.add(self.workspace_panel)
+        self.workspace = ttk.Treeview(self.workspace_panel, height=WINDOW_HEIGHT - 100)
         self.workspace.heading("#0", text="Workspace Folders")
         self.workspace.column("#0", width=256+16)
-        self.workspace.pack(side="left", padx=8, pady=8)
+        self.workspace_scroll_bar = ttk.Scrollbar(self.workspace_panel, orient=VERTICAL)
+        self.workspace_scroll_bar['command'] = self.workspace.yview
+        self.workspace_scroll_bar.pack(side="right", pady=8, fill="y")
+        self.workspace.pack(side="right", padx=8, pady=8)
         self.workspace_inodes: list[fileutil.INode] = []
         self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
-        self.workspace_scroll_bar = ttk.Scrollbar(self.root, orient=VERTICAL)
-        self.workspace_scroll_bar['command'] = self.workspace.yview
-        self.workspace_scroll_bar.pack(side="left", pady=8, fill="y")
         self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
         self.render_workspace()
 
