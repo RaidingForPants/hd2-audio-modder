@@ -121,7 +121,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                         idx+=1
                         continue
                     name = self.workspace.item(i)["text"]
-                    if name < new_item_name:
+                    if name.lower() < new_item_name.lower():
                         idx+=1
                     else:
                         break
@@ -153,7 +153,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                     idx+=1
                     continue
                 name = self.workspace.item(i)["text"]
-                if name < new_item_name:
+                if name.lower() < new_item_name.lower():
                     idx+=1
                 else:
                     break
@@ -3488,8 +3488,6 @@ class MainWindow:
         self.file_menu.add_command(label="Save", command=self.save_archive)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         
-        self.file_menu.add_command(label="Refresh Workspace",
-                                   command=self.render_workspace)
         self.file_menu.add_command(label="Add a Folder to Workspace",
                                    command=self.add_new_workspace)
         
