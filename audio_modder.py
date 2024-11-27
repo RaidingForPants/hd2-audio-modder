@@ -2079,7 +2079,6 @@ class FileHandler:
                     WWISE_CLI,
                     "convert-external-source",
                     DEFAULT_WWISE_PROJECT,
-                    "--no-wwise-dat",
                     "--platform", "Windows",
                     "--source-file",
                     source_list,
@@ -2091,7 +2090,6 @@ class FileHandler:
                     WWISE_CLI,
                     "convert-external-source",
                     DEFAULT_WWISE_PROJECT,
-                    "--no-wwise-dat",
                     "--platform", "Windows",
                     "--source-file",
                     source_list,
@@ -2137,7 +2135,6 @@ class FileHandler:
                     WWISE_CLI,
                     "convert-external-source",
                     project,
-                    "--no-wwise-dat",
                     "--platform", "Windows",
                     "--source-file",
                     schema_path,
@@ -2149,7 +2146,6 @@ class FileHandler:
                     WWISE_CLI,
                     "convert-external-source",
                     project,
-                    "--no-wwise-dat",
                     "--platform", "Windows",
                     "--source-file",
                     schema_path,
@@ -3369,7 +3365,7 @@ class MainWindow:
         self.treeview_panel = Frame(self.window)
         self.scroll_bar = ttk.Scrollbar(self.treeview_panel, orient=VERTICAL)
         self.treeview = ttk.Treeview(self.treeview_panel, columns=("type",), height=WINDOW_HEIGHT-100)
-        self.scroll_bar.pack(side="right", pady=8, fill="y")
+        self.scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
         self.treeview.pack(side="right", padx=8, pady=8, fill="x", expand=True)
         self.treeview.heading("#0", text="File")
         self.treeview.column("#0", width=250)
@@ -3760,7 +3756,7 @@ class MainWindow:
         self.workspace.column("#0", width=256+16)
         self.workspace_scroll_bar = ttk.Scrollbar(self.workspace_panel, orient=VERTICAL)
         self.workspace_scroll_bar['command'] = self.workspace.yview
-        self.workspace_scroll_bar.pack(side="right", pady=8, fill="y")
+        self.workspace_scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
         self.workspace.pack(side="right", padx=8, pady=8, fill="x", expand=True)
         self.workspace_inodes: list[fileutil.INode] = []
         self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
