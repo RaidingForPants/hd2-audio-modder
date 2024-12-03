@@ -426,13 +426,13 @@ class AudioSource:
         return self.short_id
         
     def revert_modifications(self, notify_subscribers=True):
+        if self.track_info is not None:
+            self.track_info.revert_modifications()
         if self.modified:
             self.modified = False
             if self.data_OLD != b"":
                 self.data = self.data_OLD
                 self.data_OLD = b""
-            if self.track_info is not None:
-                self.track_info.revert_modifications()
             self.size = len(self.data)
             if notify_subscribers:
                 for item in self.subscribers:
@@ -527,6 +527,7 @@ class HircEntry:
         self.size = self.hierarchy_type = self.hierarchy_id = self.misc = 0
         self.sources = []
         self.track_info = []
+        self.soundbank = None
     
     @classmethod
     def from_memory_stream(cls, stream):
@@ -539,6 +540,12 @@ class HircEntry:
         
     def get_id(self):
         return self.hierarchy_id
+        
+    def raise_modified(self):
+        self.soundbank.raise_modified()
+        
+    def lower_modified(self):
+        self.soundbank.lower_modified()
         
     def get_data(self):
         return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
@@ -615,6 +622,7 @@ class MusicSegment(HircEntry):
             self.duration_old = self.duration
             self.entry_marker_old = self.entry_marker[1]
             self.exit_marker_old = self.exit_marker[1]
+            self.raise_modified()
         if duration is not None: self.duration = duration
         if entry_marker is not None: self.entry_marker[1] = entry_marker
         if exit_marker is not None: self.exit_marker[1] = exit_marker
@@ -622,6 +630,7 @@ class MusicSegment(HircEntry):
         
     def revert_modifications(self):
         if self.modified:
+            self.lower_modified()
             self.entry_marker[1] = self.entry_marker_old
             self.exit_marker[1] = self.exit_marker_old
             self.duration = self.duration_old
@@ -661,8 +670,9 @@ class HircEntryFactory:
         
 class HircReader:
     
-    def __init__(self):
+    def __init__(self, soundbank = None):
         self.entries = {}
+        self.soundbank = soundbank
         
     def load(self, hierarchy_data):
         self.entries.clear()
@@ -672,6 +682,7 @@ class HircReader:
         num_items = reader.uint32_read()
         for item in range(num_items):
             entry = HircEntryFactory.from_memory_stream(reader)
+            entry.soundbank = self.soundbank
             self.entries[entry.get_id()] = entry
             
     def get_data(self):
@@ -724,6 +735,7 @@ class TrackInfoStruct:
         self.track_id = self.source_id = self.event_id = self.play_at = self.begin_trim_offset = self.end_trim_offset = self.source_duration = 0
         self.play_at_old = self.begin_trim_offset_old = self.end_trim_offset_old = self.source_duration_old = 0
         self.modified = False
+        self.soundbanks = set()
         
     @classmethod
     def from_bytes(cls, bytes):
@@ -746,6 +758,7 @@ class TrackInfoStruct:
             self.begin_trim_offset_old = self.begin_trim_offset
             self.end_trim_offset_old = self.end_trim_offset
             self.source_duration_old = self.source_duration
+            self.raise_modified()
         if play_at is not None: self.play_at = play_at
         if begin_trim_offset is not None: self.begin_trim_offset = begin_trim_offset
         if end_trim_offset is not None: self.end_trim_offset = end_trim_offset
@@ -754,11 +767,20 @@ class TrackInfoStruct:
         
     def revert_modifications(self):
         if self.modified:
+            self.lower_modified()
             self.play_at = self.play_at_old
             self.begin_trim_offset = self.begin_trim_offset_old
             self.end_trim_offset = self.end_trim_offset_old
             self.source_duration = self.source_duration_old
             self.modified = False
+            
+    def raise_modified(self):
+        for bank in self.soundbanks:
+            bank.raise_modified()
+        
+    def lower_modified(self):
+        for bank in self.soundbanks:
+            bank.lower_modified()
         
     def get_data(self):
         return struct.pack("<IIIdddd", self.track_id, self.source_id, self.event_id, self.play_at, self.begin_trim_offset, self.end_trim_offset, self.source_duration)
@@ -827,6 +849,8 @@ class WwiseBank(Subscriber):
         
     def add_content(self, content):
         content.subscribers.add(self)
+        if content.track_info is not None:
+            content.track_info.soundbanks.add(self)
         self.content.append(content)
         
     def remove_content(self, content):
@@ -837,6 +861,11 @@ class WwiseBank(Subscriber):
             
         try:
             self.content.remove(content)
+        except:
+            pass
+            
+        try:
+            content.track_info.soundbanks.remove(self)
         except:
             pass
   
@@ -1298,7 +1327,7 @@ class FileReader:
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
                 
-                hirc = HircReader()
+                hirc = HircReader(soundbank=entry)
                 try:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
@@ -1405,18 +1434,19 @@ class FileReader:
         #add track_info to audio sources?
         for bank in self.wwise_banks.values():
             for entry in bank.hierarchy.entries.values():
-                for source in entry.sources:
-                    try:
-                        if source.plugin_id == VORBIS and self.audio_sources[source.source_id] not in bank.get_content(): #may be missing streamed audio if the patch didn't change it
-                            bank.add_content(self.audio_sources[source.source_id])
-                    except:
-                        continue
                 for info in entry.track_info:
                     try:
                         if info.source_id != 0:
                             self.audio_sources[info.source_id].set_track_info(info, notify_subscribers=False, set_modified=False)
                     except:
                         continue
+                for source in entry.sources:
+                    try:
+                        if source.plugin_id == VORBIS and self.audio_sources[source.source_id] not in bank.get_content(): #may be missing streamed audio if the patch didn't change it
+                            bank.add_content(self.audio_sources[source.source_id])
+                    except:
+                        continue
+                
         
     def load_deps(self):
         archive_file = ""
@@ -1502,7 +1532,7 @@ class FileReader:
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
                 
-                hirc = HircReader()
+                hirc = HircReader(soundbank=entry)
                 try:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
@@ -2947,7 +2977,6 @@ class AudioSourceWindow:
         
     def apply_changes(self):
         self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
-        self.audio.modified = True
         self.update_modified()
         
 class MusicSegmentWindow:
@@ -4151,6 +4180,24 @@ class MainWindow:
             self.clear_treeview_background(child)
         bg: Any
         fg: Any
+        
+        for segment in self.file_handler.file_reader.music_segments.values():
+            bg, fg = self.get_colors(modified=segment.modified)
+            self.treeview.tag_configure(segment.get_id(),
+                                        background=bg,
+                                        foreground=fg)
+            if not segment.modified:
+                continue
+
+            items = self.treeview.tag_has(segment.get_id())
+            for item in items:
+                parent = self.treeview.parent(item)
+                while parent != "":
+                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
+                                                background=bg,
+                                                foreground=fg)
+                    parent = self.treeview.parent(parent)
+        
         for audio in self.file_handler.get_audio().values():
             is_modified = audio.modified or audio.get_track_info() is not None \
                     and audio.get_track_info().modified
@@ -4186,6 +4233,7 @@ class MainWindow:
                                                 background=bg,
                                                 foreground=fg)
                     parent = self.treeview.parent(parent)
+                    
         try:
             for string in self.file_handler.get_strings()[language].values():
                 bg, fg = self.get_colors(modified=string.modified)
