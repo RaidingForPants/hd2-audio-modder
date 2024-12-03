@@ -3562,7 +3562,7 @@ class MainWindow:
             dropped_files = event.widget.tk.splitlist(event.data)
             for file in dropped_files:
                 import_files.extend(list_files_recursive(file))
-            self.import_from_workspace(import_files)
+            self.import_files(import_files)
         self.drag_source_widget = None
 
     def drop_add_to_workspace(self, event):
@@ -3758,15 +3758,18 @@ class MainWindow:
                 wems.append(values[0])
         self.workspace_popup_menu.add_command(
             label="Import", 
-            command=lambda: self.import_from_workspace(files=wems)
+            command=lambda: self.import_files(files=wems)
         )
         self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
         self.workspace_popup_menu.grab_release()
         
-    def import_from_workspace(self, files):
+    def import_files(self, files):
         patches = [file for file in files if "patch" in os.path.splitext(file)[1]]
         wems = [file for file in files if os.path.splitext(file)[1] == ".wem"]
         wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
+        
+        # check other file extensions and call vgmstream to convert to wav, then add to wavs list
+        
         for patch in patches:
             self.file_handler.load_patch(patch_file=patch)
         if len(wems) > 0:
