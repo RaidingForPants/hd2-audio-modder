@@ -426,13 +426,13 @@ class AudioSource:
         return self.short_id
         
     def revert_modifications(self, notify_subscribers=True):
+        if self.track_info is not None:
+            self.track_info.revert_modifications()
         if self.modified:
             self.modified = False
             if self.data_OLD != b"":
                 self.data = self.data_OLD
                 self.data_OLD = b""
-            if self.track_info is not None:
-                self.track_info.revert_modifications()
             self.size = len(self.data)
             if notify_subscribers:
                 for item in self.subscribers:
@@ -2947,7 +2947,6 @@ class AudioSourceWindow:
         
     def apply_changes(self):
         self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
-        self.audio.modified = True
         self.update_modified()
         
 class MusicSegmentWindow:
