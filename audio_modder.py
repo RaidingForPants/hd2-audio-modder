@@ -75,8 +75,9 @@ FFMPEG = ""
 VGMSTREAM = ""
 GAME_FILE_LOCATION = ""
 WWISE_CLI = ""
+WWISE_VERSION = ""
 DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
-DEFAULT_CONVERSION_SETTING = "Main"
+DEFAULT_CONVERSION_SETTING = "Vorbis Quality High"
 SYSTEM = ""
 CACHE = os.path.join(DIR, ".cache")
 
@@ -2101,6 +2102,21 @@ class FileHandler:
             return
             
         source_list = self.create_external_sources_list(wavs)
+        
+        try:
+            if SYSTEM in ["Windows", "Darwin"]:
+                subprocess.run([
+                    WWISE_CLI,
+                    "migrate",
+                    DEFAULT_WWISE_PROJECT,
+                    "--quiet",
+                ]).check_returncode()
+            else:
+                showerror(title="Operation Failed",
+                    message="The current operating system does not support this feature yet")
+        except Exception as e:
+            logger.error(e)
+            showerror(title="Error", message="Error occurred during project migration. Please check log.txt.")
         
         convert_dest = os.path.join(CACHE, SYSTEM)
         try:
@@ -4333,6 +4349,14 @@ if __name__ == "__main__":
             WWISE_CLI = os.path.join(p, "Wwise.app/Contents/Tools/WwiseConsole.sh")
         except:
             pass
+    
+    if os.path.exists(WWISE_CLI):
+        if "Wwise2024" in WWISE_CLI:
+            WWISE_VERSION = "2024"
+        elif "Wwise2023" in WWISE_CLI:
+            WWISE_VERSION = "2023"
+    else:
+        WWISE_VERSION = ""
         
     if not os.path.exists(VGMSTREAM):
         logger.error("Cannot find vgmstream distribution! " \
@@ -4344,6 +4368,20 @@ if __name__ == "__main__":
     if not os.path.exists(WWISE_CLI) and SYSTEM != "Linux":
         logger.warning("Wwise installation not found. WAV file import is disabled.")
         showwarning(title="Missing Plugin", message="Wwise installation not found. WAV file import is disabled.")
+    
+    if os.path.exists(WWISE_CLI) and not os.path.exists(DEFAULT_WWISE_PROJECT):
+        process = subprocess.run([
+            WWISE_CLI,
+            "create-new-project",
+            DEFAULT_WWISE_PROJECT,
+            "--platform",
+            "Windows",
+            "--quiet",
+        ])
+        if process.returncode != 0:
+            logger.error("Error creating Wwise project. Audio import restricted to .wem files only")
+            showwarning(title="Wwise Error", message="Error creating Wwise project. Audio import restricted to .wem files only")
+            WWISE_CLI = ""
 
     lookup_store: db.LookupStore | None = None
     
