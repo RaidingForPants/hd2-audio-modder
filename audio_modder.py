@@ -3761,7 +3761,7 @@ class MainWindow:
     def import_audio_files(self):
         
         if os.path.exists(WWISE_CLI):
-            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg")]
+            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
@@ -3773,7 +3773,7 @@ class MainWindow:
         wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
         
         # check other file extensions and call vgmstream to convert to wav, then add to wavs list
-        others = [file for file in files if os.path.splitext(file)[1] in [".mp3", ".ogg"]]
+        others = [file for file in files if os.path.splitext(file)[1] in [".mp3", ".ogg", ".m4a"]]
         temp_files = []
         for file in others:
             process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
