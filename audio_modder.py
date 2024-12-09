@@ -170,7 +170,9 @@ class WorkspaceEventHandler(FileSystemEventHandler):
         for item in self.workspace.get_children():
             child_path = pathlib.Path(self.workspace.item(item, option="values")[0])
             if child_path in path.parents:
-                items.append(self.get_item_by_path_recursion(item, path))
+                i = self.get_item_by_path_recursion(item, path)
+                if i is not None:
+                    items.append(i)
             elif str(child_path) == str(path):
                 items.append(item)
         return items
