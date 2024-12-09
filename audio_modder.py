@@ -75,6 +75,7 @@ FFMPEG = ""
 VGMSTREAM = ""
 GAME_FILE_LOCATION = ""
 WWISE_CLI = ""
+WWISE_VERSION = ""
 DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
 DEFAULT_CONVERSION_SETTING = "Main"
 SYSTEM = ""
@@ -2101,6 +2102,22 @@ class FileHandler:
             return
             
         source_list = self.create_external_sources_list(wavs)
+        
+        if WWISE_VERSION == "2024":
+            try:
+                if SYSTEM in ["Windows", "Darwin"]:
+                    subprocess.run([
+                        WWISE_CLI,
+                        "migrate",
+                        DEFAULT_WWISE_PROJECT,
+                        "--quiet",
+                    ]).check_returncode()
+                else:
+                    showerror(title="Operation Failed",
+                        message="The current operating system does not support this feature yet")
+            except Exception as e:
+                logger.error(e)
+                showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
         
         convert_dest = os.path.join(CACHE, SYSTEM)
         try:
@@ -4333,6 +4350,14 @@ if __name__ == "__main__":
             WWISE_CLI = os.path.join(p, "Wwise.app/Contents/Tools/WwiseConsole.sh")
         except:
             pass
+    
+    if os.path.exists(WWISE_CLI):
+        if "Wwise2024" in WWISE_CLI:
+            WWISE_VERSION = "2024"
+        elif "Wwise2023" in WWISE_CLI:
+            WWISE_VERSION = "2023"
+    else:
+        WWISE_VERSION = ""
         
     if not os.path.exists(VGMSTREAM):
         logger.error("Cannot find vgmstream distribution! " \
