@@ -2097,7 +2097,7 @@ class FileHandler:
         
     def load_wavs(self, wavs: list[str] | None = None):
         if wavs == None:
-            wavs = filedialog.askopenfilenames(title="Choose .wem files to import")
+            wavs = filedialog.askopenfilenames(title="Choose .wav files to import")
         if wavs == "":
             return
             
@@ -3493,14 +3493,9 @@ class MainWindow:
             command=self.load_patch
         )
         self.import_menu.add_command(
-            label="Import .wems",
-            command=self.load_wems
+            label="Import Audio Files",
+            command=self.import_audio_files
         )
-        if os.path.exists(WWISE_CLI):
-            self.import_menu.add_command(
-                label="Import .wavs",
-                command=self.load_wavs
-            )
         self.import_menu.add_command(
             label="Import using spec.json (.wem)",
             command=lambda: self.file_handler.load_wems_spec() or 
@@ -3578,7 +3573,7 @@ class MainWindow:
             dropped_files = event.widget.tk.splitlist(event.data)
             for file in dropped_files:
                 import_files.extend(list_files_recursive(file))
-            self.import_from_workspace(import_files)
+            self.import_files(import_files)
         self.drag_source_widget = None
 
     def drop_add_to_workspace(self, event):
@@ -3774,15 +3769,36 @@ class MainWindow:
                 wems.append(values[0])
         self.workspace_popup_menu.add_command(
             label="Import", 
-            command=lambda: self.import_from_workspace(files=wems)
+            command=lambda: self.import_files(files=wems)
         )
         self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
         self.workspace_popup_menu.grab_release()
         
-    def import_from_workspace(self, files):
+    def import_audio_files(self):
+        
+        if os.path.exists(WWISE_CLI):
+            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
+        else:
+            available_filetypes = [("Wwise Vorbis", "*.wem")]
+        files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
+        self.import_files(files)
+        
+    def import_files(self, files):
         patches = [file for file in files if "patch" in os.path.splitext(file)[1]]
         wems = [file for file in files if os.path.splitext(file)[1] == ".wem"]
         wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
+        
+        # check other file extensions and call vgmstream to convert to wav, then add to wavs list
+        others = [file for file in files if os.path.splitext(file)[1] in [".mp3", ".ogg", ".m4a"]]
+        temp_files = []
+        for file in others:
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
+            if process.returncode != 0:
+                logger.error(f"Encountered error when importing {os.path.basename(file)}")
+            else:
+                wavs.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
+                temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
+        
         for patch in patches:
             self.file_handler.load_patch(patch_file=patch)
         if len(wems) > 0:
@@ -3792,6 +3808,11 @@ class MainWindow:
         if len(wems) == 0 and len(wavs) == 0:
             self.check_modified()
         self.show_info_window()
+        for file in temp_files:
+            try:
+                os.remove(file)
+            except:
+                pass
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
