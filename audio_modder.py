@@ -4376,7 +4376,7 @@ if __name__ == "__main__":
             DEFAULT_WWISE_PROJECT,
             "--platform",
             "Windows",
-            "--verbose",
+            "--quiet",
         ])
         if process.returncode != 0:
             logger.error("Error creating Wwise project. Audio import restricted to .wem files only")
