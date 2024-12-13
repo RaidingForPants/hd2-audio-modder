@@ -39,3 +39,17 @@ def traverse(node):
         for node in top.nodes:
             if node.isdir:
                 stack.append(node)
+
+
+def list_files_recursive(path="."):
+    files = []
+    if os.path.isfile(path):
+        return [path]
+    else:
+        for entry in os.listdir(path):
+            full_path = os.path.join(path, entry)
+            if os.path.isdir(full_path):
+                files.extend(list_files_recursive(full_path))
+            else:
+                files.append(full_path)
+        return files
