@@ -424,7 +424,7 @@ class HircEntry:
         self.size = self.hierarchy_type = self.hierarchy_id = 0
         self.misc: Literal[b""] | bytearray = b""
         self.sources: list[BankSourceStruct] = []
-        self.track_info = []
+        self.track_info: list[TrackInfoStruct] = []
         self.soundbank: WwiseBank | None = None
     
     @classmethod
@@ -440,9 +440,16 @@ class HircEntry:
         return self.hierarchy_id
         
     def raise_modified(self):
+        if self.soundbank == None:
+            raise RuntimeError(f"The Wwise Soundbank of Hirc entry {self.get_id()}"
+                               "is None. Aborting.")
+
         self.soundbank.raise_modified()
         
     def lower_modified(self):
+        if self.soundbank == None:
+            raise RuntimeError(f"The Wwise Soundbank of Hirc entry {self.get_id()}"
+                               "is None. Aborting.")
         self.soundbank.lower_modified()
         
     def get_data(self):
@@ -682,11 +689,18 @@ class MusicSegment(HircEntry):
             entry.markers.append(marker)
             if i == 0:
                 entry.entry_marker = marker
-            elif i == n-1:
+            elif i == n - 1:
                 entry.exit_marker = marker
         return entry
         
     def set_data(self, duration=None, entry_marker=None, exit_marker=None):
+        if self.entry_marker == None:
+            raise RuntimeError(f"Music segement {self.get_id()} is missing entry"
+                               " marker.")
+        if self.exit_marker == None:
+            raise RuntimeError(f"Music segment {self.get_id()} is missing exit"
+                               " marker.")
+        
         if not self.modified:
             self.duration_old = self.duration
             self.entry_marker_old = self.entry_marker[1]
@@ -698,12 +712,21 @@ class MusicSegment(HircEntry):
         self.modified = True
         
     def revert_modifications(self):
-        if self.modified:
-            self.lower_modified()
-            self.entry_marker[1] = self.entry_marker_old
-            self.exit_marker[1] = self.exit_marker_old
-            self.duration = self.duration_old
-            self.modified = False
+        if not self.modified:
+            return
+        self.lower_modified()
+        
+        if self.entry_marker == None:
+            raise RuntimeError(f"Music segement {self.get_id()} is missing entry"
+                               " marker.")
+        if self.exit_marker == None:
+            raise RuntimeError(f"Music segment {self.get_id()} is missing exit"
+                               " marker.")
+
+        self.entry_marker[1] = self.entry_marker_old
+        self.exit_marker[1] = self.exit_marker_old
+        self.duration = self.duration_old
+        self.modified = False
         
     def get_data(self):
         return (
