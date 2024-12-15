@@ -582,41 +582,35 @@ class RandomSequenceContainer(HircEntry):
         entry.size = stream.uint32_read()
         start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
+        section_start = stream.tell()
         stream.read(1)
         n = stream.uint8_read() #num fx
         stream.seek(stream.tell()-2)
         if n == 0:
-            entry.unused_sections.append(stream.read(14))
+            stream.read(14)
         else:
-            entry.unused_sections.append(stream.read(7*n + 15))
+            stream.read(7*n + 15)
         n = stream.uint8_read() #number of props
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1))
+        stream.read(5*n)
         n = stream.uint8_read() #number of props (again)
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(9*n + 1))
+        stream.read(9*n)
         positioning = stream.uint8_read()
         section_length = 0
         if positioning & 1:
-            section_length = 2
             t = stream.uint8_read()
         else:
             t = 0
-            section_length = 1
         if t & 64:
-            section_length += 9
             stream.read(5)
             n = stream.uint32_read()
-            section_length += 16*n+4
+            stream.read(16*n)
             n = stream.uint32_read()
-            section_length += 20*n
+            stream.read(20*n)
         bit_vector = stream.uint8_read()
-        stream.seek(stream.tell()-(1+section_length))
         if bit_vector & 8:
-            entry.unused_sections.append(stream.read(27 + section_length))
+            stream.read(26)
         else:
-            entry.unused_sections.append(stream.read(11 + section_length))
-        state_chunk_start = stream.tell()
+           stream.read(10)
         n = stream.uint8_read() #num state props
         stream.read(n*3)
         n = stream.uint8_read() #num state groups
@@ -624,16 +618,15 @@ class RandomSequenceContainer(HircEntry):
             stream.read(5)
             num_states = stream.uint8_read()
             stream.read(8*num_states)
-        rtpc_start = stream.tell()
         n = stream.uint16_read() # num RTPC
         for _ in range(n):
             stream.read(12)
             rtpc_size = stream.uint16_read()
             stream.read(rtpc_size*12)
         rtpc_end = stream.tell()
-        stream.seek(state_chunk_start)
-        entry.unused_sections.append(stream.read(rtpc_end-state_chunk_start))
-        entry.unused_sections.append(stream.read(24))
+        stream.seek(section_start)
+        entry.unused_sections.append(stream.read(rtpc_end-section_start+24))
+        #entry.unused_sections.append(stream.read(24))
         n = stream.uint32_read() #number of children (tracks)
         for _ in range(n):
             entry.contents.append(stream.uint32_read())
@@ -645,14 +638,9 @@ class RandomSequenceContainer(HircEntry):
             b"".join([
                 struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
                 self.unused_sections[0],
-                self.unused_sections[1],
-                self.unused_sections[2],
-                self.unused_sections[3],
-                self.unused_sections[4],
-                self.unused_sections[5],
                 len(self.contents).to_bytes(4, byteorder="little"),
                 b"".join([x.to_bytes(4, byteorder="little") for x in self.contents]),
-                self.unused_sections[6]
+                self.unused_sections[1]
             ])
         )
     
