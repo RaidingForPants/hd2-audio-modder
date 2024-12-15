@@ -9,6 +9,8 @@ from tkinter import Frame, Menu, PanedWindow, StringVar
 from tkinter import BOTH, END, HORIZONTAL, VERTICAL
 from tkinter import filedialog
 from tkinter import ttk
+from tkinter import simpledialog
+from tkinter.messagebox import showerror, showwarning
 from tkinterdnd2 import TkinterDnD
 from tkinterdnd2 import ASK, COPY, DND_FILES
 from typing import Any, Union
@@ -21,7 +23,7 @@ import fileutil
 from const_global import language, language_lookup, LANGUAGE_MAPPING
 from const_global import CACHE, GAME_FILE_LOCATION, VGMSTREAM, WWISE_CLI, VORBIS
 
-from game_asset_entity import AudioSource, MusicSegment, MusicTrack, StringEntry, \
+from game_asset_entity import AudioSource, HircEntry, MusicSegment, MusicTrack, StringEntry, \
         Sound, TextBank, TrackInfoStruct, WwiseBank
 from fileutil import list_files_recursive
 from log import logger
@@ -54,15 +56,18 @@ class MainWindow:
     ENTRY_TYPE_MUSIC_SEGMENT = "Music Segment"
     ENTRY_TYPE_MUSIC_TRACK = "Music Track"
     ENTRY_TYPE_SOUND_BANK = "Sound Bank"
+    ENTRY_TYPE_SEPARATOR = "Separator"
     ENTRY_TYPE_STRING = "String"
     ENTRY_TYPE_TEXT_BANK = "Text Bank"
     ENTRY_TYPE_UNKNONW = "Unknonw"
 
     type TreeViewEntry = Union[
         AudioSource,
+        HircEntry,
         MusicSegment,
         MusicTrack,
         StringEntry,
+        cfg.Separator,
         TextBank,
         TrackInfoStruct,
         WwiseBank
@@ -168,7 +173,6 @@ class MainWindow:
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
         self.right_click_menu = Menu(self.treeview, tearoff=0)
-        self.right_click_id = 0
 
         self.menu = Menu(self.root, tearoff=0)
         
@@ -285,6 +289,7 @@ class MainWindow:
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
 
         self.root.resizable(True, True)
+        self.root.after(100, self.load_most_recent_archive)
         self.root.mainloop()
 
     def workspace_drag_assist(self, event):
@@ -610,54 +615,97 @@ class MainWindow:
         self.archive_search.focus_set()
         self.category_search.selection_clear()
 
+    def _treeview_menu_enable(self, selects: tuple[str, ...]):
+        is_single = len(selects) == 1
+        can_sep = True
+        is_sep = False
+        add_audio = True
+
+        if is_single:
+            values = self.treeview.item(selects[0], option="values")
+            if len(values) <= 0:
+                raise RuntimeError("A treeview entry with zero value")
+            is_sep = values[0] == MainWindow.ENTRY_TYPE_SEPARATOR
+
+        parent_view_id = self.treeview.parent(selects[0])
+        for select in selects:
+            values = self.treeview.item(select, option="values")
+            if values[0] != MainWindow.ENTRY_TYPE_AUDIO_SOURCE:
+                add_audio = False
+            if parent_view_id != self.treeview.parent(select) or \
+               values[0] == MainWindow.ENTRY_TYPE_SOUND_BANK or \
+               values[0] == MainWindow.ENTRY_TYPE_TEXT_BANK:
+                can_sep = False
+            if not add_audio and not can_sep:
+                break
+                
+        return (is_single, can_sep, is_sep, add_audio)
+
+    def _treeview_menu_add_audio_export(self, is_single_select: bool):
+        self.right_click_menu.add_command(
+            label=("Dump As .wem" if is_single_select 
+                                  else "Dump Selected As .wem"),
+            command=self.dump_as_wem
+        )
+        if os.path.exists(VGMSTREAM):
+            self.right_click_menu.add_command(
+                label=("Dump As .wav" if is_single_select 
+                                      else "Dump Selected As .wav"),
+                command=self.dump_as_wav,
+            )
+            self.right_click_menu.add_command(
+                label="Dump As .wav with Sequence Number",
+                command=lambda: self.dump_as_wav(with_seq=True)
+            )
+        self.right_click_menu.add_command(
+            label="Dump muted .wav with same ID",
+            command=lambda: self.dump_as_wav(muted=True)
+        )
+        self.right_click_menu.add_command(
+            label="Dump muted .wav with same ID and sequence number",
+            command=lambda: self.dump_as_wav(muted=True, with_seq=True)
+        )
+
+    """
+    Enable conditions for each option
+    - "Copy File ID(s)"
+        - Not a Soundbank
+    - "Delete Separator" / "Rename Separator"
+        - single entry is selected
+        - select entry is a separator
+    - "Dump As .wem" / "Dump As .wav (with ...)"
+        - All selection must be audio source
+    """
     def treeview_on_right_click(self, event):
         try:
             self.right_click_menu.delete(0, "end")
 
             selects = self.treeview.selection()
-            is_single = len(selects) == 1
-
-            all_audio = True
-            for select in selects:
-                values = self.treeview.item(select, option="values")
-                assert(len(values) == 1)
-                if values[0] != MainWindow.ENTRY_TYPE_AUDIO_SOURCE:
-                    all_audio = False
-                    break
+            enable = self._treeview_menu_enable(selects)
 
             self.right_click_menu.add_command(
-                label=("Copy File ID" if is_single else "Copy File IDs"),
+                label=("Copy File ID" if enable[0] else "Copy File IDs"),
                 command=self.copy_id
             )
 
-            if not all_audio:
-                return
+            if enable[1]:
+                self.right_click_menu.add_command(
+                    label=("Create Separator"),
+                    command=lambda: self.create_separator(selects)
+                )
 
-            tags = self.treeview.item(selects[-1], option="tags")
-            assert(len(tags) == 1)
-            self.right_click_id = int(tags[0])
-            
-            self.right_click_menu.add_command(
-                label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
-                command=self.dump_as_wem
-            )
-            if os.path.exists(VGMSTREAM):
+            if enable[2]:
                 self.right_click_menu.add_command(
-                    label=("Dump As .wav" if is_single else "Dump Selected As .wav"),
-                    command=self.dump_as_wav,
+                    label=("Rename Separator"),
+                    command=lambda: self.rename_separator(selects[0])
                 )
                 self.right_click_menu.add_command(
-                    label="Dump As .wav with Sequence Number",
-                    command=lambda: self.dump_as_wav(with_seq=True)
+                    label=("Delete Separator"),
+                    command=lambda: self.delete_separator(selects[0])
                 )
-            self.right_click_menu.add_command(
-                label="Dump muted .wav with same ID",
-                command=lambda: self.dump_as_wav(muted=True)
-            )
-            self.right_click_menu.add_command(
-                label="Dump muted .wav with same ID and sequence number",
-                command=lambda: self.dump_as_wav(muted=True, with_seq=True)
-            )
+
+            enable[3] and self._treeview_menu_add_audio_export(enable[0]) # type: ignore
+
             self.right_click_menu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
             pass
@@ -671,7 +719,6 @@ class MainWindow:
         for select in selects:
             values = self.treeview.item(select, option="values")
             tags = self.treeview.item(select, option="tags")
-            assert(len(values) == 1 and len(tags) == 1)
             if values[0] != MainWindow.ENTRY_TYPE_AUDIO_SOURCE:
                 continue
             self.play_audio(int(tags[0]))
@@ -688,6 +735,13 @@ class MainWindow:
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
                 self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
+
+    def load_most_recent_archive(self):
+        if len(self.app_state.recent_files) == 0:
+            return
+        if not os.path.exists(self.app_state.recent_files[-1]):
+            return
+        self.load_archive(archive_file=self.app_state.recent_files[-1])
 
     def set_language(self):
         global language
@@ -723,56 +777,170 @@ class MainWindow:
 
         selected = self.treeview.selection()[0]
 
-        selected_type = self.treeview.item(selected, option="values")[0]
-        selected_id = int(self.treeview.item(selected, option="tags")[0])
+        values = self.treeview.item(selected, option="values")[0]
+        if len(values) <= 0:
+            raise RuntimeError("A tree entry with no value")
+        selected_type = values[0]
+
+        tags = self.treeview.item(selected, option="tags")
+        if len(tags) <= 0:
+            raise RuntimeError("A tree entry with no tags")
+        selected_id = tags[0]
+
         for child in self.entry_info_panel.winfo_children():
             child.forget()
         if selected_type == MainWindow.ENTRY_TYPE_STRING:
-            self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(selected_id))
+            self.string_info_panel.set_string_entry(
+                self.file_handler.get_string_by_id(int(selected_id))
+            )
             self.string_info_panel.frame.pack()
         elif selected_type == MainWindow.ENTRY_TYPE_AUDIO_SOURCE:
-            self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(selected_id))
+            self.audio_info_panel.set_audio(
+                self.file_handler.get_audio_by_id(int(selected_id))
+            )
             self.audio_info_panel.frame.pack()
         elif selected_type == MainWindow.ENTRY_TYPE_EVENT:
-            self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(selected_id))
+            self.event_info_panel.set_track_info(
+                self.file_handler.get_event_by_id(selected_id)
+            )
             self.event_info_panel.frame.pack()
         elif selected_type == MainWindow.ENTRY_TYPE_MUSIC_SEGMENT:
-            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(selected_id))
+            self.segment_info_panel.set_segment_info(
+                self.file_handler.get_music_segment_by_id(selected_id)
+            )
             self.segment_info_panel.frame.pack()
         elif selected_type == MainWindow.ENTRY_TYPE_SOUND_BANK:
             pass
         elif selected_type == MainWindow.ENTRY_TYPE_TEXT_BANK:
             pass
+        elif selected_type == MainWindow.ENTRY_TYPE_SEPARATOR:
+            pass
 
     def copy_id(self):
         self.root.clipboard_clear()
-        self.root.clipboard_append("\n".join([self.treeview.item(i, option="tags")[0] for i in self.treeview.selection()]))
+
+        stack: list[tuple[int, str]] = []
+        tab: int = 0
+        content = []
+        for select in self.treeview.selection():
+            stack.clear()
+            tab = 0
+            stack = [(tab, select)]
+            while len(stack) > 0:
+                top = stack.pop()
+
+                for child in self.treeview.get_children(top[1]):
+                    stack.append((top[0] + 1, child))
+
+                values = self.treeview.item(top[1], option="values")
+                if len(values) <= 0:
+                    raise RuntimeError("A tree view entry without values")
+                etype = values[0]
+
+                text = self.treeview.item(top[1], option="text").replace("\x00", "")
+                tabs = "".join([" " for _ in range(top[0] * 4)])
+
+                match etype:
+                    case MainWindow.ENTRY_TYPE_SEPARATOR:
+                        text = tabs + text
+                    case MainWindow.ENTRY_TYPE_SOUND_BANK | MainWindow.ENTRY_TYPE_TEXT_BANK:
+                        tags = self.treeview.item(top[1], option="tags")
+                        if len(tags) <= 0:
+                            raise RuntimeError("A tree view entry wihtout tags")
+                        text = f"{tabs}{text}: {tags[0]}"
+                    case _:
+                        tags = self.treeview.item(top[1], option="tags")
+                        if len(tags) <= 0:
+                            raise RuntimeError("A tree view entry wihtout tags")
+                        text = f"{tabs}{str(tags[0])}"
+
+                content.append(text)
+
+        self.root.clipboard_append("\n".join(content))
         self.root.update()
 
     def dump_as_wem(self):
-        if len(self.treeview.selection()) == 1:
-            self.file_handler.dump_as_wem(self.right_click_id)
-        else:
-            self.file_handler.dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()])
+        selects = self.treeview.selection()
+        if len(selects) == 1:
+            tags = self.treeview.item(selects[0], option="tags")
+            if len(tags) <= 0:
+                raise RuntimeError("A tree view entry without tags") 
+            # TODO: include validation to make sure this is playable media
+            if not tags[0].isdigit():
+                raise RuntimeError("Selected treeview entry does not contain a "
+                                   "numeric tag")
+            self.file_handler.dump_as_wem(int(tags[0]))
+            return
+        
+        ids: list[int] = []
+        for select in selects:
+            tags = self.treeview.item(select, option="tags")
+            if len(tags) <= 0:
+                raise RuntimeError("A tree view entry without tags") 
+
+            # TODO: include validation to make sure this is playable media
+            if not tags[0].isdigit():
+                raise RuntimeError("Selected treeview entry does not contain a "
+                                   "numeric tag")
+            ids.append(int(tags[0]))
+
+        self.file_handler.dump_multiple_as_wem(ids)
 
     def dump_as_wav(self, muted: bool = False, with_seq: bool = False):
-        if len(self.treeview.selection()) == 1:
-            self.file_handler.dump_as_wav(self.right_click_id, muted=muted)
-            return
-        self.file_handler.dump_multiple_as_wav(
-            [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
-            muted=muted,
-            with_seq=with_seq
-        )
+        selects = self.treeview.selection()
+        if len(selects) == 1:
+            tags = self.treeview.item(selects[0], option="tags")
 
+            if len(tags) <= 0:
+                raise RuntimeError("A tree view entry without tags") 
+
+            # TODO: include validation to make sure this is playable media
+            if not tags[0].isdigit():
+                raise RuntimeError("Selected treeview entry does not contain a "
+                                   "numeric tag")
+
+            self.file_handler.dump_as_wav(int(tags[0]), muted=muted)
+            return
+
+        ids: list[int] = []
+        for select in selects:
+            tags = self.treeview.item(select, option="tags")
+            if len(tags) <= 0:
+                raise RuntimeError("A tree view entry without tags") 
+
+            # TODO: include validation to make sure this is playable media
+            if not tags[0].isdigit():
+                raise RuntimeError("Selected treeview entry does not contain a "
+                                   "numeric tag")
+            ids.append(int(tags[0]))
+
+        self.file_handler.dump_multiple_as_wav(ids, muted=muted, with_seq=with_seq)
+
+    """
+    Each entry has the following properties
+        - tags
+            - index 0 -> Soundbank object id
+                - For audio source, it's Wwise short ID
+        - values
+            - index 0 -> Type of treeview entry
+    """
     def create_treeview_entry(
             self, entry: TreeViewEntry | None, 
-            parentItem: str = ""):
+            parent_view_id: str = ""):
         if entry is None:
             return ""
 
+        if isinstance(entry, cfg.Separator):
+            return self.treeview.insert(parent_view_id, 0, 
+                                        text=entry.label,
+                                        values=(MainWindow.ENTRY_TYPE_SEPARATOR,),
+                                        tags=(entry.uid,))
+
         tree_entry = self.treeview.insert(
-            parentItem, END, tags=str(entry.get_id()))
+            parent_view_id, END, tags=str(entry.get_id()))
+
+        name = "Unknown entry"
+        entry_type = MainWindow.ENTRY_TYPE_UNKNONW
 
         if isinstance(entry, AudioSource):
             entry_type = MainWindow.ENTRY_TYPE_AUDIO_SOURCE 
@@ -812,49 +980,173 @@ class MainWindow:
     def create_hierarchy_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
-        bank_dict = self.file_handler.get_wwise_banks()
-        for bank in bank_dict.values():
+
+        active_archive = self.file_handler.file_reader.path
+        banks = self.file_handler.get_wwise_banks()
+        for bank in banks.values():
             bank_entry = self.create_treeview_entry(bank)
+
+            if bank.hierarchy == None:
+                raise RuntimeError(f"Wwise Soundbank {bank.get_id} in {active_archive}"
+                                   "is missing hirearchy data.")
+
             for hierarchy_entry in bank.hierarchy.entries.values():
-                if not isinstance(hierarchy_entry, MusicSegment):
-                    segment_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
+                if isinstance(hierarchy_entry, MusicSegment):
+                    segment_entry = self.create_treeview_entry(hierarchy_entry, 
+                                                               bank_entry)
                     for track_id in hierarchy_entry.tracks:
                         track = bank.hierarchy.entries[track_id]
                         track_entry = self.create_treeview_entry(track, segment_entry)
+
                         for source in track.sources:
-                            if source.plugin_id == VORBIS:
-                                self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), track_entry)
+                            if source.plugin_id != VORBIS:
+                                continue
+                            self.create_treeview_entry(
+                                self.file_handler
+                                    .get_audio_by_id(source.source_id), track_entry)
+
                         for info in track.track_info:
-                            if info.event_id != 0:
-                                self.create_treeview_entry(info, track_entry)
-                if isinstance(hierarchy_entry, Sound):
-                    if not hierarchy_entry.sources[0].plugin_id == VORBIS:
-                        self.create_treeview_entry(self.file_handler.get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
+                            if info.event_id == 0:
+                                continue
+                            self.create_treeview_entry(info, track_entry)
+                elif isinstance(hierarchy_entry, Sound):
+                    if hierarchy_entry.sources[0].plugin_id != VORBIS:
+                        continue
+                    self.create_treeview_entry(
+                        self.file_handler
+                            .get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
+
         for entry in self.file_handler.file_reader.text_banks.values():
-            if entry.language == language:
-                e = self.create_treeview_entry(entry)
-                for string_id in entry.string_ids:
-                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+            if entry.language != language:
+                continue
+            e = self.create_treeview_entry(entry)
+            for string_id in entry.string_ids:
+                self.create_treeview_entry(self.file_handler
+                                               .file_reader
+                                               .string_entries[language][string_id], e)
+
+        """
+        Since the concept of separator is foregin to Wwise Soundbank, children 
+        of separators is much easier to arranage after all entries in the Wwise 
+        Soundbank are layout.
+        """
+        if active_archive not in self.app_state.separators_db.archive_namespace:
+            self.check_modified()
+            return
+
+        seps = self.app_state.separators_db.separators
+        active_sep_uids = self.app_state \
+                              .separators_db \
+                              .archive_namespace[active_archive]
+        sep_entries: dict[str, str] = {}
+        """
+        Layout all separators first since separators can be nested
+        """
+        for uid in active_sep_uids:
+            if uid not in seps:
+                logger.warning(f"Separator UID {uid} has no actual separator")
+                self.app_state.remove_separator(uid)
+                continue
+            sep_entries[uid] = self.create_treeview_entry(seps[uid], "")
+
+        """
+        Rearrange items for separators. The current implementation will cause 
+        all separators appear in the beginning of its parent. It can be either 
+        good or bad. (Good is that organize items are all in the front. Bad is 
+        that items will be out of order than the usual arrangement.)
+        """
+        for uid, sep_entry in sep_entries.items():
+            parent_entry_id = seps[uid].parent_entry_id
+            if parent_entry_id != "":
+                parent_view_id = self.treeview.tag_has(parent_entry_id)
+                if len(parent_view_id) == 0:
+                    raise RuntimeError(f"No treeview entry has tag {parent_entry_id}.")
+                if len(parent_view_id) > 1:
+                    raise RuntimeError(f"Tag {parent_entry_id} is not unique.")
+                self.treeview.detach(sep_entry)
+                self.treeview.move(sep_entry, parent_view_id[0], 0)
+            for entry_id in seps[uid].entry_ids:
+                children_view_id = self.treeview.tag_has(entry_id)
+                if len(children_view_id) == 0:
+                    raise RuntimeError(f"No treeview entry has tag {entry_id}.")
+                if len(children_view_id) > 1:
+                    raise RuntimeError(f"Tag {entry_id} is not unique.")
+                self.treeview.detach(children_view_id[0])
+                self.treeview.move(children_view_id[0], sep_entry, 0)
+
         self.check_modified()
                 
     def create_source_view(self):
         self.clear_search()
-        existing_sources = set()
         self.treeview.delete(*self.treeview.get_children())
-        bank_dict = self.file_handler.get_wwise_banks()
-        for bank in bank_dict.values():
+
+        existing_sources = set()
+        banks = self.file_handler.get_wwise_banks()
+        active_archive = self.file_handler.file_reader.path
+        for bank in banks.values():
+            if bank.hierarchy == None:
+                raise RuntimeError(f"Wwise Soundbank {bank.get_id()} in {active_archive}"
+                                   " is missing hierarchy data")
+
             existing_sources.clear()
             bank_entry = self.create_treeview_entry(bank)
+
             for hierarchy_entry in bank.hierarchy.entries.values():
                 for source in hierarchy_entry.sources:
-                    if source.plugin_id == VORBIS and source.source_id not in existing_sources:
-                        existing_sources.add(source.source_id)
-                        self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), bank_entry)
+                    if source.plugin_id != VORBIS or \
+                       source.source_id in existing_sources:
+                           continue
+                    existing_sources.add(source.source_id)
+
+                    self.create_treeview_entry(
+                        self.file_handler
+                            .get_audio_by_id(source.source_id), bank_entry)
+
         for entry in self.file_handler.file_reader.text_banks.values():
-            if entry.language == language:
-                e = self.create_treeview_entry(entry)
-                for string_id in entry.string_ids:
-                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+            if entry.language != language:
+                continue
+            e = self.create_treeview_entry(entry)
+            for string_id in entry.string_ids:
+                self.create_treeview_entry(
+                    self.file_handler
+                        .file_reader
+                        .string_entries[language][string_id], e)
+
+        if active_archive not in self.app_state.separators_db.archive_namespace:
+            self.check_modified()
+            return
+
+        seps = self.app_state.separators_db.separators
+        active_sep_uids = self.app_state \
+                              .separators_db \
+                              .archive_namespace[active_archive]
+        sep_entries: dict[str, str] = {}
+        for uid in active_sep_uids:
+            if uid not in seps:
+                logger.warning(f"Separator UID {uid} has no actual separator")
+                self.app_state.remove_separator(uid)
+                continue
+            sep_entries[uid] = self.create_treeview_entry(seps[uid], "")
+
+        for uid, sep_entry in sep_entries.items():
+            parent_entry_id = seps[uid].parent_entry_id
+            if parent_entry_id != "":
+                parent_view_id = self.treeview.tag_has(parent_entry_id)
+                if len(parent_view_id) == 0:
+                    raise RuntimeError(f"No treeview entry has tag {parent_entry_id}.")
+                if len(parent_view_id) > 1:
+                    raise RuntimeError(f"Tag {parent_entry_id} is not unique.")
+                self.treeview.detach(sep_entry)
+                self.treeview.move(sep_entry, parent_view_id[0], 0)
+            for entry_id in seps[uid].entry_ids:
+                children_view_id = self.treeview.tag_has(entry_id)
+                if len(children_view_id) == 0:
+                    raise RuntimeError(f"No treeview entry has tag {entry_id}.")
+                if len(children_view_id) > 1:
+                    raise RuntimeError(f"Tag {entry_id} is not unique.")
+                self.treeview.detach(children_view_id[0])
+                self.treeview.move(children_view_id[0], sep_entry, 0)
+
         self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
@@ -918,9 +1210,12 @@ class MainWindow:
                     self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
             self.selected_language.set(first)
 
-    def load_archive(self, initialdir: str | None = '', archive_file: str | None = None):
+    def load_archive(self, 
+                     initialdir: str | None = '', 
+                     archive_file: str | None = None):
         self.sound_handler.kill_sound()
-        if self.file_handler.load_archive_file(initialdir=initialdir, archive_file=archive_file):
+        if self.file_handler.load_archive_file(initialdir=initialdir, 
+                                               archive_file=archive_file):
             self.clear_search()
             self.update_language_menu()
             self.update_recent_files(filepath=self.file_handler.file_reader.path)
@@ -1033,6 +1328,104 @@ class MainWindow:
         self.file_handler.load_wems(wems=wems)
         self.check_modified()
         self.show_info_window()
+
+    """
+    Assumption
+    - A separator can include any entry type as its children except Soundbank and Textbank
+    - A separator cannot be a top level root
+    - All entries inside a separator must have the same parent / root.
+
+    Potential side effects
+    - A new entry will be created in the treeview with type Separator.
+    - Entries in a separator might be re-arrange from its original position to 
+    the position under that separator.
+    - Nested treeview structure can occur if some entries in a separator are 
+    sub tree views.
+    """
+    def create_separator(self, selects: tuple[str, ...]):
+        if len(selects) == 0:
+            raise RuntimeError("Creating separator but there are zero audio "
+                               "sources selected")
+
+        parent_view_id = self.treeview.parent(selects[0])
+        first_select_idx = self.treeview.index(selects[0])
+
+        entry_ids: list[str] = []
+        for select in selects:
+            diff = self.treeview.parent(selects[0])
+            if parent_view_id != diff:
+                showwarning("Creating separator for entries with different parent"
+                            " is not allowed")
+                return
+
+            tags = self.treeview.item(select, option="tags")
+
+            # invariant checking
+            if len(tags) <= 0: 
+                raise RuntimeError("A treeview entry without tags")
+
+            entry_ids.append(tags[0])
+
+        label = simpledialog.askstring("Create new separator",
+                                       "Enter name of the new separator")
+        if label == None:
+            return
+
+        parent_entry_tags = self.treeview.item(parent_view_id, option="tags")
+        # invariant checking
+        if len(parent_entry_tags) <= 0:
+            raise RuntimeError("A treeview entry without tags")
+
+        sep_uid = self.app_state.add_separator(
+            label,
+            self.file_handler.file_reader.path,
+            parent_entry_tags[0],
+            entry_ids
+        )
+        if sep_uid == "":
+            showerror("Failed to create new separator")
+
+        sep_view_id = self.treeview.insert(
+            parent_view_id, 
+            first_select_idx, 
+            text=label,
+            tags=sep_uid,
+            values=(MainWindow.ENTRY_TYPE_SEPARATOR,))
+
+        for select in selects:
+            self.treeview.detach(select)
+            self.treeview.move(select, sep_view_id, len(selects))
+
+    def delete_separator(self, sep_view_id: str):
+        tags = self.treeview.item(sep_view_id, option="tags")
+        if len(tags) <= 0:
+            raise RuntimeError("A treeview entry without tags")
+
+        idx = self.treeview.index(sep_view_id)
+        children = self.treeview.get_children(sep_view_id)
+        parent_view_id = self.treeview.parent(sep_view_id)
+
+        self.app_state.remove_separator(tags[0])
+
+        for child in children:
+            self.treeview.detach(child)
+            self.treeview.move(child, parent_view_id, idx)
+            idx += 1
+
+        self.treeview.delete(sep_view_id)
+
+    def rename_separator(self, sep_view_id: str):
+        tags = self.treeview.item(sep_view_id, option="tags")
+        if len(tags) <= 0:
+            raise RuntimeError("A treeview entry without tags")
+
+        label = simpledialog.askstring("Rename Separator",
+                                       "Enter a new name of this separator")
+        if label == None:
+            return
+
+        self.app_state.rename_separator(tags[0], label)
+        self.treeview.item(sep_view_id, text=label)
         
     def load_wavs(self, wavs: list[str] | None = None):
         self.sound_handler.kill_sound()
