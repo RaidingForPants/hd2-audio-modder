@@ -777,7 +777,7 @@ class MainWindow:
 
         selected = self.treeview.selection()[0]
 
-        values = self.treeview.item(selected, option="values")[0]
+        values = self.treeview.item(selected, option="values")
         if len(values) <= 0:
             raise RuntimeError("A tree entry with no value")
         selected_type = values[0]
