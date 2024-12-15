@@ -594,13 +594,36 @@ class RandomSequenceContainer(HircEntry):
         entry.unused_sections.append(stream.read(5*n + 1))
         n = stream.uint8_read() #number of props (again)
         stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(9*n + 2))
-        bit_vector = stream.uint8_read()
-        stream.seek(stream.tell()-1)
-        if bit_vector & 8:
-            entry.unused_sections.append(stream.read(29))
+        entry.unused_sections.append(stream.read(9*n + 1))
+        positioning = stream.uint8_read()
+        section_length = 0
+        if positioning & 1:
+            section_length = 2
+            t = stream.uint8_read()
         else:
-            entry.unused_sections.append(stream.read(13))
+            t = 0
+            section_length = 1
+        if t & 64:
+            section_length += 9
+            stream.read(5)
+            n = stream.uint32_read()
+            section_length += 16*n+4
+            n = stream.uint32_read()
+            section_length += 20*n
+        bit_vector = stream.uint8_read()
+        stream.seek(stream.tell()-(1+section_length))
+        if bit_vector & 8:
+            entry.unused_sections.append(stream.read(27 + section_length))
+        else:
+            entry.unused_sections.append(stream.read(11 + section_length))
+        state_chunk_start = stream.tell()
+        n = stream.uint8_read() #num state props
+        stream.read(n*3)
+        n = stream.uint8_read() #num state groups
+        for _ in range(n):
+            stream.read(5)
+            num_states = stream.uint8_read()
+            stream.read(8*num_states)
         rtpc_start = stream.tell()
         n = stream.uint16_read() # num RTPC
         for _ in range(n):
@@ -608,8 +631,8 @@ class RandomSequenceContainer(HircEntry):
             rtpc_size = stream.uint16_read()
             stream.read(rtpc_size*12)
         rtpc_end = stream.tell()
-        stream.seek(rtpc_start)
-        entry.unused_sections.append(stream.read(rtpc_end-rtpc_start))
+        stream.seek(state_chunk_start)
+        entry.unused_sections.append(stream.read(rtpc_end-state_chunk_start))
         entry.unused_sections.append(stream.read(24))
         n = stream.uint32_read() #number of children (tracks)
         for _ in range(n):
@@ -4168,7 +4191,7 @@ class MainWindow:
                     container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                     for s_id in hierarchy_entry.contents:
                         sound = bank.hierarchy.entries[s_id]
-                        if sound.sources[0].plugin_id == VORBIS:
+                        if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                             sequence_sources.add(sound)
                             self.create_treeview_entry(self.file_handler.get_audio_by_id(sound.sources[0].source_id), container_entry)
             for hierarchy_entry in bank.hierarchy.entries.values():
