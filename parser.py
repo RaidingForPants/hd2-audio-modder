@@ -2,7 +2,7 @@ import os
 
 from tkinter.filedialog import askopenfilename
 
-from game_asset_entity import AudioSource, MusicSegment
+from game_asset_entity import AudioSource, BankParser, HircReader, MusicSegment
 from game_asset_entity import TocHeader, TextBank, WwiseBank, WwiseDep, WwiseStream
 from game_asset_entity import StringEntry, MediaIndex
 from util import strip_patch_index
@@ -15,13 +15,16 @@ from const_global import BANK, PREFETCH_STREAM, STREAM, STRING, VORBIS, \
         WWISE_BANK, WWISE_DEP, WWISE_STREAM
 # runtime const import
 from const_global import GAME_FILE_LOCATION
+from log import logger
 
 
 class FileReader:
     
     def __init__(self):
-        self.wwise_streams = {}
-        self.wwise_banks = {}
+        self.name: str = ""
+        self.path: str = ""
+        self.wwise_streams: dict[int, WwiseStream] = {}
+        self.wwise_banks: dict[int, WwiseBank] = {}
         self.audio_sources: dict[int, AudioSource] = {}
         self.text_banks = {}
         self.music_track_events = {}
@@ -36,7 +39,7 @@ class FileReader:
             toc_file = MemoryStream(f.read())
 
         stream_file = MemoryStream()
-        if os.path.isfile(path+".stream"):
+        if os.path.isfile(path + ".stream"):
             with open(path+".stream", 'r+b') as f:
                 stream_file = MemoryStream(f.read())
         self.load(toc_file, stream_file)
@@ -114,6 +117,10 @@ class FileReader:
             toc_file.seek(stream.toc_header.toc_data_offset)
             toc_file.write(align_16_byte_with_pad(stream.TocData))
             stream_file.seek(stream.toc_header.stream_file_offset)
+            if stream.content == None:
+                raise RuntimeError(f"In {self.path}, Wwise stream with id {key} "
+                                   "has no actual audio source.")
+
             stream_file.write(align_16_byte_with_pad(stream.content.get_data()))
             
         for key in self.wwise_banks.keys():
@@ -128,6 +135,11 @@ class FileReader:
             toc_file.seek(file_position)
             file_position += 80
             bank = self.wwise_banks[key]
+
+            if bank.dep == None:
+                raise RuntimeError(f"Wwise Soundbank {bank.get_id()} in {self.path} is "
+                                   "missing Wwise dependency.")
+
             toc_file.write(bank.dep.toc_header.get_data())
             toc_file.seek(bank.dep.toc_header.toc_data_offset)
             toc_file.write(align_16_byte_with_pad(bank.dep.get_data()))
@@ -167,7 +179,10 @@ class FileReader:
             value.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += align_16_byte(value.toc_header.toc_data_size)
             
-        for _, value in self.wwise_banks.items():
+        for k, value in self.wwise_banks.items():
+            if value.dep == None:
+                raise RuntimeError(f"Wwise Soundbank f{k} in {self.path} is "
+                                   "missing Wwise dependency.")
             value.dep.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += align_16_byte(value.toc_header.toc_data_size)
             
@@ -176,7 +191,7 @@ class FileReader:
             value.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += align_16_byte(value.toc_header.toc_data_size)
         
-    def load(self, toc_file, stream_file):
+    def load(self, toc_file: MemoryStream, stream_file: MemoryStream):
         self.wwise_streams.clear()
         self.wwise_banks.clear()
         self.audio_sources.clear()
@@ -208,7 +223,8 @@ class FileReader:
                 toc_file.seek(toc_header.toc_data_offset)
                 entry.TocData = toc_file.read(toc_header.toc_data_size)
                 stream_file.seek(toc_header.stream_file_offset)
-                audio.set_data(stream_file.read(toc_header.stream_size), notify_subscribers=False, set_modified=False)
+                audio.set_data(stream_file.read(toc_header.stream_size), 
+                               notify_subscribers=False, set_modified=False)
                 audio.resource_id = toc_header.file_id
                 entry.set_content(audio)
                 self.wwise_streams[entry.get_id()] = entry
@@ -217,15 +233,17 @@ class FileReader:
                 toc_data_offset = toc_header.toc_data_offset
                 toc_file.seek(toc_data_offset)
                 entry.toc_data_header = toc_file.read(16)
-                bank = WwiseBank.BankParser()
+                bank = BankParser()
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
                 
-                hirc = WwiseBank.HircReader(soundbank=entry)
-                try:
+                hirc = HircReader(soundbank=entry)
+                if "HIRC" not in bank.chunks:
+                    logger.warning(f"Wwise Soundbank {toc_header.file_id} in "
+                                   f"{self.path} is missing HIRC data section.")
+                else:
                     hirc.load(bank.chunks['HIRC'])
-                except KeyError:
-                    pass
+
                 entry.hierarchy = hirc
                 #Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
@@ -274,9 +292,9 @@ class FileReader:
         
         # ---------- Backwards compatibility checks ----------
         for bank in self.wwise_banks.values():
-            if bank.dep == None: #can be None because older versions didn't save the dep along with the bank
+            if bank.dep == None: # can be None because older versions didn't save the dep along with the bank
                 if not self.load_deps():
-                    print("Failed to load")
+                    logger.error("Failed to load")
                     self.wwise_streams.clear()
                     self.wwise_banks.clear()
                     self.text_banks.clear()
@@ -284,9 +302,9 @@ class FileReader:
                     return
                 break
         
-        if len(self.wwise_banks) == 0 and len(self.wwise_streams) > 0: #0 if patch was only for streams
+        if len(self.wwise_banks) == 0 and len(self.wwise_streams) > 0: # 0 if patch was only for streams
             if not self.load_banks():
-                print("Failed to load")
+                logger.error("Failed to load")
                 self.wwise_streams.clear()
                 self.wwise_banks.clear()
                 self.text_banks.clear()
@@ -295,40 +313,69 @@ class FileReader:
         # ---------- End backwards compatibility checks ----------
         
         # Create all AudioSource objects
-        for bank in self.wwise_banks.values():
+        for key, bank in self.wwise_banks.items():
+            if bank.hierarchy == None:
+                raise RuntimeError(f"Wwise Soundbank {key} in {self.path} is "
+                                   "missing hierarchy data")
+            
             for entry in bank.hierarchy.entries.values():
                 for source in entry.sources:
-                    if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
-                        try:
-                            audio = AudioSource()
-                            audio.stream_type = BANK
-                            audio.short_id = source.source_id
-                            audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
-                            self.audio_sources[source.source_id] = audio
-                        except KeyError:
-                            pass
-                    elif source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
-                        try:
-                            stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
-                            audio = self.wwise_streams[stream_resource_id].content
-                            audio.short_id = source.source_id
-                            self.audio_sources[source.source_id] = audio
-                        except KeyError:
-                            pass
+                    if source.plugin_id   == VORBIS and \
+                       source.stream_type == BANK   and \
+                       source.source_id not in self.audio_sources:
+                       if source.source_id not in media_index.data:
+                           logger.warning(f"Source {source.source_id} does "
+                                          "not exist in Media Index section"
+                                          ". This source will not be added.") 
+                           continue
+                       audio = AudioSource()
+                       audio.stream_type = BANK
+                       audio.short_id = source.source_id
+                       audio.set_data(media_index.data[source.source_id], 
+                                      set_modified=False, 
+                                      notify_subscribers=False)
+                       self.audio_sources[source.source_id] = audio
+                    elif source.plugin_id == VORBIS                      and \
+                         source.stream_type in [STREAM, PREFETCH_STREAM] and \
+                         source.source_id not in self.audio_sources:
+                        if bank.dep == None:
+                            raise RuntimeError(f"Wwise Soundbank {key} in {self.path}"
+                                               " is missing Wwise dependency.")
+
+                        stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
+                        if stream_resource_id not in self.wwise_streams:
+                            logger.warning(f"Stream resource with ID f{stream_resource_id}"
+                                           " does not have an actual content.")
+                            continue
+
+                        audio = self.wwise_streams[stream_resource_id].content
+                        if audio == None:
+                            logger.warning(f"Stream resource with ID f{stream_resource_id}"
+                                           " does not have an actual audio source.")
+                            continue
+
+                        audio.short_id = source.source_id
+                        self.audio_sources[source.source_id] = audio
+
                 for info in entry.track_info:
                     if info.event_id != 0:
                         self.music_track_events[info.event_id] = info
                 if isinstance(entry, MusicSegment):
                     self.music_segments[entry.get_id()] = entry
 
-        #construct list of audio sources in each bank
-        #add track_info to audio sources?
+        # construct list of audio sources in each bank
+        # add track_info to audio sources?
         for bank in self.wwise_banks.values():
+            if bank.hierarchy == None:
+                raise RuntimeError(f"Wwise Soundbank {bank.get_id()} in {self.path}"
+                                   " is missing hierarchy data.")
             for entry in bank.hierarchy.entries.values():
                 for info in entry.track_info:
                     try:
                         if info.source_id != 0:
-                            self.audio_sources[info.source_id].set_track_info(info, notify_subscribers=False, set_modified=False)
+                            self.audio_sources[info.source_id].set_track_info(
+                                    info, 
+                                    notify_subscribers=False, set_modified=False)
                     except:
                         continue
                 for source in entry.sources:
@@ -341,8 +388,9 @@ class FileReader:
         
     def load_deps(self):
         archive_file = ""
-        if os.path.exists(GAME_FILE_LOCATION):
-            archive_file = os.path.join(GAME_FILE_LOCATION, strip_patch_index(self.name))
+        if os.path.exists(GAME_FILE_LOCATION()):
+            archive_file = os.path.join(GAME_FILE_LOCATION(), 
+                                        strip_patch_index(self.name))
         if not os.path.exists(archive_file):
             warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
             warning.show()
@@ -378,11 +426,36 @@ class FileReader:
                 except KeyError:
                     pass
         return True
+
+    def _load_bank_include_bank(self):
+        for key, bank in self.wwise_banks.items():
+            if bank.hierarchy == None:
+                raise RuntimeError(f"Wwise Soundbank {key} in {self.path} is "
+                                    "missing hirearchy data.")
+
+            for hierarchy_entry in bank.hierarchy.entries.values():
+                for source in hierarchy_entry.sources:
+                    if source.plugin_id != VORBIS or \
+                       source.stream_type not in [STREAM, PREFETCH_STREAM]:
+                       continue
+
+                    if bank.dep == None:
+                        raise RuntimeError(f"Wwise Soundbank {key} in {self.path}"
+                                           " has no Wwise dependency is None.")
+
+                    stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
+
+                    for stream in self.wwise_streams.values():
+                        if stream.get_id() == stream_resource_id:
+                            self.wwise_banks.clear()
+                            self.wwise_banks[key] = bank
+                            return
         
     def load_banks(self):
         archive_file = ""
-        if os.path.exists(GAME_FILE_LOCATION):
-            archive_file = os.path.join(GAME_FILE_LOCATION, strip_patch_index(self.name))
+        if os.path.exists(GAME_FILE_LOCATION()):
+            archive_file = os.path.join(GAME_FILE_LOCATION(), 
+                                        strip_patch_index(self.name))
         if not os.path.exists(archive_file):
             warning = PopupWindow(
                     message = "This patch may have been created using an older "
@@ -420,11 +493,11 @@ class FileReader:
                 toc_file.seek(toc_data_offset)
                 entry.toc_data_header = toc_file.read(16)
                 #-------------------------------------
-                bank = WwiseBank.BankParser()
+                bank = BankParser()
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
                 
-                hirc = WwiseBank.HircReader(soundbank=entry)
+                hirc = HircReader(soundbank=entry)
                 try:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
@@ -446,24 +519,7 @@ class FileReader:
                 except KeyError:
                     pass
         
-        #only include banks that contain at least 1 of the streams
-        temp_banks = {}
-        for key, bank in self.wwise_banks.items():
-            include_bank = False
-            for hierarchy_entry in bank.hierarchy.entries.values():
-                for source in hierarchy_entry.sources:
-                    if source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM]:
-                        stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
-                        for stream in self.wwise_streams.values():
-                            if stream.get_id() == stream_resource_id:
-                                include_bank = True
-                                temp_banks[key] = bank
-                                break
-                    if include_bank:
-                        break
-                if include_bank:
-                    break
-        self.wwise_banks = temp_banks
+        # only include banks that contain at least 1 of the streams
+        self._load_bank_include_bank()
         
         return True
-        
