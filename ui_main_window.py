@@ -801,12 +801,12 @@ class MainWindow:
             self.audio_info_panel.frame.pack()
         elif selected_type == MainWindow.ENTRY_TYPE_EVENT:
             self.event_info_panel.set_track_info(
-                self.file_handler.get_event_by_id(selected_id)
+                self.file_handler.get_event_by_id(int(selected_id))
             )
             self.event_info_panel.frame.pack()
         elif selected_type == MainWindow.ENTRY_TYPE_MUSIC_SEGMENT:
             self.segment_info_panel.set_segment_info(
-                self.file_handler.get_music_segment_by_id(selected_id)
+                self.file_handler.get_music_segment_by_id(int(selected_id))
             )
             self.segment_info_panel.frame.pack()
         elif selected_type == MainWindow.ENTRY_TYPE_SOUND_BANK:
@@ -1270,8 +1270,11 @@ class MainWindow:
                     parent = self.treeview.parent(parent)
         
         for audio in self.file_handler.get_audio().values():
-            is_modified = audio.modified or audio.get_track_info() is not None \
-                    and audio.get_track_info().modified
+            track_info = audio.get_track_info()
+            if track_info == None:
+                continue
+
+            is_modified = audio.modified or track_info.modified
             bg, fg = self.get_colors(modified=is_modified)
             self.treeview.tag_configure(str(audio.get_id()),
                                         background=bg,
@@ -1290,13 +1293,13 @@ class MainWindow:
 
         for event in self.file_handler.file_reader.music_track_events.values():
             bg, fg = self.get_colors(modified=event.modified)
-            self.treeview.tag_configure(event.get_id(),
+            self.treeview.tag_configure(str(event.get_id()),
                                         background=bg,
                                         foreground=fg)
             if not event.modified:
                 continue
 
-            items = self.treeview.tag_has(event.get_id())
+            items = self.treeview.tag_has(str(event.get_id()))
             for item in items:
                 parent = self.treeview.parent(item)
                 while parent != "":
