@@ -568,6 +568,70 @@ class MusicRandomSequence(HircEntry):
         
     def get_data(self):
         pass
+        
+class RandomSequenceContainer(HircEntry):
+    def __init__(self):
+        super().__init__()
+        self.unused_sections = []
+        self.contents = []
+        
+    @classmethod
+    def from_memory_stream(cls, stream):
+        entry = RandomSequenceContainer()
+        entry.hierarchy_type = stream.uint8_read()
+        entry.size = stream.uint32_read()
+        start_position = stream.tell()
+        entry.hierarchy_id = stream.uint32_read()
+        stream.read(1)
+        n = stream.uint8_read() #num fx
+        stream.seek(stream.tell()-2)
+        if n == 0:
+            entry.unused_sections.append(stream.read(14))
+        else:
+            entry.unused_sections.append(stream.read(7*n + 15))
+        n = stream.uint8_read() #number of props
+        stream.seek(stream.tell()-1)
+        entry.unused_sections.append(stream.read(5*n + 1))
+        n = stream.uint8_read() #number of props (again)
+        stream.seek(stream.tell()-1)
+        entry.unused_sections.append(stream.read(9*n + 2))
+        bit_vector = stream.uint8_read()
+        stream.seek(stream.tell()-1)
+        if bit_vector & 8:
+            entry.unused_sections.append(stream.read(29))
+        else:
+            entry.unused_sections.append(stream.read(13))
+        rtpc_start = stream.tell()
+        n = stream.uint16_read() # num RTPC
+        for _ in range(n):
+            stream.read(12)
+            rtpc_size = stream.uint16_read()
+            stream.read(rtpc_size*12)
+        rtpc_end = stream.tell()
+        stream.seek(rtpc_start)
+        entry.unused_sections.append(stream.read(rtpc_end-rtpc_start))
+        entry.unused_sections.append(stream.read(24))
+        n = stream.uint32_read() #number of children (tracks)
+        for _ in range(n):
+            entry.contents.append(stream.uint32_read())
+        entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
+        return entry
+        
+    def get_data(self):
+        return (
+            b"".join([
+                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
+                self.unused_sections[0],
+                self.unused_sections[1],
+                self.unused_sections[2],
+                self.unused_sections[3],
+                self.unused_sections[4],
+                self.unused_sections[5],
+                len(self.contents).to_bytes(4, byteorder="little"),
+                b"".join([x.to_bytes(4, byteorder="little") for x in self.contents]),
+                self.unused_sections[6]
+            ])
+        )
     
 class MusicSegment(HircEntry):
 
@@ -593,7 +657,7 @@ class MusicSegment(HircEntry):
         entry.unused_sections.append(stream.read(5*n + 1))
         n = stream.uint8_read() #number of props (again)
         stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
+        entry.unused_sections.append(stream.read(9*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
         n = stream.uint32_read() #number of children (tracks)
         for _ in range(n):
             entry.tracks.append(stream.uint32_read())
@@ -668,6 +732,8 @@ class HircEntryFactory:
             return MusicTrack.from_memory_stream(stream)
         elif hierarchy_type == 0x0A: #music segment
             return MusicSegment.from_memory_stream(stream)
+        elif hierarchy_type == 0x05: #random sequence container
+            return RandomSequenceContainer.from_memory_stream(stream)
         else:
             return HircEntry.from_memory_stream(stream)
         
@@ -4066,6 +4132,9 @@ class MainWindow:
         elif isinstance(entry, MusicSegment):
             entry_type = "Music Segment"
             name = f"Segment {entry.get_id()}"
+        elif isinstance(entry, RandomSequenceContainer):
+            entry_type = "Random Sequence"
+            name = f"Sequence {entry.get_id()}"
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -4080,6 +4149,7 @@ class MainWindow:
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
         bank_dict = self.file_handler.get_wwise_banks()
+        sequence_sources = set()
         for bank in bank_dict.values():
             bank_entry = self.create_treeview_entry(bank)
             for hierarchy_entry in bank.hierarchy.entries.values():
@@ -4094,7 +4164,15 @@ class MainWindow:
                         for info in track.track_info:
                             if info.event_id != 0:
                                 self.create_treeview_entry(info, track_entry)
-                elif isinstance(hierarchy_entry, Sound):
+                elif isinstance(hierarchy_entry, RandomSequenceContainer):
+                    container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
+                    for s_id in hierarchy_entry.contents:
+                        sound = bank.hierarchy.entries[s_id]
+                        if sound.sources[0].plugin_id == VORBIS:
+                            sequence_sources.add(sound)
+                            self.create_treeview_entry(self.file_handler.get_audio_by_id(sound.sources[0].source_id), container_entry)
+            for hierarchy_entry in bank.hierarchy.entries.values():
+                if isinstance(hierarchy_entry, Sound) and hierarchy_entry not in sequence_sources:
                     if hierarchy_entry.sources[0].plugin_id == VORBIS:
                         self.create_treeview_entry(self.file_handler.get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
         for entry in self.file_handler.file_reader.text_banks.values():
