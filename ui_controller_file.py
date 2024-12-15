@@ -37,9 +37,13 @@ class FileHandler:
         
     def revert_audio(self, file_id):
         audio = self.get_audio_by_id(file_id)
+        if audio == None:
+            logger.warning(f"No audio source associated with {file_id} in "
+                           f"{self.file_reader.path}.")
+            return
         audio.revert_modifications()
         
-    def dump_as_wem(self, file_id):
+    def dump_as_wem(self, file_id: int):
         output_file = filedialog.asksaveasfile(mode='wb', title="Save As", initialfile=(str(file_id)+".wem"), defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
         if output_file is None:
             return
@@ -50,7 +54,7 @@ class FileHandler:
 
         output_file.write(audio.get_data())
         
-    def dump_as_wav(self, file_id, muted: bool = False):
+    def dump_as_wav(self, file_id: int, muted: bool = False):
         output_file = filedialog.asksaveasfilename(
             title="Save As", 
             initialfile=f"{file_id}.wav", 
@@ -166,47 +170,62 @@ class FileHandler:
         
         progress_window = ProgressWindow(title="Dumping Files", max_progress=len(self.file_reader.audio_sources))
         progress_window.show()
+
+        if not os.path.exists(folder):
+            logger.warning("Invalid folder selected, aborting dump")
+            progress_window.destroy()
+            return
         
-        if os.path.exists(folder):
-            for bank in self.file_reader.wwise_banks.values():
-                subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
-                if not os.path.exists(subfolder):
-                    os.mkdir(subfolder)
-                for audio in bank.get_content():
-                    save_path = os.path.join(subfolder, f"{audio.get_id()}")
-                    progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wem")
-                    with open(save_path+".wem", "wb") as f:
-                        f.write(audio.get_data())
-                    progress_window.step()
-        else:
-            print("Invalid folder selected, aborting dump")
-            
+        for bank in self.file_reader.wwise_banks.values():
+            if bank.dep == None: 
+                raise RuntimeError(f"Wwise Soundbank {bank.get_id()} in {self.file_reader.path}"
+                                   " is missing Wwise dependency.")
+
+            subfolder = os.path.join(folder, 
+                                     os.path.basename(bank.dep.data.replace('\x00', '')))
+            if not os.path.exists(subfolder):
+                os.mkdir(subfolder)
+            for audio in bank.get_content():
+                save_path = os.path.join(subfolder, f"{audio.get_id()}")
+                progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wem")
+                with open(save_path+".wem", "wb") as f:
+                    f.write(audio.get_data())
+                progress_window.step()
+
         progress_window.destroy()
     
     def dump_all_as_wav(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
 
-        progress_window = ProgressWindow(title="Dumping Files", max_progress=len(self.file_reader.audio_sources))
+        progress_window = ProgressWindow(title="Dumping Files", 
+                                         max_progress=len(self.file_reader.audio_sources))
         progress_window.show()
         
-        if os.path.exists(folder):
-            for bank in self.file_reader.wwise_banks.values():
-                subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
-                if not os.path.exists(subfolder):
-                    os.mkdir(subfolder)
-                for audio in bank.get_content():
-                    save_path = os.path.join(subfolder, f"{audio.get_id()}")
-                    progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wav")
-                    with open(save_path+".wem", "wb") as f:
-                        f.write(audio.get_data())
-                    process = subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
-                    if process.returncode != 0:
-                        logger.error(f"Encountered error when converting {os.path.basename(save_path)}.wem to .wav")
-                    os.remove(f"{save_path}.wem")
-                    progress_window.step()
-        else:
-            print("Invalid folder selected, aborting dump")
-            
+        if not os.path.exists(folder):
+            logger.warning("Invalid folder selected, aborting dump")
+            progress_window.destroy()
+            return
+        
+        for bank in self.file_reader.wwise_banks.values():
+            if bank.dep == None:
+                raise RuntimeError(f"Wwise Soundbank {bank.get_id} in {self.file_reader.path}"
+                                   " is missing Wwise dependency")
+
+            subfolder = os.path.join(folder, 
+                                     os.path.basename(bank.dep.data.replace('\x00', '')))
+            if not os.path.exists(subfolder):
+                os.mkdir(subfolder)
+            for audio in bank.get_content():
+                save_path = os.path.join(subfolder, f"{audio.get_id()}")
+                progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wav")
+                with open(save_path+".wem", "wb") as f:
+                    f.write(audio.get_data())
+                process = subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
+                if process.returncode != 0:
+                    logger.error(f"Encountered error when converting {os.path.basename(save_path)}.wem to .wav")
+                os.remove(f"{save_path}.wem")
+                progress_window.step()
+
         progress_window.destroy()
         
     def get_number_prefix(self, n):
@@ -263,7 +282,9 @@ class FileHandler:
     def get_strings(self):
         return self.file_reader.string_entries
         
-    def load_archive_file(self, initialdir: str | None = '', archive_file: str | None = None):
+    def load_archive_file(self, 
+                          initialdir: str | None = '', 
+                          archive_file: str | None = None):
         if archive_file == None:
             archive_file = askopenfilename(initialdir=initialdir, 
                                            title="Select archive")
