@@ -2,7 +2,7 @@ import os
 
 from tkinter.filedialog import askopenfilename
 
-from game_asset_entity import AudioSource, BankParser, HircReader, MusicSegment
+from game_asset_entity import AudioSource, BankParser, HircReader, MusicSegment, TrackInfoStruct
 from game_asset_entity import TocHeader, TextBank, WwiseBank, WwiseDep, WwiseStream
 from game_asset_entity import StringEntry, MediaIndex
 from util import strip_patch_index
@@ -27,7 +27,7 @@ class FileReader:
         self.wwise_banks: dict[int, WwiseBank] = {}
         self.audio_sources: dict[int, AudioSource] = {}
         self.text_banks = {}
-        self.music_track_events = {}
+        self.music_track_events: dict[int, TrackInfoStruct] = {}
         self.string_entries: dict[int, dict[int, StringEntry]] = {}
         self.music_segments: dict[int, MusicSegment] = {}
         
@@ -245,7 +245,7 @@ class FileReader:
                     hirc.load(bank.chunks['HIRC'])
 
                 entry.hierarchy = hirc
-                #Add all bank sources to the source list
+                # Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
                     media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
                 
@@ -259,10 +259,13 @@ class FileReader:
                 dep = WwiseDep(toc_header)
                 toc_file.seek(toc_header.toc_data_offset)
                 dep.from_memory_stream(toc_file)
-                try:
+
+                if toc_header.file_id in self.wwise_banks:
                     self.wwise_banks[toc_header.file_id].dep = dep
-                except KeyError:
-                    pass
+                else:
+                    logger.warning(f"A Wwise dependency {toc_header.file_id} does "
+                                   "not have an associated Wwise Soundbank in "
+                                   f"{self.path}")
             elif toc_header.type_id == STRING: #string_entry
                 toc_file.seek(toc_header.toc_data_offset)
                 data = toc_file.read(toc_header.toc_data_size)
@@ -292,15 +295,17 @@ class FileReader:
         
         # ---------- Backwards compatibility checks ----------
         for bank in self.wwise_banks.values():
-            if bank.dep == None: # can be None because older versions didn't save the dep along with the bank
-                if not self.load_deps():
-                    logger.error("Failed to load")
-                    self.wwise_streams.clear()
-                    self.wwise_banks.clear()
-                    self.text_banks.clear()
-                    self.audio_sources.clear()
-                    return
-                break
+            if bank.dep != None:
+                continue
+
+            if not self.load_deps():
+                logger.error("Failed to load")
+                self.wwise_streams.clear()
+                self.wwise_banks.clear()
+                self.text_banks.clear()
+                self.audio_sources.clear()
+                return
+            break
         
         if len(self.wwise_banks) == 0 and len(self.wwise_streams) > 0: # 0 if patch was only for streams
             if not self.load_banks():
