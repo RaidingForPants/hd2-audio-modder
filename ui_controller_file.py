@@ -241,34 +241,40 @@ class FileHandler:
             self.file_reader.rebuild_headers()
             self.file_reader.to_file(folder)
         else:
-            print("Invalid folder selected, aborting save")
+            logger.warning("Invalid folder selected, aborting save")
             
     def get_audio_by_id(self, file_id: int):
         if file_id in self.file_reader.audio_sources:
             return self.file_reader.audio_sources[file_id]
 
-        for source in self.file_reader.audio_sources.values(): #resource_id
+        for source in self.file_reader.audio_sources.values(): # resource_id
             if source.resource_id == file_id:
                 return source
-
+        logger.error(f"{file_id} has no actual audio source in "
+                     f"{self.file_reader.path}.")
         return None
                 
-    def get_event_by_id(self, event_id):
-        try:
+    def get_event_by_id(self, event_id: int):
+        if event_id in self.file_reader.music_track_events:
             return self.file_reader.music_track_events[event_id]
-        except:
-            pass
+        logger.error(f"{event_id} has no actual music track event in "
+                     f"{self.file_reader.path}")
+        return None
+
             
     def get_string_by_id(self, string_id: int):
         if string_id in self.file_reader.string_entries[language]:
             return self.file_reader.string_entries[language][string_id]
+        logger.error(f"{string_id} has no actual string entry in "
+                     f"{self.file_reader.path}.")
         return None
         
-    def get_music_segment_by_id(self, segment_id):
-        try:
+    def get_music_segment_by_id(self, segment_id: int):
+        if segment_id in self.file_reader.music_segments:
             return self.file_reader.music_segments[segment_id]
-        except:
-            pass
+        logger.error(f"{segment_id} has no actual segment entry in "
+                     f"{self.file_reader.path}.")
+        return None
         
     def get_wwise_streams(self):
         return self.file_reader.wwise_streams
@@ -329,19 +335,56 @@ class FileHandler:
             #load audio content from the patch
             for new_audio in bank.get_content():
                 progress_window.set_text(f"Loading {new_audio.get_id()}")
+
                 old_audio = self.get_audio_by_id(new_audio.get_short_id())
-                if old_audio is not None:
-                    old_audio.set_data(new_audio.get_data())
-                    if old_audio.get_track_info() is not None and new_audio.get_track_info() is not None:
-                        new_track_info = new_audio.get_track_info()
-                        old_audio.get_track_info().set_data(play_at=new_track_info.play_at, begin_trim_offset=new_track_info.begin_trim_offset, end_trim_offset=new_track_info.end_trim_offset, source_duration=new_track_info.source_duration)
+                if old_audio is None:
+                    continue
+
+                old_audio.set_data(new_audio.get_data())
+
+                old_track_info = old_audio.get_track_info()
+                new_track_info = new_audio.get_track_info()
+
+                if old_track_info == None or new_track_info == None:
+                    continue
+
+                old_track_info.set_data(
+                    play_at=new_track_info.play_at, 
+                    begin_trim_offset=new_track_info.begin_trim_offset, 
+                    end_trim_offset=new_track_info.end_trim_offset, 
+                    source_duration=new_track_info.source_duration)
+
                 progress_window.step()
 
         for key, music_segment in patch_file_reader.music_segments.items():
-            try:
-                old_music_segment = self.file_reader.music_segments[key]
-            except:
+            if key not in self.file_reader.music_segments:
                 continue
+
+            old_music_segment = self.file_reader.music_segments[key]
+            
+            if music_segment.entry_marker == None:
+                raise RuntimeError(
+                    f"The music segment {music_segment.get_id()} from "
+                    f"patch {patch_file_reader.path} is missing entry marker."
+                )
+            if music_segment.exit_marker == None:
+                raise RuntimeError(
+                    f"The music segment {music_segment.get_id()} from "
+                    f"patch {patch_file_reader.path} is missing exit marker."
+                )
+            if old_music_segment.entry_marker == None:
+                raise RuntimeError(
+                    f"The musci segement {old_music_segment.get_id()} from "
+                    f"the loaded archive file {self.file_reader.path} is missing"
+                    " entry mark."
+                )
+            if old_music_segment.exit_marker == None:
+                raise RuntimeError(
+                    f"The musci segement {old_music_segment.get_id()} from "
+                    f"the loaded archive file {self.file_reader.path} is missing"
+                    " exit mark."
+                )
+
             if (
                 (
                     not old_music_segment.modified
@@ -399,6 +442,12 @@ class FileHandler:
             patch_file_reader.text_banks = {}
             
             for key, value in self.file_reader.wwise_streams.items():
+                if value.content == None:
+                    raise RuntimeError(
+                        f"Wwise stream {key} has no actual audio in "
+                        f"{self.file_reader.path}. Aborting patch writing."
+                    )
+
                 if value.content.modified:
                     patch_file_reader.wwise_streams[key] = value
                     
