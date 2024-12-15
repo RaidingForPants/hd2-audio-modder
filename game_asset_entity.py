@@ -1,5 +1,5 @@
 import struct
-from typing import Literal
+from typing import Literal, Union
 
 from const_global import BANK, MUSIC_TRACK, PREFETCH_STREAM, SOUND, VORBIS
 from ui_window_component import ProgressWindow
@@ -31,7 +31,7 @@ class TocHeader:
         self.toc_data_offset     = stream.uint64_read()
         self.stream_file_offset  = stream.uint64_read()
         self.gpu_resource_offset = stream.uint64_read()
-        self.unknown1            = stream.uint64_read() #seems to contain duplicate entry index
+        self.unknown1            = stream.uint64_read() # seems to contain duplicate entry index
         self.unknown2            = stream.uint64_read()
         self.toc_data_size       = stream.uint32_read()
         self.stream_size         = stream.uint32_read()
@@ -179,54 +179,6 @@ class TextBank:
 
 class WwiseBank(Subscriber):
 
-    class HircReader:
-        
-        def __init__(self, soundbank = None):
-            self.entries = {}
-            self.soundbank = soundbank
-            
-        def load(self, hierarchy_data):
-            self.entries.clear()
-            reader = MemoryStream()
-            reader.write(hierarchy_data)
-            reader.seek(0)
-            num_items = reader.uint32_read()
-            for _ in range(num_items):
-                entry = HircEntryFactory.from_memory_stream(reader)
-                entry.soundbank = self.soundbank
-                self.entries[entry.get_id()] = entry
-                
-        def get_data(self):
-            arr = [entry.get_data() for entry in self.entries.values()]
-            return len(arr).to_bytes(4, byteorder="little") + b"".join(arr)
-
-
-    class BankParser:
-        
-        def __init__(self):
-            self.chunks = {}
-            
-        def load(self, bank_data):
-            self.chunks.clear()
-            reader = MemoryStream()
-            reader.write(bank_data)
-            reader.seek(0)
-            while True:
-                tag = ""
-                try:
-                    tag = reader.read(4).decode('utf-8')
-                except:
-                    break
-                size = reader.uint32_read()
-                self.chunks[tag] = reader.read(size)
-                
-        def GetChunk(self, chunk_tag):
-            try:
-                return self.chunks[chunk_tag]
-            except:
-                return None
-
-    
     def __init__(self, toc_header: TocHeader):
         self.data = b""
         self.bank_header = b""
@@ -236,7 +188,7 @@ class WwiseBank(Subscriber):
         self.toc_header = toc_header
         self.dep: WwiseDep | None = None
         self.modified_count = 0
-        self.hierarchy: WwiseBank.HircReader | None = None
+        self.hierarchy: HircReader | None = None
         self.content = []
         
     def add_content(self, content):
@@ -369,10 +321,58 @@ class WwiseBank(Subscriber):
             return 0
         
 
+class HircReader:
+
+    def __init__(self, soundbank: WwiseBank | None = None):
+        self.entries: dict[int, HircEntryType] = {}
+        self.soundbank = soundbank
+
+    def load(self, hierarchy_data):
+        self.entries.clear()
+        reader = MemoryStream()
+        reader.write(hierarchy_data)
+        reader.seek(0)
+        num_items = reader.uint32_read()
+        for _ in range(num_items):
+            entry = HircEntryFactory.from_memory_stream(reader)
+            entry.soundbank = self.soundbank
+            self.entries[entry.get_id()] = entry
+
+    def get_data(self):
+        arr = [entry.get_data() for entry in self.entries.values()]
+        return len(arr).to_bytes(4, byteorder="little") + b"".join(arr)
+
+
+class BankParser:
+
+    def __init__(self):
+        self.chunks = {}
+
+    def load(self, bank_data):
+        self.chunks.clear()
+        reader = MemoryStream()
+        reader.write(bank_data)
+        reader.seek(0)
+        while True:
+            tag = ""
+            try:
+                tag = reader.read(4).decode('utf-8')
+            except:
+                break
+            size = reader.uint32_read()
+            self.chunks[tag] = reader.read(size)
+
+    def GetChunk(self, chunk_tag):
+        try:
+            return self.chunks[chunk_tag]
+        except:
+            return None
+
+
 class WwiseStream(Subscriber):
 
     def __init__(self, toc_header: TocHeader):
-        self.content = None
+        self.content: AudioSource | None = None
         self.modified = False
         self.toc_header = toc_header
         self.TocData = bytearray()
@@ -414,7 +414,8 @@ class WwiseStream(Subscriber):
             return 0
             
     def get_data(self):
-        return self.content.get_data()
+        if self.content != None:
+            return self.content.get_data()
 
 
 class HircEntry:
@@ -422,9 +423,9 @@ class HircEntry:
     def __init__(self):
         self.size = self.hierarchy_type = self.hierarchy_id = 0
         self.misc: Literal[b""] | bytearray = b""
-        self.sources = []
+        self.sources: list[BankSourceStruct] = []
         self.track_info = []
-        self.soundbank = None
+        self.soundbank: WwiseBank | None = None
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -449,7 +450,8 @@ class HircEntry:
                self.size.to_bytes(4, byteorder="little") + \
                self.hierarchy_id.to_bytes(4, byteorder="little") + \
                self.misc
-        
+
+type HircEntryType = Union[HircEntry, MusicSegment, MusicTrack, Sound]
 
 class HircEntryFactory:
     
@@ -457,11 +459,11 @@ class HircEntryFactory:
     def from_memory_stream(cls, stream: MemoryStream):
         hierarchy_type = stream.uint8_read()
         stream.seek(stream.tell()-1)
-        if hierarchy_type == 2: #sound
+        if hierarchy_type == 2: # sound
             return Sound.from_memory_stream(stream)
-        elif hierarchy_type == 11: #music track
+        elif hierarchy_type == 11: # music track
             return MusicTrack.from_memory_stream(stream)
-        elif hierarchy_type == 0x0A: #music segment
+        elif hierarchy_type == 0x0A: # music segment
             return MusicSegment.from_memory_stream(stream)
         else:
             return HircEntry.from_memory_stream(stream)
@@ -543,7 +545,7 @@ class TrackInfoStruct:
 class AudioSource:
 
     def __init__(self):
-        self.data = b""
+        self.data: bytearray | bytes | Literal[b""] = b""
         self.size = 0
         self.resource_id = 0
         self.short_id = 0
@@ -553,7 +555,9 @@ class AudioSource:
         self.stream_type = 0
         self.track_info = None
         
-    def set_data(self, data, notify_subscribers=True, set_modified=True):
+    def set_data(self, data: bytearray | bytes, 
+                 notify_subscribers=True, 
+                 set_modified=True):
         if not self.modified and set_modified:
             self.data_OLD = self.data
         self.data = data
@@ -628,7 +632,7 @@ class MusicRandomSequence(HircEntry):
         return entry
         
     def get_data(self):
-        pass
+        return b""
     
 
 class MusicSegment(HircEntry):
