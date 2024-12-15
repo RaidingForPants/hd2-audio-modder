@@ -657,7 +657,7 @@ class MusicSegment(HircEntry):
         entry.unused_sections.append(stream.read(5*n + 1))
         n = stream.uint8_read() #number of props (again)
         stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(9*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
+        entry.unused_sections.append(stream.read(5*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
         n = stream.uint32_read() #number of children (tracks)
         for _ in range(n):
             entry.tracks.append(stream.uint32_read())
