@@ -9,10 +9,16 @@ from log import logger
 
 class Separator:
 
-    def __init__(self, uid: str, label: str, parent_entry_id: str, entry_ids: list[str]):
+    def __init__(self, 
+                 uid: str, 
+                 label: str, 
+                 parent_entry_id: str, 
+                 view_mode: str,
+                 entry_ids: set[str]):
         self.uid = uid
         self.label = label
         self.parent_entry_id = parent_entry_id
+        self.view_mode = view_mode
         self.entry_ids = entry_ids
 
     def __str__(self):
@@ -35,11 +41,9 @@ class SeparatorDB:
     """
     def __init__(self, 
                  separators: dict[str, Separator] = {},
-                 separator_children: dict[str, str] = {},
                  archive_namespace: dict[str, set[str]] = {}, 
                  separator_parents: dict[str, set[str]] = {}):
         self.separators = separators
-        self.separator_children = separator_children
         self.archive_namespace = archive_namespace
         self.separator_parents = separator_parents
 
@@ -51,11 +55,13 @@ class Config:
                  separators_db: SeparatorDB,
                  recent_files: list[str] = [],
                  theme: str = "dark_mode",
+                 view_mode: str = "SourceView",
                  workspace_paths: set[str] = set()):
         self.game_data_path = game_data_path
         self.separators_db = separators_db
         self.recent_files = recent_files
         self.theme = theme
+        self.view_mode = view_mode
         self.workspace_paths = workspace_paths
 
     """
@@ -72,9 +78,10 @@ class Config:
 
     def add_separator(self, 
                       label: str, 
+                      view_mode: str,
                       archive_path: str, 
                       parent_id: str, 
-                      entries: list[str]):
+                      entries: set[str]):
         uid = uuid.uuid4().hex
 
         if uid in self.separators_db.separators:
@@ -88,33 +95,118 @@ class Config:
             logger.error("Hash collision when creating a new separator!"
                          " Collision in archive namespace")
 
-        if parent_id not in self.separators_db.separator_parents:
-            self.separators_db.separator_parents[parent_id] = set()
-
-        if uid in self.separators_db.separator_parents[parent_id]:
-            logger.error("Hash collision when creating a new separator!"
-                         " Collision in parent scope")
-        separator = Separator(uid, label, parent_id, entries)
+        separator = Separator(uid, label, parent_id, view_mode, entries)
 
         self.separators_db.separators[uid] = separator
         self.separators_db.archive_namespace[archive_path].add(uid)
-        self.separators_db.separator_parents[parent_id].add(uid)
+
+        """
+        If a child is a separator, update its parent
+        Example:
+            Before:
+                Sep 1:
+                    Item 1
+                    Item 2
+                Sep 2:
+                    Item 3
+                    Item 4
+            After:
+                Sep 3:
+                    Sep 1:
+                        Item 1
+                        Item 2
+                    Sep 2:
+                        Item 3
+                        Item 4
+        """
+        for entry in entries:
+            if entry in self.separators_db.separators:
+                self.separators_db \
+                    .separators[entry].parent_entry_id = separator.uid
+
+        if parent_id not in self.separators_db.separators:
+            return uid
+
+        """
+        If its parent is a separator, update its children list.
+        Example:
+            Before:
+                Sep 1:
+                    Item 1
+                    Item 2
+                    Item 3
+                    Item 4
+            After:
+                Sep 1:
+                    Sep 2:
+                        Item 1
+                        Item 2
+                    Sep 3:
+                        Item 3
+                        Item 4
+        """
+        parent_sep = self.separators_db.separators[parent_id]
+        for entry in entries:
+            if entry in parent_sep.entry_ids:
+                parent_sep.entry_ids.remove(entry)
+
+        if separator.uid in parent_sep.entry_ids:
+            raise RuntimeError(f"Separator {separator.uid} is alredy exist in "
+                               "its parent separator entry ids. Hash collision!")
+
+        parent_sep.entry_ids.add(separator.uid)
 
         return uid
 
+    def get_separator(self, uid: str):
+        if uid not in self.separators_db.separators:
+            return logger.error(f"Separator {uid} has no actual separator")
+        return self.separators_db.separators[uid]
+
+    def update_separator_parent(self, uid: str, parent_entry_id: str):
+        if uid not in self.separators_db.separators:
+            return logger.error(f"Separator {uid} has no actual separator")
+        self.separators_db.separators[uid].parent_entry_id = parent_entry_id
+
     def rename_separator(self, uid: str, label: str):
-        if uid in self.separators_db.separators:
-            self.separators_db.separators[uid].label = label
+        if uid not in self.separators_db.separators:
+            return logger.error(f"Separator {uid} has no actual separator")
+        self.separators_db.separators[uid].label = label
 
     def remove_separator(self, uid: str):
-        if uid in self.separators_db.separators:
-            self.separators_db.separators.pop(uid)
+        if uid not in self.separators_db.separators:
+            return logger.error(f"Separator {uid} has no actual separator")
+
+        removed_sep = self.separators_db.separators.pop(uid)
+
+        # Remove this separator from the current loaded archive
         for _, v in self.separators_db.archive_namespace.items():
             if uid in v:
                 v.remove(uid)
-        for _, v in self.separators_db.separator_parents.items():
-            if uid in v:
-                v.remove(uid)
+
+        # Update parent entry id if a child is a separator
+        for entry_id in removed_sep.entry_ids:
+            if entry_id in self.separators_db.separators:
+                self.separators_db \
+                    .separators[entry_id] \
+                    .parent_entry_id = removed_sep.parent_entry_id 
+
+        if removed_sep.parent_entry_id not in self.separators_db.separators:
+            return 
+
+        # If this separator's parent is also a separator, update that parent 
+        # separator's children
+        parent_sep = self.separators_db.separators[removed_sep.parent_entry_id]
+        parent_sep.entry_ids.remove(uid)
+        for entry_id in removed_sep.entry_ids:
+            if entry_id in parent_sep.entry_ids:
+                logger.error(f"Entry id {entry_id} is duplicated in Separator"
+                             f" {parent_sep.uid}.")
+            else:
+                parent_sep.entry_ids.add(entry_id)
+            if entry_id in self.separators_db.separators:
+                self.separators_db \
+                    .separators[entry_id].parent_entry_id = parent_sep.uid
 
     def save_config(self, config_path: str = "config.pickle"):
         try:
@@ -165,6 +257,8 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             cfg.recent_files = []
         if not hasattr(cfg, "separators_db"):
             cfg.separators_db = SeparatorDB()
+        if not hasattr(cfg, "view_mode"):
+            cfg.view_mode = "SourceView"
 
         cfg.recent_files = [file for file in cfg.recent_files 
                                  if os.path.exists(file)]
