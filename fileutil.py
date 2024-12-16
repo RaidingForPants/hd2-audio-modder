@@ -1,4 +1,7 @@
 import os
+import pathlib
+
+from const_global import SYSTEM
 
 class INode:
 
@@ -25,7 +28,7 @@ def generate_file_tree(path) -> INode | None:
             inodes[absolute_path] = inode
             curr.nodes.append(inode)
         for filename in filenames:
-            f, ext = os.path.splitext(filename)
+            _, ext = os.path.splitext(filename)
             if ext in [".wav", ".wem"] or "patch" in ext:
                 curr.nodes.append(INode(
                     False, os.path.join(dirpath, filename), filename))
@@ -53,3 +56,12 @@ def list_files_recursive(path="."):
             else:
                 files.append(full_path)
         return files
+
+def std_path(p: str):
+    match SYSTEM:
+        case "Windows":
+            return pathlib.PureWindowsPath(p).as_uri()
+        case "Linux" | "Darwin":
+            return pathlib.PurePosixPath(p).as_uri()
+        case _:
+            return pathlib.Path(p).as_uri()
