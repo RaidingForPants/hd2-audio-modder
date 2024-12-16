@@ -25,7 +25,7 @@ from const_global import CACHE, GAME_FILE_LOCATION, VGMSTREAM, WWISE_CLI, VORBIS
 
 from game_asset_entity import AudioSource, HircEntry, MusicSegment, MusicTrack, StringEntry, \
         Sound, TextBank, TrackInfoStruct, WwiseBank
-from fileutil import list_files_recursive
+from fileutil import list_files_recursive, std_path
 from log import logger
 
 from ui_archive_search import ArchiveSearch
@@ -177,10 +177,16 @@ class MainWindow:
         self.menu = Menu(self.root, tearoff=0)
         
         self.selected_view = StringVar()
-        self.selected_view.set("SourceView")
+        self.selected_view.set(self.app_state.view_mode)
         self.view_menu = Menu(self.menu, tearoff=0)
-        self.view_menu.add_radiobutton(label="Sources", variable=self.selected_view, value="SourceView", command=self.create_source_view)
-        self.view_menu.add_radiobutton(label="Hierarchy", variable=self.selected_view, value="HierarchyView", command=self.create_hierarchy_view)
+        self.view_menu.add_radiobutton(label="Sources", 
+                                       variable=self.selected_view, 
+                                       value="SourceView", 
+                                       command=self.create_source_view)
+        self.view_menu.add_radiobutton(label="Hierarchy", 
+                                       variable=self.selected_view, 
+                                       value="HierarchyView", 
+                                       command=self.create_hierarchy_view)
         
         self.selected_language = StringVar()
         self.options_menu = Menu(self.menu, tearoff=0)
@@ -615,6 +621,15 @@ class MainWindow:
         self.archive_search.focus_set()
         self.category_search.selection_clear()
 
+    def _treeview_menu_collaspe_selection(self):
+        selects = set(self.treeview.selection())
+        collaspe_selects = set()
+        for select in selects:
+            parent_entry_id = self.treeview.parent(select)
+            if parent_entry_id not in selects:
+                collaspe_selects.add(select)
+        return tuple(collaspe_selects)
+
     def _treeview_menu_enable(self, selects: tuple[str, ...]):
         is_single = len(selects) == 1
         can_sep = True
@@ -622,9 +637,7 @@ class MainWindow:
         add_audio = True
 
         if is_single:
-            values = self.treeview.item(selects[0], option="values")
-            if len(values) <= 0:
-                raise RuntimeError("A treeview entry with zero value")
+            values = self.get_entry_values(selects[0])
             is_sep = values[0] == MainWindow.ENTRY_TYPE_SEPARATOR
 
         parent_view_id = self.treeview.parent(selects[0])
@@ -680,7 +693,7 @@ class MainWindow:
         try:
             self.right_click_menu.delete(0, "end")
 
-            selects = self.treeview.selection()
+            selects = self._treeview_menu_collaspe_selection() 
             enable = self._treeview_menu_enable(selects)
 
             self.right_click_menu.add_command(
@@ -777,14 +790,10 @@ class MainWindow:
 
         selected = self.treeview.selection()[0]
 
-        values = self.treeview.item(selected, option="values")
-        if len(values) <= 0:
-            raise RuntimeError("A tree entry with no value")
+        values = self.get_entry_values(selected)
         selected_type = values[0]
 
-        tags = self.treeview.item(selected, option="tags")
-        if len(tags) <= 0:
-            raise RuntimeError("A tree entry with no tags")
+        tags = self.get_entry_tags(selected)
         selected_id = tags[0]
 
         for child in self.entry_info_panel.winfo_children():
@@ -832,9 +841,7 @@ class MainWindow:
                 for child in self.treeview.get_children(top[1]):
                     stack.append((top[0] + 1, child))
 
-                values = self.treeview.item(top[1], option="values")
-                if len(values) <= 0:
-                    raise RuntimeError("A tree view entry without values")
+                values = self.get_entry_values(top[1])
                 etype = values[0]
 
                 text = self.treeview.item(top[1], option="text").replace("\x00", "")
@@ -844,14 +851,10 @@ class MainWindow:
                     case MainWindow.ENTRY_TYPE_SEPARATOR:
                         text = tabs + text
                     case MainWindow.ENTRY_TYPE_SOUND_BANK | MainWindow.ENTRY_TYPE_TEXT_BANK:
-                        tags = self.treeview.item(top[1], option="tags")
-                        if len(tags) <= 0:
-                            raise RuntimeError("A tree view entry wihtout tags")
+                        tags = self.get_entry_tags(top[1])
                         text = f"{tabs}{text}: {tags[0]}"
                     case _:
-                        tags = self.treeview.item(top[1], option="tags")
-                        if len(tags) <= 0:
-                            raise RuntimeError("A tree view entry wihtout tags")
+                        tags = self.get_entry_tags(top[1])
                         text = f"{tabs}{str(tags[0])}"
 
                 content.append(text)
@@ -862,9 +865,7 @@ class MainWindow:
     def dump_as_wem(self):
         selects = self.treeview.selection()
         if len(selects) == 1:
-            tags = self.treeview.item(selects[0], option="tags")
-            if len(tags) <= 0:
-                raise RuntimeError("A tree view entry without tags") 
+            tags = self.get_entry_tags(selects[0])
             # TODO: include validation to make sure this is playable media
             if not tags[0].isdigit():
                 raise RuntimeError("Selected treeview entry does not contain a "
@@ -874,9 +875,7 @@ class MainWindow:
         
         ids: list[int] = []
         for select in selects:
-            tags = self.treeview.item(select, option="tags")
-            if len(tags) <= 0:
-                raise RuntimeError("A tree view entry without tags") 
+            tags = self.get_entry_tags(select)
 
             # TODO: include validation to make sure this is playable media
             if not tags[0].isdigit():
@@ -889,11 +888,7 @@ class MainWindow:
     def dump_as_wav(self, muted: bool = False, with_seq: bool = False):
         selects = self.treeview.selection()
         if len(selects) == 1:
-            tags = self.treeview.item(selects[0], option="tags")
-
-            if len(tags) <= 0:
-                raise RuntimeError("A tree view entry without tags") 
-
+            tags = self.get_entry_tags(selects[0])
             # TODO: include validation to make sure this is playable media
             if not tags[0].isdigit():
                 raise RuntimeError("Selected treeview entry does not contain a "
@@ -904,9 +899,7 @@ class MainWindow:
 
         ids: list[int] = []
         for select in selects:
-            tags = self.treeview.item(select, option="tags")
-            if len(tags) <= 0:
-                raise RuntimeError("A tree view entry without tags") 
+            tags = self.get_entry_tags(select)
 
             # TODO: include validation to make sure this is playable media
             if not tags[0].isdigit():
@@ -915,6 +908,22 @@ class MainWindow:
             ids.append(int(tags[0]))
 
         self.file_handler.dump_multiple_as_wav(ids, muted=muted, with_seq=with_seq)
+
+    """
+    Helper function for getting tags and values of a tree view entry with 
+    exception handling and validation
+    """
+    def get_entry_values(self, view_id: str):
+        values = self.treeview.item(view_id, option="values")
+        if len(values) <= 0:
+            raise RuntimeError("A treeview entry without values")
+        return values
+
+    def get_entry_tags(self, view_id: str):
+        tags = self.treeview.item(view_id, option="tags")
+        if len(tags) <= 0:
+            raise RuntimeError("A treeview entry without tags")
+        return tags
 
     """
     Each entry has the following properties
@@ -980,8 +989,9 @@ class MainWindow:
     def create_hierarchy_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
+        self.app_state.view_mode = "HierarchyView"
 
-        active_archive = self.file_handler.file_reader.path
+        active_archive = std_path(self.file_handler.file_reader.path)
         banks = self.file_handler.get_wwise_banks()
         for bank in banks.values():
             bank_entry = self.create_treeview_entry(bank)
@@ -1034,10 +1044,12 @@ class MainWindow:
             self.check_modified()
             return
 
+
         seps = self.app_state.separators_db.separators
         active_sep_uids = self.app_state \
                               .separators_db \
                               .archive_namespace[active_archive]
+        # dict[separator_uid, treeview_view_id]
         sep_entries: dict[str, str] = {}
         """
         Layout all separators first since separators can be nested
@@ -1046,6 +1058,8 @@ class MainWindow:
             if uid not in seps:
                 logger.warning(f"Separator UID {uid} has no actual separator")
                 self.app_state.remove_separator(uid)
+                continue
+            if seps[uid].view_mode != self.selected_view.get():
                 continue
             sep_entries[uid] = self.create_treeview_entry(seps[uid], "")
 
@@ -1079,10 +1093,11 @@ class MainWindow:
     def create_source_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
+        self.app_state.view_mode = "SourceView"
 
         existing_sources = set()
         banks = self.file_handler.get_wwise_banks()
-        active_archive = self.file_handler.file_reader.path
+        active_archive = std_path(self.file_handler.file_reader.path)
         for bank in banks.values():
             if bank.hierarchy == None:
                 raise RuntimeError(f"Wwise Soundbank {bank.get_id()} in {active_archive}"
@@ -1120,11 +1135,14 @@ class MainWindow:
         active_sep_uids = self.app_state \
                               .separators_db \
                               .archive_namespace[active_archive]
+        # dict[separator_uid, treeview_view_id]
         sep_entries: dict[str, str] = {}
         for uid in active_sep_uids:
             if uid not in seps:
                 logger.warning(f"Separator UID {uid} has no actual separator")
                 self.app_state.remove_separator(uid)
+                continue
+            if seps[uid].view_mode != self.selected_view.get():
                 continue
             sep_entries[uid] = self.create_treeview_entry(seps[uid], "")
 
@@ -1353,7 +1371,8 @@ class MainWindow:
         parent_view_id = self.treeview.parent(selects[0])
         first_select_idx = self.treeview.index(selects[0])
 
-        entry_ids: list[str] = []
+        entry_ids: set[str] = set()
+        reroute_seps: set[str] = set()
         for select in selects:
             diff = self.treeview.parent(selects[0])
             if parent_view_id != diff:
@@ -1361,32 +1380,45 @@ class MainWindow:
                             " is not allowed")
                 return
 
-            tags = self.treeview.item(select, option="tags")
+            tags = self.get_entry_tags(select)
+            values = self.get_entry_values(select)
 
-            # invariant checking
-            if len(tags) <= 0: 
-                raise RuntimeError("A treeview entry without tags")
+            if values[0] == MainWindow.ENTRY_TYPE_SEPARATOR:
+                if tags[0] in reroute_seps:
+                    logger.error(f"Separator ID {tags[0]} is duplicated. It's "
+                                 "either hash colloision or reselect same entry"
+                                 "twice")
+                else:
+                    reroute_seps.add(tags[0])
 
-            entry_ids.append(tags[0])
+            if tags[0] in entry_ids:
+                logger.error(f"Entry id {tags[0]} is duplicated. It's either "
+                             "something wrong with tags value or reselect same "
+                             "entry twice")
+            else:
+                entry_ids.add(tags[0])
 
         label = simpledialog.askstring("Create new separator",
                                        "Enter name of the new separator")
         if label == None:
             return
 
-        parent_entry_tags = self.treeview.item(parent_view_id, option="tags")
+        parent_entry_tags = self.get_entry_tags(parent_view_id)
         # invariant checking
-        if len(parent_entry_tags) <= 0:
-            raise RuntimeError("A treeview entry without tags")
 
         sep_uid = self.app_state.add_separator(
             label,
-            self.file_handler.file_reader.path,
+            self.selected_view.get(),
+            std_path(self.file_handler.file_reader.path),
             parent_entry_tags[0],
             entry_ids
         )
         if sep_uid == "":
             showerror("Failed to create new separator")
+            return
+
+        for reroute_sep in reroute_seps:
+            self.app_state.update_separator_parent(reroute_sep, sep_uid)
 
         sep_view_id = self.treeview.insert(
             parent_view_id, 
@@ -1400,9 +1432,7 @@ class MainWindow:
             self.treeview.move(select, sep_view_id, len(selects))
 
     def delete_separator(self, sep_view_id: str):
-        tags = self.treeview.item(sep_view_id, option="tags")
-        if len(tags) <= 0:
-            raise RuntimeError("A treeview entry without tags")
+        tags = self.get_entry_tags(sep_view_id)
 
         idx = self.treeview.index(sep_view_id)
         children = self.treeview.get_children(sep_view_id)
@@ -1418,9 +1448,7 @@ class MainWindow:
         self.treeview.delete(sep_view_id)
 
     def rename_separator(self, sep_view_id: str):
-        tags = self.treeview.item(sep_view_id, option="tags")
-        if len(tags) <= 0:
-            raise RuntimeError("A treeview entry without tags")
+        tags = self.get_entry_tags(sep_view_id)
 
         label = simpledialog.askstring("Rename Separator",
                                        "Enter a new name of this separator")
