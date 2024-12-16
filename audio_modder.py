@@ -596,7 +596,7 @@ class RandomSequenceContainer(HircEntry):
         stream.read(9*n)
         positioning = stream.uint8_read()
         section_length = 0
-        if positioning & 1:
+        if positioning & 2:
             t = stream.uint8_read()
         else:
             t = 0
@@ -626,7 +626,6 @@ class RandomSequenceContainer(HircEntry):
         rtpc_end = stream.tell()
         stream.seek(section_start)
         entry.unused_sections.append(stream.read(rtpc_end-section_start+24))
-        #entry.unused_sections.append(stream.read(24))
         n = stream.uint32_read() #number of children (tracks)
         for _ in range(n):
             entry.contents.append(stream.uint32_read())
