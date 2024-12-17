@@ -591,44 +591,44 @@ class RandomSequenceContainer(HircEntry):
         start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
         section_start = stream.tell()
-        stream.read(1)
+        stream.advance(1)
         n = stream.uint8_read() #num fx
         if n == 0:
-            stream.read(12)
+            stream.advance(12)
         else:
-            stream.read(7*n + 13)
-        n = stream.uint8_read() #number of props
-        stream.read(5*n)
-        n = stream.uint8_read() #number of props (again)
-        stream.read(9*n)
+            stream.advance(7*n + 13)
+        #n = stream.uint8_read() #number of props
+        stream.advance(5*stream.uint8_read())
+        #n = stream.uint8_read() #number of props (again)
+        stream.advance(9*stream.uint8_read())
         #positioning = stream.uint8_read()
         if stream.uint8_read() & 0b0000_0010: #positioning bit vector
             t = stream.uint8_read()
         else:
             t = 0
         if t & 0b0100_0000:
-            stream.read(5)
+            stream.advance(5)
             n = stream.uint32_read()
-            stream.read(16*n)
+            stream.advance(16*n)
             n = stream.uint32_read()
-            stream.read(20*n)
+            stream.advance(20*n)
         bit_vector = stream.uint8_read()
         if bit_vector & 0b0000_1000:
-            stream.read(26)
+            stream.advance(26)
         else:
-           stream.read(10)
+           stream.advance(10)
         n = stream.uint8_read() #num state props
-        stream.read(n*3)
+        stream.advance(n*3)
         n = stream.uint8_read() #num state groups
         for _ in range(n):
-            stream.read(5)
+            stream.advance(5)
             num_states = stream.uint8_read()
-            stream.read(8*num_states)
+            stream.advance(8*num_states)
         n = stream.uint16_read() # num RTPC
         for _ in range(n):
-            stream.read(12)
+            stream.advance(12)
             rtpc_size = stream.uint16_read()
-            stream.read(rtpc_size*12)
+            stream.advance(rtpc_size*12)
         rtpc_end = stream.tell()
         stream.seek(section_start)
         entry.unused_sections.append(stream.read(rtpc_end-section_start+24))
