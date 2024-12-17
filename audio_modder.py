@@ -590,6 +590,8 @@ class RandomSequenceContainer(HircEntry):
         entry.size = stream.uint32_read()
         start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
+        
+        # ---------------------------------------
         section_start = stream.tell()
         stream.advance(1)
         n = stream.uint8_read() #num fx
@@ -616,10 +618,14 @@ class RandomSequenceContainer(HircEntry):
             stream.advance(12)
             stream.advance(stream.uint16_read()*12)
         section_end = stream.tell()
+        # ---------------------------------------
+
         stream.seek(section_start)
         entry.unused_sections.append(stream.read(section_end-section_start+24))
+
         for _ in range(stream.uint32_read()): #number of children (tracks)
             entry.contents.append(stream.uint32_read())
+
         entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
         return entry
         
