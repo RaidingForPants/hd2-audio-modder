@@ -600,13 +600,10 @@ class RandomSequenceContainer(HircEntry):
         stream.advance(5*stream.uint8_read()) #number of props
         stream.advance(9*stream.uint8_read()) #number of props (again)
         if stream.uint8_read() & 0b0000_0010: #positioning bit vector
-            t = stream.uint8_read()
-        else:
-            t = 0
-        if t & 0b0100_0000:
-            stream.advance(5)
-            stream.advance(16*stream.uint32_read())
-            stream.advance(20*stream.uint32_read())
+            if stream.uint8_read() & 0b0100_0000:
+                stream.advance(5)
+                stream.advance(16*stream.uint32_read())
+                stream.advance(20*stream.uint32_read())
         if stream.uint8_read() & 0b0000_1000: #I forget what this is for
             stream.advance(26)
         else:
