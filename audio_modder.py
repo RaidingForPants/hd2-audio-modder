@@ -596,18 +596,18 @@ class RandomSequenceContainer(HircEntry):
         stream.read(9*n)
         positioning = stream.uint8_read()
         section_length = 0
-        if positioning & 2:
+        if positioning & 0b0000_0010:
             t = stream.uint8_read()
         else:
             t = 0
-        if t & 64:
+        if t & 0b0100_0000:
             stream.read(5)
             n = stream.uint32_read()
             stream.read(16*n)
             n = stream.uint32_read()
             stream.read(20*n)
         bit_vector = stream.uint8_read()
-        if bit_vector & 8:
+        if bit_vector & 0b0000_1000:
             stream.read(26)
         else:
            stream.read(10)
