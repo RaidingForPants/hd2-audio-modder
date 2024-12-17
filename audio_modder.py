@@ -243,6 +243,14 @@ class MemoryStream:
         newData = self.data[self.location:self.location+length]
         self.location += length
         return bytearray(newData)
+        
+    def advance(self, offset):
+        self.location += offset
+        if self.location < 0:
+            self.location = 0
+        if self.location > len(self.data):
+            missing_bytes = self.location - len(self.data)
+            self.data += bytearray(missing_bytes)
 
     def write(self, bytes): # Write Bytes To Stream
         length = len(bytes)
@@ -585,18 +593,16 @@ class RandomSequenceContainer(HircEntry):
         section_start = stream.tell()
         stream.read(1)
         n = stream.uint8_read() #num fx
-        stream.seek(stream.tell()-2)
         if n == 0:
-            stream.read(14)
+            stream.read(12)
         else:
-            stream.read(7*n + 15)
+            stream.read(7*n + 13)
         n = stream.uint8_read() #number of props
         stream.read(5*n)
         n = stream.uint8_read() #number of props (again)
         stream.read(9*n)
-        positioning = stream.uint8_read()
-        section_length = 0
-        if positioning & 0b0000_0010:
+        #positioning = stream.uint8_read()
+        if stream.uint8_read() & 0b0000_0010: #positioning bit vector
             t = stream.uint8_read()
         else:
             t = 0
