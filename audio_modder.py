@@ -597,43 +597,31 @@ class RandomSequenceContainer(HircEntry):
             stream.advance(12)
         else:
             stream.advance(7*n + 13)
-        #n = stream.uint8_read() #number of props
-        stream.advance(5*stream.uint8_read())
-        #n = stream.uint8_read() #number of props (again)
-        stream.advance(9*stream.uint8_read())
-        #positioning = stream.uint8_read()
+        stream.advance(5*stream.uint8_read()) #number of props
+        stream.advance(9*stream.uint8_read()) #number of props (again)
         if stream.uint8_read() & 0b0000_0010: #positioning bit vector
             t = stream.uint8_read()
         else:
             t = 0
         if t & 0b0100_0000:
             stream.advance(5)
-            n = stream.uint32_read()
-            stream.advance(16*n)
-            n = stream.uint32_read()
-            stream.advance(20*n)
-        bit_vector = stream.uint8_read()
-        if bit_vector & 0b0000_1000:
+            stream.advance(16*stream.uint32_read())
+            stream.advance(20*stream.uint32_read())
+        if stream.uint8_read() & 0b0000_1000: #I forget what this is for
             stream.advance(26)
         else:
            stream.advance(10)
-        n = stream.uint8_read() #num state props
-        stream.advance(n*3)
-        n = stream.uint8_read() #num state groups
-        for _ in range(n):
+        stream.advance(3*stream.uint8_read()) #num state props
+        for _ in range(stream.uint8_read()): #num state groups
             stream.advance(5)
-            num_states = stream.uint8_read()
-            stream.advance(8*num_states)
-        n = stream.uint16_read() # num RTPC
-        for _ in range(n):
+            stream.advance(8*stream.uint8_read())
+        for _ in range(stream.uint16_read()):  # num RTPC
             stream.advance(12)
-            rtpc_size = stream.uint16_read()
-            stream.advance(rtpc_size*12)
-        rtpc_end = stream.tell()
+            stream.advance(stream.uint16_read()*12)
+        section_end = stream.tell()
         stream.seek(section_start)
-        entry.unused_sections.append(stream.read(rtpc_end-section_start+24))
-        n = stream.uint32_read() #number of children (tracks)
-        for _ in range(n):
+        entry.unused_sections.append(stream.read(section_end-section_start+24))
+        for _ in range(stream.uint32_read()): #number of children (tracks)
             entry.contents.append(stream.uint32_read())
         entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
         return entry
