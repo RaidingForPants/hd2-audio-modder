@@ -590,7 +590,7 @@ class RandomSequenceContainer(HircEntry):
         entry.size = stream.uint32_read()
         start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
-        
+
         # ---------------------------------------
         section_start = stream.tell()
         stream.advance(1)
@@ -602,7 +602,7 @@ class RandomSequenceContainer(HircEntry):
         stream.advance(5*stream.uint8_read()) #number of props
         stream.advance(9*stream.uint8_read()) #number of props (again)
         if stream.uint8_read() & 0b0000_0010: #positioning bit vector
-            if stream.uint8_read() & 0b0100_0000:
+            if stream.uint8_read() & 0b0100_0000: # relative pathing bit vector
                 stream.advance(5)
                 stream.advance(16*stream.uint32_read())
                 stream.advance(20*stream.uint32_read())
