@@ -3911,6 +3911,10 @@ class MainWindow:
         self.archive_search.set_entries(entries)
         self.archive_search.focus_set()
         self.category_search.selection_clear()
+        
+    def targeted_import(self, target):
+        pass
+        
 
     def treeview_on_right_click(self, event):
         try:
@@ -3931,6 +3935,12 @@ class MainWindow:
                 label=("Copy File ID" if is_single else "Copy File IDs"),
                 command=self.copy_id
             )
+            
+            if is_single:
+                self.right_click_menu.add_command(
+                    label="Import audio",
+                    command=lambda: self.targeted_import(target=self.treeview.item(select, option="tags")[0])
+                )
 
             if not all_audio:
                 return
