@@ -2088,7 +2088,7 @@ class FileHandler:
                 len_ms = total_samples * 1000 / sample_rate
                 print(len_ms)
                 if audio.get_track_info() is not None:
-                    audio.get_track_info().set_data(play_at=0, begin_trim_offset=0, end_trim_offset=0, source_duration=len_ms):
+                    audio.get_track_info().set_data(play_at=0, begin_trim_offset=0, end_trim_offset=0, source_duration=len_ms)
                 # find music segment for Audio Source
             progress_window.step()
         progress_window.destroy()
