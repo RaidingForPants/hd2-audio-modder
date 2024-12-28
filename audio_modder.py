@@ -2054,7 +2054,7 @@ class FileHandler:
 
     def load_wems(self, wems: Union[tuple[str, ...], Literal[""], None] = None): 
         if wems == None:
-            wems = filedialog.askopenfilenames(title="Choose .wem files to import")
+            wems = filedialog.askopenfilenames(title="Choose .wem files to import", filetypes=[("Wwise Vorbis", "*.wem")])
         if wems == "":
             return
         progress_window = ProgressWindow(title="Loading Files", 
@@ -2100,7 +2100,7 @@ class FileHandler:
         
     def load_wavs(self, wavs: list[str] | None = None):
         if wavs == None:
-            wavs = filedialog.askopenfilenames(title="Choose .wav files to import")
+            wavs = filedialog.askopenfilenames(title="Choose .wav files to import", filetypes=[("WAV audio", "*.wav")])
         if wavs == "":
             return
             
@@ -3913,7 +3913,18 @@ class MainWindow:
         self.category_search.selection_clear()
         
     def targeted_import(self, target):
-        pass
+        if os.path.exists(WWISE_CLI):
+            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
+        else:
+            available_filetypes = [("Wwise Vorbis", "*.wem")]
+        filename = askopenfilename(title="Select audio file to import", filetypes=available_filetypes)
+        if not filename or not os.path.exists(filename):
+            return
+        old_name = filename
+        new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
+        os.rename(filename, new_name)
+        self.import_files([new_name])
+        os.rename(new_name, old_name)
         
 
     def treeview_on_right_click(self, event):
@@ -3935,41 +3946,39 @@ class MainWindow:
                 label=("Copy File ID" if is_single else "Copy File IDs"),
                 command=self.copy_id
             )
-            
-            if is_single:
-                self.right_click_menu.add_command(
-                    label="Import audio",
-                    command=lambda: self.targeted_import(target=self.treeview.item(select, option="tags")[0])
-                )
 
-            if not all_audio:
-                return
+            if all_audio:
+                if is_single:
+                    self.right_click_menu.add_command(
+                        label="Import audio",
+                        command=lambda: self.targeted_import(target=self.treeview.item(select, option="tags")[0])
+                    )
 
-            tags = self.treeview.item(selects[-1], option="tags")
-            assert(len(tags) == 1)
-            self.right_click_id = int(tags[0])
-            
-            self.right_click_menu.add_command(
-                label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
-                command=self.dump_as_wem
-            )
-            if os.path.exists(VGMSTREAM):
+                tags = self.treeview.item(selects[-1], option="tags")
+                assert(len(tags) == 1)
+                self.right_click_id = int(tags[0])
+                
                 self.right_click_menu.add_command(
-                    label=("Dump As .wav" if is_single else "Dump Selected As .wav"),
-                    command=self.dump_as_wav,
+                    label=("Dump As .wem" if is_single else "Dump Selected As .wem"),
+                    command=self.dump_as_wem
+                )
+                if os.path.exists(VGMSTREAM):
+                    self.right_click_menu.add_command(
+                        label=("Dump As .wav" if is_single else "Dump Selected As .wav"),
+                        command=self.dump_as_wav,
+                    )
+                    self.right_click_menu.add_command(
+                        label="Dump As .wav with Sequence Number",
+                        command=lambda: self.dump_as_wav(with_seq=True)
+                    )
+                self.right_click_menu.add_command(
+                    label="Dump muted .wav with same ID",
+                    command=lambda: self.dump_as_wav(muted=True)
                 )
                 self.right_click_menu.add_command(
-                    label="Dump As .wav with Sequence Number",
-                    command=lambda: self.dump_as_wav(with_seq=True)
+                    label="Dump muted .wav with same ID and sequence number",
+                    command=lambda: self.dump_as_wav(muted=True, with_seq=True)
                 )
-            self.right_click_menu.add_command(
-                label="Dump muted .wav with same ID",
-                command=lambda: self.dump_as_wav(muted=True)
-            )
-            self.right_click_menu.add_command(
-                label="Dump muted .wav with same ID and sequence number",
-                command=lambda: self.dump_as_wav(muted=True, with_seq=True)
-            )
             self.right_click_menu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
             pass
