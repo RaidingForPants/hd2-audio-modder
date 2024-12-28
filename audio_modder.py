@@ -3356,6 +3356,7 @@ class MainWindow:
         self.watched_paths = []
         
         self.root = TkinterDnD.Tk()
+        self.root.iconbitmap("icon.ico")
         
         self.drag_source_widget = None
         self.workspace_selection = []
