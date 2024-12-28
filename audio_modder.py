@@ -2051,7 +2051,7 @@ class FileHandler:
             return False
         return True
 
-    def load_wems(self, wems: Union[tuple[str, ...], Literal[""], None] = None): 
+    def load_wems(self, wems: Union[tuple[str, ...], Literal[""], None] = None, set_duration=True): 
         if wems == None:
             wems = filedialog.askopenfilenames(title="Choose .wem files to import")
         if wems == "":
@@ -2077,6 +2077,19 @@ class FileHandler:
                 continue
             with open(wem, 'rb') as f:
                 audio.set_data(f.read())
+            if set_duration:
+                process = subprocess.run([VGMSTREAM, "-m", wem], capture_output=True)
+                process.check_returncode()
+                for line in process.stdout.decode("utf-8").split("\n"):
+                    if "sample rate" in line:
+                        sample_rate = float(line[13:line.index("Hz")-1])
+                    if "stream total samples" in line:
+                        total_samples = int(line[22:line.index("(")-1])
+                len_ms = total_samples * 1000 / sample_rate
+                print(len_ms)
+                if audio.get_track_info() is not None:
+                    audio.get_track_info().set_data(play_at=0, begin_trim_offset=0, end_trim_offset=0, source_duration=len_ms):
+                # find music segment for Audio Source
             progress_window.step()
         progress_window.destroy()
         
