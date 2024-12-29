@@ -1955,18 +1955,40 @@ class FileHandler:
         progress_window = ProgressWindow(title="Loading Files", max_progress=len(patch_file_reader.audio_sources))
         progress_window.show()
         
-        #TO-DO: Import hierarchy changes
-        
         for bank in patch_file_reader.wwise_banks.values(): #something is a bit wrong here
             #load audio content from the patch
             for new_audio in bank.get_content():
                 progress_window.set_text(f"Loading {new_audio.get_id()}")
                 old_audio = self.get_audio_by_id(new_audio.get_short_id())
                 if old_audio is not None:
-                    old_audio.set_data(new_audio.get_data())
+                    if (not old_audio.modified and new_audio.get_data() != old_audio.get_data()
+                        or old_audio.modified and new_audio.get_data() != old_audio.data_OLD):
+                        old_audio.set_data(new_audio.get_data())
                     if old_audio.get_track_info() is not None and new_audio.get_track_info() is not None:
-                        new_track_info = new_audio.get_track_info()
-                        old_audio.get_track_info().set_data(play_at=new_track_info.play_at, begin_trim_offset=new_track_info.begin_trim_offset, end_trim_offset=new_track_info.end_trim_offset, source_duration=new_track_info.source_duration)
+                        old_info = old_audio.get_track_info()
+                        new_info = new_audio.get_track_info()
+                        if (
+                            (
+                                not old_info.modified 
+                                and (
+                                    old_info.play_at != new_info.play_at
+                                    or old_info.begin_trim_offset != new_info.begin_trim_offset
+                                    or old_info.end_trim_offset != new_info.end_trim_offset
+                                    or old_info.source_duration != new_info.source_duration
+                                )
+                            )
+                            or
+                            (
+                                old_info.modified
+                                and (
+                                    old_info.play_at_old != new_info.play_at
+                                    or old_info.begin_trim_offset_old != new_info.begin_trim_offset
+                                    or old_info.end_trim_offset_old != new_info.end_trim_offset
+                                    or old_info.source_duration_old != new_info.source_duration
+                                )
+                            )
+                        ):
+                            old_audio.get_track_info().set_data(play_at=new_info.play_at, begin_trim_offset=new_info.begin_trim_offset, end_trim_offset=new_info.end_trim_offset, source_duration=new_info.source_duration)
                 progress_window.step()
 
         for key, music_segment in patch_file_reader.music_segments.items():
