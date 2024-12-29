@@ -2086,10 +2086,22 @@ class FileHandler:
                     if "stream total samples" in line:
                         total_samples = int(line[22:line.index("(")-1])
                 len_ms = total_samples * 1000 / sample_rate
-                print(len_ms)
                 if audio.get_track_info() is not None:
                     audio.get_track_info().set_data(play_at=0, begin_trim_offset=0, end_trim_offset=0, source_duration=len_ms)
                 # find music segment for Audio Source
+                stop = False
+                for segment in self.file_reader.music_segments.values():
+                    for track_id in segment.tracks:
+                        track = segment.soundbank.hierarchy.entries[track_id]
+                        for source in track.sources:
+                            if source.source_id == audio.get_short_id():
+                                segment.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+                                stop = True
+                                break
+                        if stop:
+                            break
+                    if stop:
+                        break
             progress_window.step()
         progress_window.destroy()
         
