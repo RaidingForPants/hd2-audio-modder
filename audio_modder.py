@@ -2078,8 +2078,12 @@ class FileHandler:
             with open(wem, 'rb') as f:
                 audio.set_data(f.read())
             if set_duration:
-                process = subprocess.run([VGMSTREAM, "-m", wem], capture_output=True)
-                process.check_returncode()
+                try:
+                    process = subprocess.run([VGMSTREAM, "-m", wem], capture_output=True)
+                    process.check_returncode()
+                except:
+                    logger.warning(f"Failed to get duration info for {wem}")
+                    continue
                 for line in process.stdout.decode("utf-8").split("\n"):
                     if "sample rate" in line:
                         sample_rate = float(line[13:line.index("Hz")-1])
