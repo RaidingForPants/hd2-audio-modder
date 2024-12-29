@@ -45,6 +45,7 @@ STREAM = 2
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
 VORBIS = 0x00040001
+REV_AUDIO = 0x01A01052
 WWISE_BANK = 6006249203084351385
 WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
@@ -1001,6 +1002,8 @@ class WwiseBank(Subscriber):
         didx_array = []
         data_array = []
         
+        added_sources = set()
+        
         for entry in self.hierarchy.entries.values():
             for index, info in enumerate(entry.track_info):
                 if info.event_id != 0:
@@ -1022,14 +1025,30 @@ class WwiseBank(Subscriber):
                             entry.track_info[count] = audio.get_track_info()
                     except: #exception because there may be no original track info struct
                         pass
-                    if source.stream_type == PREFETCH_STREAM:
+                    if source.stream_type == PREFETCH_STREAM and sources.source_id not in added_sources:
                         data_array.append(audio.get_data()[:source.mem_size])
                         didx_array.append(struct.pack("<III", source.source_id, offset, source.mem_size))
                         offset += source.mem_size
-                    elif source.stream_type == BANK:
+                        added_sources.add(source.source_id)
+                    elif source.stream_type == BANK and source.source_id not in added_sources:
                         data_array.append(audio.get_data())
                         didx_array.append(struct.pack("<III", source.source_id, offset, audio.size))
                         offset += audio.size
+                        added_sources.add(source.source_id)
+                elif source.plugin_id == REV_AUDIO:
+                    try:
+                        custom_fx_entry = self.hierarchy.entries[source.source_id]
+                        fx_data = custom_fx_entry.get_data()
+                        plugin_param_size = int.from_bytes(fx_data[13:17], byteorder="little")
+                        media_index_id = int.from_bytes(fx_data[19+plugin_param_size:23+plugin_param_size], byteorder="little")
+                        audio = audio_sources[media_index_id]
+                    except KeyError:
+                        continue
+                    if source.stream_type == BANK and source.source_id not in added_sources:
+                        data_array.append(audio.get_data())
+                        didx_array.append(struct.pack("<III", media_index_id, offset, audio.size))
+                        offset += audio.size
+                        added_sources.add(media_index_id)
         if len(didx_array) > 0:
             data += "DIDX".encode('utf-8') + (12*len(didx_array)).to_bytes(4, byteorder="little")
             data += b"".join(didx_array)
@@ -1499,6 +1518,19 @@ class FileReader:
                             audio = self.wwise_streams[stream_resource_id].content
                             audio.short_id = source.source_id
                             self.audio_sources[source.source_id] = audio
+                        except KeyError:
+                            pass
+                    elif source.plugin_id == REV_AUDIO and source.stream_type == BANK and source.source_id not in self.audio_sources:
+                        try:
+                            custom_fx = bank.hierarchy.entries[source.source_id]
+                            data = custom_fx.get_data()
+                            plugin_param_size = int.from_bytes(data[13:17], byteorder="little")
+                            media_index_id = int.from_bytes(data[19+plugin_param_size:23+plugin_param_size], byteorder="little")
+                            audio = AudioSource()
+                            audio.stream_type = BANK
+                            audio.short_id = media_index_id
+                            audio.set_data(media_index.data[media_index_id], set_modified=False, notify_subscribers=False)
+                            self.audio_sources[media_index_id] = audio
                         except KeyError:
                             pass
                 for info in entry.track_info:
