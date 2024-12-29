@@ -1025,7 +1025,7 @@ class WwiseBank(Subscriber):
                             entry.track_info[count] = audio.get_track_info()
                     except: #exception because there may be no original track info struct
                         pass
-                    if source.stream_type == PREFETCH_STREAM and sources.source_id not in added_sources:
+                    if source.stream_type == PREFETCH_STREAM and source.source_id not in added_sources:
                         data_array.append(audio.get_data()[:source.mem_size])
                         didx_array.append(struct.pack("<III", source.source_id, offset, source.mem_size))
                         offset += source.mem_size
