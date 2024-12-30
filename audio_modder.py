@@ -4070,19 +4070,92 @@ class MainWindow:
         self.archive_search.focus_set()
         self.category_search.selection_clear()
         
-    def targeted_import(self, target):
+    def targeted_import(self, targets):
         if os.path.exists(WWISE_CLI):
             available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         filename = askopenfilename(title="Select audio file to import", filetypes=available_filetypes)
+        temp_file = False
         if not filename or not os.path.exists(filename):
             return
+        if os.path.splitext(filename)[1] in [".mp3", ".ogg", ".m4a"]:
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
+            if process.returncode != 0:
+                logger.error(f"Encountered error when importing {os.path.basename(file)}")
+            else:
+                filename = f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"
+                temp_file = True
+        if os.path.splitext(filename)[1] == ".wav":
+            source_list = self.file_handler.create_external_sources_list([filename])
+        
+            try:
+                if SYSTEM in ["Windows", "Darwin"]:
+                    subprocess.run([
+                        WWISE_CLI,
+                        "migrate",
+                        DEFAULT_WWISE_PROJECT,
+                        "--quiet",
+                    ]).check_returncode()
+                else:
+                    showerror(title="Operation Failed",
+                        message="The current operating system does not support this feature yet")
+            except Exception as e:
+                logger.error(e)
+                showerror(title="Error", message="Error occurred during project migration. Please check log.txt.")
+            
+            convert_dest = os.path.join(CACHE, SYSTEM)
+            try:
+                if SYSTEM == "Darwin":
+                    subprocess.run([
+                        WWISE_CLI,
+                        "convert-external-source",
+                        DEFAULT_WWISE_PROJECT,
+                        "--platform", "Windows",
+                        "--source-file",
+                        source_list,
+                        "--output",
+                        CACHE,
+                    ]).check_returncode()
+                elif SYSTEM == "Windows":
+                    subprocess.run([
+                        WWISE_CLI,
+                        "convert-external-source",
+                        DEFAULT_WWISE_PROJECT,
+                        "--platform", "Windows",
+                        "--source-file",
+                        source_list,
+                        "--output",
+                        CACHE,
+                    ]).check_returncode()
+                else:
+                    showerror(title="Operation Failed",
+                        message="The current operating system does not support this feature yet")
+            except Exception as e:
+                logger.error(e)
+                showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
+        
+            if temp_file:
+                try:
+                    os.remove(filename)
+                except:
+                    pass
+                    
+            temp_file = True
+        
+            filename = os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filename))[0]}.wem")
+        
         old_name = filename
-        new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
-        os.rename(filename, new_name)
-        self.import_files([new_name])
-        os.rename(new_name, old_name)
+        for target in targets:
+            new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
+            os.rename(filename, new_name)
+            self.import_files([new_name])
+            os.rename(new_name, old_name)
+        try:
+            if temp_file:
+                os.remove(filename)
+        except:
+            pass
         
 
     def treeview_on_right_click(self, event):
@@ -4106,11 +4179,10 @@ class MainWindow:
             )
 
             if all_audio:
-                if is_single:
-                    self.right_click_menu.add_command(
-                        label="Import audio",
-                        command=lambda: self.targeted_import(target=self.treeview.item(select, option="tags")[0])
-                    )
+                self.right_click_menu.add_command(
+                    label="Import audio",
+                    command=lambda: self.targeted_import(targets=[self.treeview.item(select, option="tags")[0] for select in selects])
+                )
 
                 tags = self.treeview.item(selects[-1], option="tags")
                 assert(len(tags) == 1)
