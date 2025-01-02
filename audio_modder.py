@@ -2070,31 +2070,6 @@ class FileHandler:
                     if (not old_audio.modified and new_audio.get_data() != old_audio.get_data()
                         or old_audio.modified and new_audio.get_data() != old_audio.data_OLD):
                         old_audio.set_data(new_audio.get_data())
-                    if old_audio.get_track_info() is not None and new_audio.get_track_info() is not None:
-                        old_info = old_audio.get_track_info()
-                        new_info = new_audio.get_track_info()
-                        if (
-                            (
-                                not old_info.modified 
-                                and (
-                                    old_info.play_at != new_info.play_at
-                                    or old_info.begin_trim_offset != new_info.begin_trim_offset
-                                    or old_info.end_trim_offset != new_info.end_trim_offset
-                                    or old_info.source_duration != new_info.source_duration
-                                )
-                            )
-                            or
-                            (
-                                old_info.modified
-                                and (
-                                    old_info.play_at_old != new_info.play_at
-                                    or old_info.begin_trim_offset_old != new_info.begin_trim_offset
-                                    or old_info.end_trim_offset_old != new_info.end_trim_offset
-                                    or old_info.source_duration_old != new_info.source_duration
-                                )
-                            )
-                        ):
-                            old_audio.get_track_info().set_data(play_at=new_info.play_at, begin_trim_offset=new_info.begin_trim_offset, end_trim_offset=new_info.end_trim_offset, source_duration=new_info.source_duration)
                 progress_window.step()
 
         for key, music_segment in patch_file_reader.music_segments.items():
@@ -2122,6 +2097,44 @@ class FileHandler:
                 )
             ):
                 old_music_segment.set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
+            for track_id in music_segment.tracks:
+                new_track = music_segment.soundbank.hierarchy.entries[track_id]
+                old_track = old_music_segment.soundbank.hierarchy.entries[track_id]
+                for idx, new_info in enumerate(new_track.track_info):
+                    for i in old_track.track_info:
+                        if (
+                            (
+                                new_info.source_id != 0 and new_info.source_id == i.source_id
+                            )
+                            or
+                            (
+                                new_info.event_id != 0 and new_info.event_id == i.event_id
+                            )
+                        ):
+                            old_info = i
+                            break
+                    if (
+                        (
+                            not old_info.modified
+                            and (
+                                old_info.play_at != new_info.play_at
+                                or old_info.begin_trim_offset != new_info.begin_trim_offset
+                                or old_info.end_trim_offset != new_info.end_trim_offset
+                                or old_info.source_duration != new_info.source_duration
+                            )
+                        )
+                        or
+                        (
+                            old_info.modified
+                            and (
+                                old_info.play_at_old != new_info.play_at
+                                or old_info.begin_trim_offset_old != new_info.begin_trim_offset
+                                or old_info.end_trim_offset_old != new_info.end_trim_offset
+                                or old_info.source_duration_old != new_info.source_duration
+                            )
+                        )
+                    ):
+                        old_info.set_data(play_at=new_info.play_at, begin_trim_offset=new_info.begin_trim_offset, end_trim_offset=new_info.end_trim_offset, source_duration=new_info.source_duration)
 
         for text_data in patch_file_reader.text_banks.values():
             for string_id in text_data.string_ids:
