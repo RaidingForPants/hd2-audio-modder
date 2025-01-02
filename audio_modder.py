@@ -541,6 +541,7 @@ class HircEntry:
         self.sources = []
         self.track_info = []
         self.soundbank = None
+        self.modified = False
     
     @classmethod
     def from_memory_stream(cls, stream):
@@ -557,6 +558,9 @@ class HircEntry:
         stream.write(data)
         stream.seek(0)
         return cls.from_memory_stream(stream)
+        
+    def import_entry(self, new_entry):
+        pass
         
     def get_id(self):
         return self.hierarchy_id
@@ -1353,7 +1357,7 @@ class FileReader:
             bank = self.wwise_banks[key]
             toc_file.write(bank.toc_header.get_data())
             toc_file.seek(bank.toc_header.toc_data_offset)
-            toc_file.write(pad_to_16_byte_align(bank.toc_data_header + bank.get_data()))
+            toc_file.write(pad_to_16_byte_align(bank.toc_data_header + bank.generate()))
             
         for key in self.wwise_banks.keys():
             toc_file.seek(file_position)
@@ -1369,7 +1373,7 @@ class FileReader:
             entry = self.text_banks[key]
             toc_file.write(entry.toc_header.get_data())
             toc_file.seek(entry.toc_header.toc_data_offset)
-            toc_file.write(pad_to_16_byte_align(entry.get_data()))
+            toc_file.write(pad_to_16_byte_align(entry.generate()))
             
         with open(os.path.join(path, self.name), 'w+b') as f:
             f.write(toc_file.data)
@@ -1393,7 +1397,7 @@ class FileReader:
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
         
         for key, value in self.wwise_banks.items():
-            value.generate(self.audio_sources, self.music_track_events)
+            #value.generate(self.audio_sources, self.music_track_events)
             
             value.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
@@ -1403,7 +1407,7 @@ class FileReader:
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
             
         for key, value in self.text_banks.items():
-            value.generate(string_entries=self.string_entries)
+            #value.generate(string_entries=self.string_entries)
             value.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
         
@@ -4171,9 +4175,9 @@ class MainWindow:
             with_seq=with_seq
         )
 
-    def create_treeview_entry(self, entry, parentItem=""):
+    def create_treeview_entry(self, entry, parent_item=""): #if HircEntry, add id of parent bank to the tags
         if entry is None: return
-        tree_entry = self.treeview.insert(parentItem, END, tag=entry.get_id())
+        tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
         if isinstance(entry, WwiseBank):
             name = entry.dep.data.split('/')[-1]
             entry_type = "Sound Bank"
@@ -4360,24 +4364,16 @@ class MainWindow:
             self.clear_treeview_background(child)
         bg: Any
         fg: Any
-        
-        for segment in self.file_handler.file_reader.music_segments.values():
-            bg, fg = self.get_colors(modified=segment.modified)
-            self.treeview.tag_configure(segment.get_id(),
+        for bank in self.file_handler.file_reader.wwise_banks.values():
+            bg, fg = self.get_colors(modified=bank.modified)
+            self.treeview.tag_configure(bank.get_id(),
                                         background=bg,
                                         foreground=fg)
-            if not segment.modified:
-                continue
-
-            items = self.treeview.tag_has(segment.get_id())
-            for item in items:
-                parent = self.treeview.parent(item)
-                while parent != "":
-                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
-                                                background=bg,
-                                                foreground=fg)
-                    parent = self.treeview.parent(parent)
-        
+            for entry in bank.hierarchy.get_entries():
+                bg, fg = self.get_colors(modified=entry.modified)
+                self.treeview.tag_configure(entry.get_id(),
+                                        background=bg,
+                                        foreground=fg)
         for audio in self.file_handler.get_audio().values():
             is_modified = audio.modified or audio.get_track_info() is not None \
                     and audio.get_track_info().modified
@@ -4385,53 +4381,18 @@ class MainWindow:
             self.treeview.tag_configure(audio.get_id(),
                                         background=bg,
                                         foreground=fg)
-            if not is_modified:
-                continue
-
-            items = self.treeview.tag_has(audio.get_id())
-            for item in items:
-                parent = self.treeview.parent(item)
-                while parent != "":
-                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
-                                                background=bg, 
-                                                foreground=fg)
-                    parent = self.treeview.parent(parent)
-
-        for event in self.file_handler.file_reader.music_track_events.values():
-            bg, fg = self.get_colors(modified=event.modified)
-            self.treeview.tag_configure(event.get_id(),
-                                        background=bg,
-                                        foreground=fg)
-            if not event.modified:
-                continue
-
-            items = self.treeview.tag_has(event.get_id())
-            for item in items:
-                parent = self.treeview.parent(item)
-                while parent != "":
-                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
-                                                background=bg,
-                                                foreground=fg)
-                    parent = self.treeview.parent(parent)
                     
-        try:
-            for string in self.file_handler.get_strings()[language].values():
-                bg, fg = self.get_colors(modified=string.modified)
-                self.treeview.tag_configure(string.get_id(), 
+        for text_bank in self.file_handler.file_reader.text_banks.values():
+            bg, fg = self.get_colors(modified=text_bank.modified)
+            self.treeview.tag_configure(text_bank.get_id(), 
                                             background=bg,
                                             foreground=fg)
-                if not string.modified:
-                    continue
-                item = self.treeview.tag_has(string.get_id())
-                parent = self.treeview.parent(item)
-                while parent != "":
-                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0],
-                                                background=bg,
-                                                foreground=fg)
-                    parent = self.treeview.parent(parent)
-        except KeyError:
-            pass
-
+            for entry in text_bank.entries.values():
+                bg, fg = self.get_colors(modified=entry.modified)
+                self.treeview.tag_configure(entry.get_id(),
+                                        background=bg,
+                                        foreground=fg)
+                                            
     def load_wems(self, wems: list[str] | None = None):
         self.sound_handler.kill_sound()
         self.file_handler.load_wems(wems=wems)
