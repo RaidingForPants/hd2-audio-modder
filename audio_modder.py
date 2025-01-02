@@ -551,6 +551,13 @@ class HircEntry:
         entry.misc = stream.read(entry.size - 4)
         return entry
         
+    @classmethod
+    def from_bytes(cls, data):
+        stream = MemoryStream()
+        stream.write(data)
+        stream.seek(0)
+        return cls.from_memory_stream(stream)
+        
     def get_id(self):
         return self.hierarchy_id
         
@@ -704,6 +711,10 @@ class MusicSegment(HircEntry):
         if exit_marker is not None: self.exit_marker[1] = exit_marker
         self.modified = True
         
+    def import_entry(self, new_entry):
+        if self.modified:
+            pass
+        
     def revert_modifications(self):
         if self.modified:
             self.lower_modified()
@@ -746,10 +757,11 @@ class HircEntryFactory:
         else:
             return HircEntry.from_memory_stream(stream)
         
-class HircReader:
+class WwiseHierarchy:
     
     def __init__(self, soundbank = None):
         self.entries = {}
+        self.type_lists = {}
         self.soundbank = soundbank
         
     def load(self, hierarchy_data):
@@ -762,6 +774,23 @@ class HircReader:
             entry = HircEntryFactory.from_memory_stream(reader)
             entry.soundbank = self.soundbank
             self.entries[entry.get_id()] = entry
+            try:
+                self.type_lists[entry.hierarchy_type].append(entry)
+            except:
+                self.type_lists[entry.hierarchy_type] = [entry]
+                
+    def import_hierarchy(self, new_hierarchy):
+        for entry in new_hierarchy.get_entries():
+            self.get_entry(entry.get_id()).import_entry(entry)
+                   
+    def get_entry(self, entry_id):
+        return self.entries[entry_id]
+        
+    def get_entries(self):
+        return self.entries.values()
+        
+    def get_type(self, hirc_type):
+        return self.types[hirc_type]
             
     def get_data(self):
         arr = [entry.get_data() for entry in self.entries.values()]
@@ -925,6 +954,9 @@ class WwiseBank(Subscriber):
         self.hierarchy = None
         self.content = []
         
+    def import_hierarchy(self, new_hierarchy):
+        self.hierarchy.import_hierarchy(new_hierarchy)
+        
     def add_content(self, content):
         content.subscribers.add(self)
         if content.track_info is not None:
@@ -1063,6 +1095,7 @@ class WwiseBank(Subscriber):
         self.toc_data_header[4:8] = len(data).to_bytes(4, byteorder="little")
         self.data = data
         bank_generation_progress_window.destroy()
+        return data
                      
     def get_entry_index(self):
         try:
@@ -1073,22 +1106,22 @@ class WwiseBank(Subscriber):
 class WwiseStream(Subscriber):
 
     def __init__(self):
-        self.content = None
+        self.audio_source = None
         self.modified = False
         self.toc_header = None
         self.TocData = bytearray()
         
-    def set_content(self, content):
+    def set_source(self, audio_source):
         try:
-            self.content.subscribers.remove(self)
+            self.audio_source.subscribers.remove(self)
         except:
             pass
-        self.content = content
-        content.subscribers.add(self)
+        self.audio_source = audio_source
+        audio_source.subscribers.add(self)
         
-    def update(self, content):
-        self.toc_header.stream_size = content.size
-        self.TocData[8:12] = content.size.to_bytes(4, byteorder='little')
+    def update(self, audio_source):
+        self.toc_header.stream_size = audio_source.size
+        self.TocData[8:12] = audio_source.size.to_bytes(4, byteorder='little')
         
     def raise_modified(self):
         self.modified = True
@@ -1115,7 +1148,7 @@ class WwiseStream(Subscriber):
             return 0
             
     def get_data(self):
-        return self.content.get_data()
+        return self.audio_source.get_data()
 
 class StringEntry:
 
@@ -1146,57 +1179,59 @@ class TextBank:
     
     def __init__(self):
         self.toc_header = None
-        self.data = b''
-        self.string_ids = []
+        self.entries = {}
         self.language = 0
         self.modified = False
-        
+     
     def set_data(self, data):
-        self.string_ids.clear()
+        self.entries.clear()
         num_entries = int.from_bytes(data[8:12], byteorder='little')
+        self.language = int.from_bytes(data[12:16], byteorder='little')
         id_section_start = 16
         offset_section_start = id_section_start + 4 * num_entries
         data_section_start = offset_section_start + 4 * num_entries
         ids = data[id_section_start:offset_section_start]
         offsets = data[offset_section_start:data_section_start]
+        offset = 0
         for n in range(num_entries):
+            entry = StringEntry()
             string_id = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
-            self.string_ids.append(string_id)
+            text_bank.string_ids.append(string_id)
+            string_offset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
+            entry.string_id = string_id
+            stopIndex = string_offset + 1
+            while data[stopIndex] != 0:
+                stopIndex += 1
+            entry.text = data[string_offset:stopIndex].decode('utf-8')
+            self.entries[string_id] = entry
             
     def update(self):
         pass
         
-    def get_data(self):
-        return self.data
-        
-    def GetLanguage(self):
+    def get_language(self):
         return self.language
         
     def is_modified(self):
         return self.modified
         
-    def generate(self, string_entries):
-        entries = string_entries[self.language]
+    def generate(self):
         stream = MemoryStream()
         stream.write(b'\xae\xf3\x85\x3e\x01\x00\x00\x00')
-        stream.write(len(self.string_ids).to_bytes(4, byteorder="little"))
+        stream.write(len(self.entries).to_bytes(4, byteorder="little"))
         stream.write(self.language.to_bytes(4, byteorder="little"))
-        offset = 16 + 8*len(self.string_ids)
-        for i in self.string_ids:
-            stream.write(entries[i].get_id().to_bytes(4, byteorder="little"))
-        for i in self.string_ids:
+        offset = 16 + 8*len(self.entries)
+        for entry in self.entries.values():
+            stream.write(entry.get_id().to_bytes(4, byteorder="little"))
+        for entry in self.entries.values():
             stream.write(offset.to_bytes(4, byteorder="little"))
             initial_position = stream.tell()
             stream.seek(offset)
-            text_bytes = entries[i].text.encode('utf-8') + b'\x00'
+            text_bytes = entry.text.encode('utf-8') + b'\x00'
             stream.write(text_bytes)
             offset += len(text_bytes)
             stream.seek(initial_position)
-        self.data = stream.data
-        self.toc_header.toc_data_size = len(self.data)
-        
-    def Rebuild(self, string_id, offset_difference):
-        pass
+        self.toc_header.toc_data_size = len(stream.data)
+        return stream.data
         
     def get_id(self):
         try:
@@ -1223,9 +1258,6 @@ class FileReader:
         self.wwise_banks = {}
         self.audio_sources = {}
         self.text_banks = {}
-        self.music_track_events = {}
-        self.string_entries = {}
-        self.music_segments = {}
         
     def from_file(self, path):
         self.name = os.path.basename(path)
@@ -1380,9 +1412,6 @@ class FileReader:
         self.wwise_banks.clear()
         self.audio_sources.clear()
         self.text_banks.clear()
-        self.music_track_events.clear()
-        self.string_entries.clear()
-        self.music_segments.clear()
         
         media_index = MediaIndex()
         
@@ -1431,7 +1460,6 @@ class FileReader:
                 entry.hierarchy = hirc
                 #Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
-                    bank_id = entry.toc_header.file_id
                     media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
                 
                 entry.bank_misc_data = b''
@@ -1452,29 +1480,9 @@ class FileReader:
             elif toc_header.type_id == STRING: #string_entry
                 toc_file.seek(toc_header.toc_data_offset)
                 data = toc_file.read(toc_header.toc_data_size)
-                num_entries = int.from_bytes(data[8:12], byteorder='little')
-                language = int.from_bytes(data[12:16], byteorder='little')
-                if language not in self.string_entries:
-                    self.string_entries[language] = {}
-                id_section_start = 16
-                offset_section_start = id_section_start + 4 * num_entries
-                data_section_start = offset_section_start + 4 * num_entries
-                ids = data[id_section_start:offset_section_start]
-                offsets = data[offset_section_start:data_section_start]
                 text_bank = TextBank()
                 text_bank.toc_header = toc_header
-                text_bank.language = language
-                for n in range(num_entries):
-                    entry = StringEntry()
-                    string_id = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
-                    text_bank.string_ids.append(string_id)
-                    string_offset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
-                    entry.string_id = string_id
-                    stopIndex = string_offset + 1
-                    while data[stopIndex] != 0:
-                        stopIndex += 1
-                    entry.text = data[string_offset:stopIndex].decode('utf-8')
-                    self.string_entries[language][string_id] = entry
+                text_bank.set_data(data)
                 self.text_banks[text_bank.get_id()] = text_bank
         
         # ---------- Backwards compatibility checks ----------
@@ -1501,7 +1509,7 @@ class FileReader:
         
         # Create all AudioSource objects
         for bank in self.wwise_banks.values():
-            for entry in bank.hierarchy.entries.values():
+            for entry in bank.hierarchy.get_entries():
                 for source in entry.sources:
                     if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
                         try:
@@ -1515,7 +1523,7 @@ class FileReader:
                     elif source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
                         try:
                             stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
-                            audio = self.wwise_streams[stream_resource_id].content
+                            audio = self.wwise_streams[stream_resource_id].audio_source
                             audio.short_id = source.source_id
                             self.audio_sources[source.source_id] = audio
                         except KeyError:
@@ -1533,11 +1541,6 @@ class FileReader:
                             self.audio_sources[media_index_id] = audio
                         except KeyError:
                             pass
-                for info in entry.track_info:
-                    if info.event_id != 0:
-                        self.music_track_events[info.event_id] = info
-                if isinstance(entry, MusicSegment):
-                    self.music_segments[entry.get_id()] = entry
 
         #construct list of audio sources in each bank
         #add track_info to audio sources?
@@ -1991,24 +1994,6 @@ class FileHandler:
         for source in self.file_reader.audio_sources.values(): #resource_id
             if source.resource_id == file_id:
                 return source
-                
-    def get_event_by_id(self, event_id):
-        try:
-            return self.file_reader.music_track_events[event_id]
-        except:
-            pass
-            
-    def get_string_by_id(self, string_id):
-        try:
-            return self.file_reader.string_entries[language][string_id]
-        except:
-            pass
-        
-    def get_music_segment_by_id(self, segment_id):
-        try:
-            return self.file_reader.music_segments[segment_id]
-        except:
-            pass
         
     def get_wwise_streams(self):
         return self.file_reader.wwise_streams
@@ -2062,6 +2047,7 @@ class FileHandler:
         progress_window.show()
         
         for bank in patch_file_reader.wwise_banks.values(): #something is a bit wrong here
+            self.file_reader.wwise_banks[bank.get_id()].import_hierarchy(bank.hierarchy)
             #load audio content from the patch
             for new_audio in bank.get_content():
                 progress_window.set_text(f"Loading {new_audio.get_id()}")
@@ -2070,71 +2056,10 @@ class FileHandler:
                     if (not old_audio.modified and new_audio.get_data() != old_audio.get_data()
                         or old_audio.modified and new_audio.get_data() != old_audio.data_OLD):
                         old_audio.set_data(new_audio.get_data())
-                    if old_audio.get_track_info() is not None and new_audio.get_track_info() is not None:
-                        old_info = old_audio.get_track_info()
-                        new_info = new_audio.get_track_info()
-                        if (
-                            (
-                                not old_info.modified 
-                                and (
-                                    old_info.play_at != new_info.play_at
-                                    or old_info.begin_trim_offset != new_info.begin_trim_offset
-                                    or old_info.end_trim_offset != new_info.end_trim_offset
-                                    or old_info.source_duration != new_info.source_duration
-                                )
-                            )
-                            or
-                            (
-                                old_info.modified
-                                and (
-                                    old_info.play_at_old != new_info.play_at
-                                    or old_info.begin_trim_offset_old != new_info.begin_trim_offset
-                                    or old_info.end_trim_offset_old != new_info.end_trim_offset
-                                    or old_info.source_duration_old != new_info.source_duration
-                                )
-                            )
-                        ):
-                            old_audio.get_track_info().set_data(play_at=new_info.play_at, begin_trim_offset=new_info.begin_trim_offset, end_trim_offset=new_info.end_trim_offset, source_duration=new_info.source_duration)
                 progress_window.step()
 
-        for key, music_segment in patch_file_reader.music_segments.items():
-            try:
-                old_music_segment = self.file_reader.music_segments[key]
-            except:
-                continue
-            if (
-                (
-                    not old_music_segment.modified
-                    and (
-                        music_segment.entry_marker[1] != old_music_segment.entry_marker[1]
-                        or music_segment.exit_marker[1] != old_music_segment.exit_marker[1]
-                        or music_segment.duration != old_music_segment.duration
-                    )
-                )
-                or
-                (
-                    old_music_segment.modified
-                    and (
-                        music_segment.entry_marker[1] != old_music_segment.entry_marker_old
-                        or music_segment.exit_marker[1] != old_music_segment.exit_marker_old
-                        or music_segment.duration != old_music_segment.duration_old
-                    )
-                )
-            ):
-                old_music_segment.set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
-
-        for text_data in patch_file_reader.text_banks.values():
-            for string_id in text_data.string_ids:
-                new_text_data = patch_file_reader.string_entries[language][string_id]
-                try:
-                    old_text_data = self.file_reader.string_entries[language][string_id]
-                except:
-                    continue
-                if (
-                    (not old_text_data.modified and new_text_data.get_text() != old_text_data.get_text())
-                    or (old_text_data.modified and new_text_data.get_text() != old_text_data.text_old)
-                ):
-                    old_text_data.set_text(new_text_data.get_text())
+        for text_bank in patch_file_reader.text_banks.values():
+            self.file_reader.text_banks[text_bank.get_id()].import_text(text_bank)
         
         progress_window.destroy()
         return True
