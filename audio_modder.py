@@ -3725,6 +3725,7 @@ class MainWindow:
         self.workspace.bind("<Double-Button-1>", self.workspace_on_double_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
         self.treeview.dnd_bind("<<Drop>>", self.drop_import)
+        self.treeview.dnd_bind("<<DropPosition>>", self.drop_position)
         self.workspace.dnd_bind("<<Drop>>", self.drop_add_to_workspace)
         self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
@@ -3732,6 +3733,12 @@ class MainWindow:
 
         self.root.resizable(True, True)
         self.root.mainloop()
+        
+    def drop_position(self, event):
+        if event.data:
+            if len(event.widget.tk.splitlist(event.data)) != 1:
+                return
+        self.treeview.selection_set(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()))
 
     def workspace_drag_assist(self, event):
         selected_item = self.workspace.identify_row(event.y)
@@ -3746,35 +3753,38 @@ class MainWindow:
         renamed = False
         old_name = ""
         if event.data:
-            import_files = []
-            dropped_files = event.widget.tk.splitlist(event.data)
-            for file in dropped_files:
-                import_files.extend(list_files_recursive(file))
-            if (
-                len(import_files) == 1 
-                and os.path.splitext(import_files[0])[1] in [".mp3", ".wav", ".ogg", ".m4a", ".wem"]
-                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
-            ):
-                audio_id = self.file_handler.get_number_prefix(os.path.basename(import_files[0]))
-                if self.file_handler.get_audio_by_id(audio_id) is not None:
-                    answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
-                    if answer is None:
-                        return
-                    if not answer:
+            try:
+                import_files = []
+                dropped_files = event.widget.tk.splitlist(event.data)
+                for file in dropped_files:
+                    import_files.extend(list_files_recursive(file))
+                if (
+                    len(import_files) == 1 
+                    and os.path.splitext(import_files[0])[1] in [".mp3", ".wav", ".ogg", ".m4a", ".wem"]
+                    and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
+                ):
+                    audio_id = self.file_handler.get_number_prefix(os.path.basename(import_files[0]))
+                    if self.file_handler.get_audio_by_id(audio_id) is not None:
+                        answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
+                        if answer is None:
+                            return
+                        if not answer:
+                            new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
+                            os.rename(import_files[0], new_name)
+                            old_name = import_files[0]
+                            import_files[0] = new_name
+                            renamed = True
+                    else:
                         new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
                         os.rename(import_files[0], new_name)
                         old_name = import_files[0]
                         import_files[0] = new_name
                         renamed = True
-                else:
-                    new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                    os.rename(import_files[0], new_name)
-                    old_name = import_files[0]
-                    import_files[0] = new_name
-                    renamed = True
-            self.import_files(import_files)
-            if renamed:
-                os.rename(new_name, old_name)
+                self.import_files(import_files)
+                if renamed:
+                    os.rename(new_name, old_name)
+            except:
+                pass
 
     def drop_add_to_workspace(self, event):
         if self.drag_source_widget is not self.workspace and event.data:
