@@ -1,3 +1,5 @@
+import util
+
 class HircEntry:
     
     def __init__(self):
@@ -9,7 +11,7 @@ class HircEntry:
         self.data_old = None
     
     @classmethod
-    def from_memory_stream(cls, stream):
+    def from_memory_stream(cls, stream: MemoryStream):
         entry = HircEntry()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
@@ -18,13 +20,13 @@ class HircEntry:
         return entry
         
     @classmethod
-    def from_bytes(cls, data):
+    def from_bytes(cls, data: bytes | bytearray):
         stream = MemoryStream()
         stream.write(data)
         stream.seek(0)
         return cls.from_memory_stream(stream)
         
-    def set_data(self, new_entry):
+    def set_data(self, new_entry: HircEntry):
         if not self.modified:
             self.data_old = self.get_data()
         self.misc = new_entry.misc
@@ -37,7 +39,7 @@ class HircEntry:
             self.data_old = None
             self.lower_modified()
         
-    def import_entry(self, new_entry):
+    def import_entry(self, new_entry: HircEntry):
         if (
             (self.modified and new_entry.get_data() != self.data_old)
             or
@@ -67,7 +69,7 @@ class MusicRandomSequence(HircEntry):
         super().__init__()
     
     @classmethod
-    def from_memory_stream(cls, stream):
+    def from_memory_stream(cls, stream: MemoryStream):
         entry = MusicRandomSequence()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
@@ -77,7 +79,7 @@ class MusicRandomSequence(HircEntry):
     def get_data(self):
         pass
         
-    def set_data(self):
+    def set_data(self, new_entry: MusicRandomSequence):
         pass
         
 class RandomSequenceContainer(HircEntry):
@@ -87,7 +89,7 @@ class RandomSequenceContainer(HircEntry):
         self.contents = []
         
     @classmethod
-    def from_memory_stream(cls, stream):
+    def from_memory_stream(cls, stream: MemoryStream):
         entry = RandomSequenceContainer()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
@@ -132,7 +134,7 @@ class RandomSequenceContainer(HircEntry):
         entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
         return entry
         
-    def set_data(self, new_entry):
+    def set_data(self, new_entry: RandomSequenceContainer):
         self.unused_sections = new_entry.unused_sections
         self.contents = new_entry.contents
         self.size = new_entry.size
@@ -161,7 +163,7 @@ class MusicSegment(HircEntry):
         self.modified = False
     
     @classmethod
-    def from_memory_stream(cls, stream):
+    def from_memory_stream(cls, stream: MemoryStream):
         entry = MusicSegment()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
@@ -199,7 +201,7 @@ class MusicSegment(HircEntry):
                 entry.exit_marker = marker
         return entry
         
-    def set_data(self, new_entry):
+    def set_data(self, new_entry: MusicSegment):
         if not self.modified:
             self.data_old = self.get_data()
         self.raise_modified()
@@ -234,7 +236,7 @@ class BankSourceStruct:
         self.stream_type = self.source_id = self.mem_size = self.bit_flags = 0
         
     @classmethod
-    def from_bytes(cls, bytes):
+    def from_bytes(cls, bytes: bytes | bytearray):
         b = BankSourceStruct()
         b.plugin_id, b.stream_type, b.source_id, b.mem_size, b.bit_flags = struct.unpack("<IBIIB", bytes)
         return b
@@ -248,7 +250,7 @@ class TrackInfoStruct:
         self.track_id = self.source_id = self.event_id = self.play_at = self.begin_trim_offset = self.end_trim_offset = self.source_duration = 0
 
     @classmethod
-    def from_bytes(cls, bytes):
+    def from_bytes(cls, bytes: bytes | bytearray):
         t = TrackInfoStruct()
         t.track_id, t.source_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack("<IIIdddd", bytes)
         return t
@@ -269,7 +271,7 @@ class MusicTrack(HircEntry):
         self.bit_flags = 0
         
     @classmethod
-    def from_memory_stream(cls, stream):
+    def from_memory_stream(cls, stream: MemoryStream):
         entry = MusicTrack()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
@@ -287,7 +289,7 @@ class MusicTrack(HircEntry):
         entry.misc = stream.read(entry.size - (stream.tell()-start_position))
         return entry
         
-    def set_data(self, new_entry):
+    def set_data(self, new_entry: MusicTrack):
         if not self.modified:
             self.data_old = self.get_data()
         self.size = new_entry.size
@@ -308,7 +310,7 @@ class Sound(HircEntry):
         super().__init__()
     
     @classmethod
-    def from_memory_stream(cls, stream):
+    def from_memory_stream(cls, stream: MemoryStream):
         entry = Sound()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
@@ -317,7 +319,7 @@ class Sound(HircEntry):
         entry.misc = stream.read(entry.size - 18)
         return entry
         
-    def set_data(self, new_entry):
+    def set_data(self, new_entry: Sound):
         if not self.modified:
             self.data_old = self.get_data()
         self.raise_modified()
@@ -332,7 +334,7 @@ class Sound(HircEntry):
 class HircEntryFactory:
     
     @classmethod
-    def from_memory_stream(cls, stream):
+    def from_memory_stream(cls, stream: MemoryStream):
         hierarchy_type = stream.uint8_read()
         stream.seek(stream.tell()-1)
         if hierarchy_type == 2: #sound
@@ -348,14 +350,14 @@ class HircEntryFactory:
             
 class WwiseHierarchy:
     
-    def __init__(self, soundbank = None):
+    def __init__(self, soundbank: WwiseBank = None):
         self.entries = {}
         self.type_lists = {}
         self.soundbank = soundbank
         self.added_entries = {}
         self.removed_entries = {}
         
-    def load(self, hierarchy_data):
+    def load(self, hierarchy_data: bytes | bytearray):
         self.entries.clear()
         reader = MemoryStream()
         reader.write(hierarchy_data)
@@ -370,7 +372,7 @@ class WwiseHierarchy:
             except:
                 self.type_lists[entry.hierarchy_type] = [entry]
                 
-    def import_hierarchy(self, new_hierarchy):
+    def import_hierarchy(self, new_hierarchy: WwiseHierarchy):
         for entry in new_hierarchy.get_entries():
             try:
                 self.get_entry(entry.get_id()).import_entry(entry)
@@ -382,7 +384,7 @@ class WwiseHierarchy:
                 except KeyError:
                     self.type_lists[entry.hierarchy_type] = [entry]
                 
-    def revert_modifications(self, entry_id=None):
+    def revert_modifications(self, entry_id: int = 0):
         if entry_id:
             self.get_entry(entry_id).revert_modifications()
         else:
@@ -396,7 +398,7 @@ class WwiseHierarchy:
             for entry in self.get_entries():
                 entry.revert_modifications()
                 
-    def add_entry(self, new_entry):
+    def add_entry(self, new_entry: HircEntry):
         self.soundbank.raise_modified()
         self.added_entries[new_entry.hierarchy_id] = new_entry
         self.entries[new_entry.hierarchy_id] = new_entry
@@ -405,7 +407,7 @@ class WwiseHierarchy:
         except KeyError:
             self.type_lists[new_entry.hierarchy_type] = [new_entry]
             
-    def remove_entry(self, entry):
+    def remove_entry(self, entry: HircEntry):
         if entry.hierarchy_id in self.entries:
             if entry.hierarchy_id in self.added_entries:
                 del self.added_entries[entry.hierarchy_id]
@@ -416,13 +418,13 @@ class WwiseHierarchy:
             self.type_lists[entry.hierarchy_type].remove(entry)
             del self.entries[entry.hierarchy_id]
             
-    def get_entry(self, entry_id):
+    def get_entry(self, entry_id: int):
         return self.entries[entry_id]
         
     def get_entries(self):
         return self.entries.values()
         
-    def get_type(self, hirc_type):
+    def get_type(self, hirc_type: int):
         return self.types[hirc_type]
             
     def get_data(self):
