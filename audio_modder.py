@@ -50,6 +50,7 @@ WWISE_BANK = 6006249203084351385
 WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
 STRING = 979299457696010195
+SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
 LANGUAGE_MAPPING = ({
     "English (US)" : 0x03f97b57,
     "English (UK)" : 0x6f4515cb,
@@ -3758,6 +3759,11 @@ class MainWindow:
                 dropped_files = event.widget.tk.splitlist(event.data)
                 for file in dropped_files:
                     import_files.extend(list_files_recursive(file))
+                if os.path.exists(WWISE_CLI):
+                    import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
+                else:
+                    import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
+                print(import_files)
                 if (
                     len(import_files) == 1 
                     and os.path.splitext(import_files[0])[1] in [".mp3", ".wav", ".ogg", ".m4a", ".wem"]
@@ -3770,19 +3776,20 @@ class MainWindow:
                             return
                         if not answer:
                             new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                            os.rename(import_files[0], new_name)
+                            shutil.copyfile(import_files[0], new_name)
                             old_name = import_files[0]
                             import_files[0] = new_name
                             renamed = True
                     else:
                         new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                        os.rename(import_files[0], new_name)
+                        shutil.copyfile(import_files[0], new_name)
                         old_name = import_files[0]
                         import_files[0] = new_name
                         renamed = True
+                print(import_files)
                 self.import_files(import_files)
                 if renamed:
-                    os.rename(new_name, old_name)
+                    os.remove(new_name)
             except:
                 pass
 
@@ -3987,7 +3994,7 @@ class MainWindow:
     def import_audio_files(self):
         
         if os.path.exists(WWISE_CLI):
-            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
+            available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
@@ -3999,7 +4006,10 @@ class MainWindow:
         wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
         
         # check other file extensions and call vgmstream to convert to wav, then add to wavs list
-        others = [file for file in files if os.path.splitext(file)[1] in [".mp3", ".ogg", ".m4a"]]
+        filetypes = list(SUPPORTED_AUDIO_TYPES)
+        filetypes.remove(".wav")
+        filetypes.remove(".wem")
+        others = [file for file in files if os.path.splitext(file)[1] in filetypes]
         temp_files = []
         for file in others:
             process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
@@ -4095,7 +4105,7 @@ class MainWindow:
         
     def targeted_import(self, target):
         if os.path.exists(WWISE_CLI):
-            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
+            available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         filename = askopenfilename(title="Select audio file to import", filetypes=available_filetypes)
@@ -4103,9 +4113,12 @@ class MainWindow:
             return
         old_name = filename
         new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
-        os.rename(filename, new_name)
+        shutil.copyfile(filename, new_name)
         self.import_files([new_name])
-        os.rename(new_name, old_name)
+        try:
+            os.remove(new_name)
+        except:
+            pass
         
 
     def treeview_on_right_click(self, event):
