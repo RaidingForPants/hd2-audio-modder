@@ -1,14 +1,19 @@
-import util
+from util import *
+import struct
 
 class HircEntry:
+    
+    import_values = ["misc", "parent_id"]
     
     def __init__(self):
         self.size = self.hierarchy_type = self.hierarchy_id = self.misc = 0
         self.sources = []
         self.track_info = []
         self.soundbank = None
-        self.num_modifications = False
+        self.modified_children = 0
+        self.modified = False
         self.parent_id = 0
+        self.parent = None
         self.data_old = None
     
     @classmethod
@@ -27,25 +32,34 @@ class HircEntry:
         stream.seek(0)
         return cls.from_memory_stream(stream)
         
-    def is_modified(self):
-        return self.num_modifications != 0
+    def has_modified_children(self):
+        return self.modified_children != 0
         
-    def set_data(self, new_entry: HircEntry):
+    def set_data(self, entry = None, **data):
         if not self.modified:
             self.data_old = self.get_data()
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
         self.modified = True
-        self.misc = new_entry.misc
-        self.size = len(new_entry.misc) + 4
+        self.size = len(self.get_data())
+        try:
+            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
+        except:
+            self.parent = None
         self.raise_modified()
         
     def revert_modifications(self):
         if self.modified:
             self.set_data(self.from_bytes(self.data_old))
             self.data_old = None
-            self.lower_modified()
             self.modified = False
+            self.lower_modified()
         
-    def import_entry(self, new_entry: HircEntry):
+    def import_entry(self, new_entry):
         if (
             (self.modified and new_entry.get_data() != self.data_old)
             or
@@ -57,13 +71,17 @@ class HircEntry:
         return self.hierarchy_id
         
     def raise_modified(self):
-        if not self.is_modified():
-            self.modified = True
+        self.modified_children+=1
+        if self.parent:
+            self.parent.raise_modified()
+        else:
             self.soundbank.raise_modified()
         
     def lower_modified(self):
-        if self.is_modified():
-            self.modified = False
+        self.modified_children-=1
+        if self.parent:
+            self.parent.lower_modified()
+        else:
             self.soundbank.lower_modified()
         
     def get_data(self):
@@ -84,11 +102,11 @@ class MusicRandomSequence(HircEntry):
         
     def get_data(self):
         pass
-        
-    def set_data(self, new_entry: MusicRandomSequence):
-        pass
-        
+
 class RandomSequenceContainer(HircEntry):
+    
+    import_values = ["unused_sections", "contents", "parent_id"]
+    
     def __init__(self):
         super().__init__()
         self.unused_sections = []
@@ -140,11 +158,6 @@ class RandomSequenceContainer(HircEntry):
         entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
         return entry
         
-    def set_data(self, new_entry: RandomSequenceContainer):
-        self.unused_sections = new_entry.unused_sections
-        self.contents = new_entry.contents
-        self.size = new_entry.size
-        
     def get_data(self):
         return (
             b"".join([
@@ -157,6 +170,8 @@ class RandomSequenceContainer(HircEntry):
         )
     
 class MusicSegment(HircEntry):
+    
+    import_values = ["parent_id", "tracks", "duration", "entry_marker", "exit_marker", "unused_sections", "markers"]
 
     def __init__(self):
         super().__init__()
@@ -209,22 +224,12 @@ class MusicSegment(HircEntry):
                 entry.exit_marker = marker
         return entry
         
-    def set_data(self, new_entry: MusicSegment):
-        if not self.modified:
-            self.data_old = self.get_data()
-        self.raise_modified()
-        self.duration = new_entry.duration
-        self.unused_sections = new_entry.unused_sections
-        self.tracks = new_entry.tracks
-        self.markers = new_entry.markers
-        self.size = new_entry.size
-        
     def get_data(self):
         return (
             b"".join([
                 struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
                 self.unused_sections[0],
-                self.parent_id.to_bytes(4, byteorder="little")
+                self.parent_id.to_bytes(4, byteorder="little"),
                 self.unused_sections[1],
                 self.unused_sections[2],
                 self.unused_sections[3],
@@ -276,6 +281,8 @@ class TrackInfoStruct:
             
 class MusicTrack(HircEntry):
     
+    import_values = ["bit_flags", "unused_sections", "parent_id", "sources", "track_info", "misc"]
+    
     def __init__(self):
         super().__init__()
         self.bit_flags = 0
@@ -310,16 +317,6 @@ class MusicTrack(HircEntry):
         entry.parent_id = stream.uint32_read()
         entry.misc = stream.read(entry.size - (stream.tell()-start_position))
         return entry
-        
-    def set_data(self, new_entry: MusicTrack):
-        if not self.modified:
-            self.data_old = self.get_data()
-        self.size = new_entry.size
-        self.bit_flags = new_entry.bit_flags
-        self.sources = new_entry.sources
-        self.track_info = new_entry.track_info
-        self.misc = new_entry.misc
-        self.raise_modified()
 
     def get_data(self):
         b = b"".join([source.get_data() for source in self.sources])
@@ -327,6 +324,8 @@ class MusicTrack(HircEntry):
         return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
     
 class Sound(HircEntry):
+    
+    import_values = ["misc", "sources", "parent_id"]
     
     def __init__(self):
         super().__init__()
@@ -340,14 +339,6 @@ class Sound(HircEntry):
         entry.sources.append(BankSourceStruct.from_bytes(stream.read(14)))
         entry.misc = stream.read(entry.size - 18)
         return entry
-        
-    def set_data(self, new_entry: Sound):
-        if not self.modified:
-            self.data_old = self.get_data()
-        self.raise_modified()
-        self.sources = new_entry.sources
-        self.misc = new_entry.misc
-        self.size = new_entry.size
 
     def get_data(self):
         return struct.pack(f"<BII14s{len(self.misc)}s", self.hierarchy_type, self.size, self.hierarchy_id, self.sources[0].get_data(), self.misc)
@@ -372,7 +363,7 @@ class HircEntryFactory:
             
 class WwiseHierarchy:
     
-    def __init__(self, soundbank: WwiseBank = None):
+    def __init__(self, soundbank = None):
         self.entries = {}
         self.type_lists = {}
         self.soundbank = soundbank
@@ -393,8 +384,14 @@ class WwiseHierarchy:
                 self.type_lists[entry.hierarchy_type].append(entry)
             except:
                 self.type_lists[entry.hierarchy_type] = [entry]
+        for entry in self.get_entries():
+            try:
+                entry.parent = self.get_entry(entry.parent_id)
+            except:
+                pass
+        print(self.type_lists.keys())
                 
-    def import_hierarchy(self, new_hierarchy: WwiseHierarchy):
+    def import_hierarchy(self, new_hierarchy):
         for entry in new_hierarchy.get_entries():
             try:
                 self.get_entry(entry.get_id()).import_entry(entry)
@@ -447,7 +444,10 @@ class WwiseHierarchy:
         return self.entries.values()
         
     def get_type(self, hirc_type: int):
-        return self.types[hirc_type]
+        try:
+            return self.type_lists[hirc_type]
+        except KeyError:
+            return []
             
     def get_data(self):
         arr = [entry.get_data() for entry in self.entries.values()]

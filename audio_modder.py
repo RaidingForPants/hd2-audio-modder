@@ -11,7 +11,7 @@ import wave
 import sys
 import pathlib
 import xml.etree.ElementTree as etree
-from wwise_hierarchy import WwiseHierarchy
+from wwise_hierarchy import *
 
 from functools import partial
 from functools import cmp_to_key
@@ -34,7 +34,7 @@ import config as cfg
 import db
 import log
 import fileutil
-import util
+from util import *
 
 from log import logger
 
@@ -42,6 +42,7 @@ from log import logger
 MUSIC_TRACK = 11
 SOUND = 2
 BANK = 0
+MUSIC_SEGMENT = 0x0A
 PREFETCH_STREAM = 1
 STREAM = 2
 WINDOW_WIDTH = 1280
@@ -52,24 +53,7 @@ WWISE_BANK = 6006249203084351385
 WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
 STRING = 979299457696010195
-LANGUAGE_MAPPING = ({
-    "English (US)" : 0x03f97b57,
-    "English (UK)" : 0x6f4515cb,
-    "Français" : 4271961631,
-    "Português 1": 1861586415,
-    "Português 2": 1244441033,
-    "Polski": 260593578,
-    "日本語": 2427891497,
-    "中文（繁體）": 2663028010,
-    "中文（简体）": 2189905090,
-    "Nederlands": 291057413,
-    "한국어": 3151476177,
-    "Español 1": 830498882,
-    "Español 2": 3854981686,
-    "Deutsch": 3124347884,
-    "Italiano": 3808107213,
-    "Русский": 3317373165
-})
+
 
 # constants (set once on runtime)
 DIR = os.path.dirname(__file__)
@@ -205,8 +189,8 @@ class AudioSource:
         self.data = data
         self.size = len(self.data)
         if notify_subscribers:
-            for item in self.subscribers:
-                item.update(self)
+            for item in self.parents:
+                #item.update(self)
                 if not self.modified:
                     item.raise_modified()
         if set_modified:
@@ -231,8 +215,6 @@ class AudioSource:
         return self.short_id
         
     def revert_modifications(self, notify_subscribers=True):
-        if self.track_info is not None:
-            self.track_info.revert_modifications()
         if self.modified:
             self.modified = False
             if self.data_OLD != b"":
@@ -240,9 +222,9 @@ class AudioSource:
                 self.data_OLD = b""
             self.size = len(self.data)
             if notify_subscribers:
-                for item in self.subscribers:
+                for item in self.parents:
                     item.lower_modified()
-                    item.update(self)
+                    #item.update(self)
                 
 class TocHeader:
 
@@ -345,7 +327,7 @@ class BankParser:
             size = reader.uint32_read()
             self.chunks[tag] = reader.read(size)
             
-    def GetChunk(self, chunk_tag: str): -> bytearray
+    def GetChunk(self, chunk_tag: str) -> bytearray:
         try:
             return self.chunks[chunk_tag]
         except:
@@ -369,26 +351,26 @@ class WwiseBank(Subscriber):
         self.hierarchy.import_hierarchy(new_hierarchy)
         
     def add_content(self, content):
-        content.subscribers.add(self)
-        if content.track_info is not None:
-            content.track_info.soundbanks.add(self)
+        #content.parents.add(self)
+        #if content.track_info is not None:
+        #    content.track_info.soundbanks.add(self)
         self.content.append(content)
         
     def remove_content(self, content):
-        try:
-            content.subscribers.remove(self)
-        except:
-            pass
+        #try:
+        #    content.parents.remove(self)
+        #except:
+        #    pass
             
         try:
             self.content.remove(content)
         except:
             pass
             
-        try:
-            content.track_info.soundbanks.remove(self)
-        except:
-            pass
+        #try:
+        #    content.track_info.soundbanks.remove(self)
+        #except:
+        #    pass
   
     def get_content(self):
         return self.content
@@ -505,11 +487,11 @@ class WwiseStream(Subscriber):
         
     def set_source(self, audio_source):
         try:
-            self.audio_source.subscribers.remove(self)
+            self.audio_source.parents.remove(self)
         except:
             pass
         self.audio_source = audio_source
-        audio_source.subscribers.add(self)
+        audio_source.parents.add(self)
         
     def update(self, audio_source):
         self.toc_header.stream_size = audio_source.size
@@ -588,7 +570,6 @@ class TextBank:
         for n in range(num_entries):
             entry = StringEntry()
             string_id = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
-            text_bank.string_ids.append(string_id)
             string_offset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
             entry.string_id = string_id
             stopIndex = string_offset + 1
@@ -832,7 +813,7 @@ class FileReader:
                 stream_file.seek(toc_header.stream_file_offset)
                 audio.set_data(stream_file.read(toc_header.stream_size), notify_subscribers=False, set_modified=False)
                 audio.resource_id = toc_header.file_id
-                entry.set_content(audio)
+                entry.set_source(audio)
                 self.wwise_streams[entry.get_id()] = entry
             elif toc_header.type_id == WWISE_BANK:
                 entry = WwiseBank()
@@ -845,7 +826,7 @@ class FileReader:
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
                 
-                hirc = HircReader(soundbank=entry)
+                hirc = WwiseHierarchy(soundbank=entry)
                 try:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
@@ -946,6 +927,8 @@ class FileReader:
                     except:
                         continue
                 for source in entry.sources:
+                    if source.plugin_id == VORBIS:
+                        self.audio_sources[source.source_id].parents.add(entry)
                     try:
                         if source.plugin_id == VORBIS and self.audio_sources[source.source_id] not in bank.get_content(): #may be missing streamed audio if the patch didn't change it
                             bank.add_content(self.audio_sources[source.source_id])
@@ -1037,7 +1020,7 @@ class FileReader:
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
                 
-                hirc = HircReader(soundbank=entry)
+                hirc = WwiseHierarchy(soundbank=entry)
                 try:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
@@ -1387,6 +1370,18 @@ class FileHandler:
         for source in self.file_reader.audio_sources.values(): #resource_id
             if source.resource_id == file_id:
                 return source
+                
+    def get_string_entry(self, textbank_id, entry_id):
+        try:
+            return self.file_reader.text_banks[textbank_id].entries[entry_id]
+        except KeyError:
+            return None
+                
+    def get_hierarchy_entry(self, soundbank_id, hierarchy_id):
+        try:
+            return self.get_wwise_banks()[soundbank_id].hierarchy.get_entry(hierarchy_id)
+        except KeyError:
+            return None
         
     def get_wwise_streams(self):
         return self.file_reader.wwise_streams
@@ -1526,22 +1521,11 @@ class FileHandler:
                         total_samples = int(line[22:line.index("(")-1])
                 len_ms = total_samples * 1000 / sample_rate
                 # find music segment for Audio Source
-                stop = False
-                for bank in self.file_reader.wwise_banks.values():
-                    for segment in bank.hierarchy.get_type(MUSIC_SEGMENT):
-                        for track_id in segment.tracks:
-                            track = segment.soundbank.hierarchy.entries[track_id]
-                            for source in track.sources:
-                                if source.source_id == audio.get_short_id():
-                                    segment.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
-                                    stop = True
-                                    break
-                            if stop:
-                                break
-                        if stop:
-                            break
+                for item in audio.parents:
+                    if isinstance(item, MusicTrack):
+                        item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
                         
-    def create_external_sources_list(self, sources: list[str]): -> str
+    def create_external_sources_list(self, sources: list[str]) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": __file__
@@ -2375,7 +2359,8 @@ class AudioSourceWindow:
         
     def set_audio(self, audio):
         self.audio = audio
-        self.track_info = audio.get_track_info()
+        self.track_info = None
+        #self.track_info = audio.get_track_info()
         self.title_label.configure(text=f"Info for {audio.get_id()}.wem")
         self.play_button.configure(text= '\u23f5')
         self.revert_button.pack_forget()
@@ -3510,19 +3495,23 @@ class MainWindow:
             return
         selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
         selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[0])
+        item = self.treeview.selection()[0]
+        while self.treeview.parent(item):
+            item = self.treeview.parent(item)
+        bank_id = int(self.treeview.item(item, option="tags")[0])
         for child in self.entry_info_panel.winfo_children():
             child.forget()
         if selection_type == "String":
-            self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(selection_id))
+            self.string_info_panel.set_string_entry(self.file_handler.get_string_entry(bank_id, selection_id))
             self.string_info_panel.frame.pack()
         elif selection_type == "Audio Source":
             self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(selection_id))
             self.audio_info_panel.frame.pack()
         elif selection_type == "Event":
-            self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(selection_id))
+            self.event_info_panel.set_track_info(self.file_handler.get_hierarchy_entry(bank_id, selection_id))
             self.event_info_panel.frame.pack()
         elif selection_type == "Music Segment":
-            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(selection_id))
+            self.segment_info_panel.set_segment_info(self.file_handler.get_hierarchy_entry(bank_id, selection_id))
             self.segment_info_panel.frame.pack()
         elif selection_type == "Sound Bank":
             pass
@@ -3617,11 +3606,11 @@ class MainWindow:
                 if isinstance(hierarchy_entry, Sound) and hierarchy_entry not in sequence_sources:
                     if hierarchy_entry.sources[0].plugin_id == VORBIS:
                         self.create_treeview_entry(self.file_handler.get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
-        for entry in self.file_handler.file_reader.text_banks.values():
-            if entry.language == language:
-                e = self.create_treeview_entry(entry)
-                for string_id in entry.string_ids:
-                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+        for text_bank in self.file_handler.file_reader.text_banks.values():
+            if text_bank.language == language:
+                bank_entry = self.create_treeview_entry(text_bank)
+                for string_entry in text_bank.entries.values():
+                    self.create_treeview_entry(string_entry, bank_entry)
         self.check_modified()
                 
     def create_source_view(self):
@@ -3637,16 +3626,16 @@ class MainWindow:
                     if source.plugin_id == VORBIS and source.source_id not in existing_sources:
                         existing_sources.add(source.source_id)
                         self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), bank_entry)
-        for entry in self.file_handler.file_reader.text_banks.values():
-            if entry.language == language:
-                e = self.create_treeview_entry(entry)
-                for string_id in entry.string_ids:
-                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+        for text_bank in self.file_handler.file_reader.text_banks.values():
+            if text_bank.language == language:
+                bank_entry = self.create_treeview_entry(text_bank)
+                for string_entry in text_bank.entries.values():
+                    self.create_treeview_entry(string_entry, bank_entry)
         self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":
-            string_entry = self.file_handler.get_string_by_id(int(self.treeview.item(item, option="tags")[0]))
+            string_entry = self.file_handler.get_string_entry(int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
             s = self.treeview.item(item, option="text")
@@ -3691,6 +3680,7 @@ class MainWindow:
 
     def update_language_menu(self):
         self.options_menu.delete(1, "end") #change to delete only the language select menu
+        '''
         if len(self.file_handler.get_strings()) > 0:
             self.language_menu.delete(0, "end")
             first = ""
@@ -3700,6 +3690,7 @@ class MainWindow:
                 if lang_id in self.file_handler.get_strings():
                     self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
             self.selected_language.set(first)
+        '''
 
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = None):
         self.sound_handler.kill_sound()
@@ -3745,13 +3736,13 @@ class MainWindow:
                                         background=bg,
                                         foreground=fg)
             for entry in bank.hierarchy.get_entries():
-                bg, fg = self.get_colors(modified=entry.modified)
+                is_modified = entry.modified or entry.has_modified_children()
+                bg, fg = self.get_colors(modified=is_modified)
                 self.treeview.tag_configure(entry.get_id(),
                                         background=bg,
                                         foreground=fg)
         for audio in self.file_handler.get_audio().values():
-            is_modified = audio.modified or audio.get_track_info() is not None \
-                    and audio.get_track_info().modified
+            is_modified = audio.modified
             bg, fg = self.get_colors(modified=is_modified)
             self.treeview.tag_configure(audio.get_id(),
                                         background=bg,
