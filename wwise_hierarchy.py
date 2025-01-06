@@ -7,7 +7,8 @@ class HircEntry:
         self.sources = []
         self.track_info = []
         self.soundbank = None
-        self.modified = False
+        self.num_modifications = False
+        self.parent_id = 0
         self.data_old = None
     
     @classmethod
@@ -26,9 +27,13 @@ class HircEntry:
         stream.seek(0)
         return cls.from_memory_stream(stream)
         
+    def is_modified(self):
+        return self.num_modifications != 0
+        
     def set_data(self, new_entry: HircEntry):
         if not self.modified:
             self.data_old = self.get_data()
+        self.modified = True
         self.misc = new_entry.misc
         self.size = len(new_entry.misc) + 4
         self.raise_modified()
@@ -38,6 +43,7 @@ class HircEntry:
             self.set_data(self.from_bytes(self.data_old))
             self.data_old = None
             self.lower_modified()
+            self.modified = False
         
     def import_entry(self, new_entry: HircEntry):
         if (
@@ -51,12 +57,12 @@ class HircEntry:
         return self.hierarchy_id
         
     def raise_modified(self):
-        if not self.modified:
+        if not self.is_modified():
             self.modified = True
             self.soundbank.raise_modified()
         
     def lower_modified(self):
-        if self.modified:
+        if self.is_modified():
             self.modified = False
             self.soundbank.lower_modified()
         
@@ -111,7 +117,7 @@ class RandomSequenceContainer(HircEntry):
                 stream.advance(5)
                 stream.advance(16*stream.uint32_read())
                 stream.advance(20*stream.uint32_read())
-        if stream.uint8_read() & 0b0000_1000: #I forget what this is for
+        if stream.uint8_read() & 0b0000_1000: #I forget what this is for (if HAS AUX)
             stream.advance(26)
         else:
            stream.advance(10)
@@ -168,7 +174,9 @@ class MusicSegment(HircEntry):
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
         entry.hierarchy_id = stream.uint32_read()
-        entry.unused_sections.append(stream.read(15))
+        entry.unused_sections.append(stream.read(10))
+        entry.parent_id = stream.uint32_read()
+        entry.unused_sections.append(stream.read(1))
         n = stream.uint8_read() #number of props
         stream.seek(stream.tell()-1)
         entry.unused_sections.append(stream.read(5*n + 1))
@@ -216,12 +224,14 @@ class MusicSegment(HircEntry):
             b"".join([
                 struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
                 self.unused_sections[0],
+                self.parent_id.to_bytes(4, byteorder="little")
                 self.unused_sections[1],
                 self.unused_sections[2],
+                self.unused_sections[3],
                 len(self.tracks).to_bytes(4, byteorder="little"),
                 b"".join([x.to_bytes(4, byteorder="little") for x in self.tracks]),
-                self.unused_sections[3],
                 self.unused_sections[4],
+                self.unused_sections[5],
                 struct.pack("<d", self.duration),
                 len(self.markers).to_bytes(4, byteorder="little"),
                 b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in self.markers])
@@ -269,6 +279,7 @@ class MusicTrack(HircEntry):
     def __init__(self):
         super().__init__()
         self.bit_flags = 0
+        self.unused_sections = []
         
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -286,6 +297,17 @@ class MusicTrack(HircEntry):
         for _ in range(num_track_info):
             track = TrackInfoStruct.from_bytes(stream.read(44))
             entry.track_info.append(track)
+        start = stream.tell()
+        num_sub_tracks = stream.uint32_read()
+        num_clip_automations = stream.uint32_read()
+        for _ in range(num_clip_automations):
+            stream.advance(12)
+        stream.advance(5)
+        end_position = stream.tell()
+        stream.seek(start)
+        entry.unused_sections.append(stream.read(end_position - start))
+        entry.override_bus_id = stream.uint32_read()
+        entry.parent_id = stream.uint32_read()
         entry.misc = stream.read(entry.size - (stream.tell()-start_position))
         return entry
         
@@ -302,7 +324,7 @@ class MusicTrack(HircEntry):
     def get_data(self):
         b = b"".join([source.get_data() for source in self.sources])
         t = b"".join([track.get_data() for track in self.track_info])
-        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.misc
+        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
     
 class Sound(HircEntry):
     

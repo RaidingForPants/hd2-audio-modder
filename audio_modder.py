@@ -196,7 +196,7 @@ class AudioSource:
         self.short_id = 0
         self.modified = False
         self.data_OLD = b""
-        self.subscribers = set()
+        self.parents = set()
         self.stream_type = 0
         
     def set_data(self, data, notify_subscribers=True, set_modified=True):
@@ -354,8 +354,8 @@ class BankParser:
 class WwiseBank(Subscriber):
     
     def __init__(self):
-        self.data = b""
         self.bank_header = b""
+        self.data = b""
         self.toc_data_header = b""
         self.bank_misc_data = b""
         self.modified = False
@@ -438,10 +438,6 @@ class WwiseBank(Subscriber):
                 max_progress += len(entry.sources)
                     
         
-        bank_generation_progress_window = ProgressWindow("Generating Soundbanks", max_progress)
-        bank_generation_progress_window.show()
-        bank_generation_progress_window.set_text(f"Generating {self.dep.data}")
-        
         didx_array = []
         data_array = []
         
@@ -449,7 +445,6 @@ class WwiseBank(Subscriber):
         
         for entry in self.hierarchy.get_type(SOUND):
             for source in entry.sources:
-                bank_generation_progress_window.step()
                 if source.plugin_id == VORBIS:
                     try:
                         audio = audio_sources[source.source_id]
@@ -492,7 +487,6 @@ class WwiseBank(Subscriber):
         self.toc_header.toc_data_size = len(data) + len(self.toc_data_header)
         self.toc_data_header[4:8] = len(data).to_bytes(4, byteorder="little")
         self.data = data
-        bank_generation_progress_window.destroy()
         return data
                      
     def get_entry_index(self):
@@ -735,6 +729,23 @@ class FileReader:
             toc_file.write(unk.to_bytes(4, byteorder='little'))
         
         file_position = toc_file.tell()
+            
+        for key in self.wwise_banks.keys():
+            toc_file.seek(file_position)
+            file_position += 80
+            bank = self.wwise_banks[key]
+            toc_file.write(bank.toc_header.get_data())
+            toc_file.seek(bank.toc_header.toc_data_offset)
+            toc_file.write(pad_to_16_byte_align(bank.toc_data_header + bank.data))
+            
+        for key in self.wwise_banks.keys():
+            toc_file.seek(file_position)
+            file_position += 80
+            bank = self.wwise_banks[key]
+            toc_file.write(bank.dep.toc_header.get_data())
+            toc_file.seek(bank.dep.toc_header.toc_data_offset)
+            toc_file.write(pad_to_16_byte_align(bank.dep.get_data()))
+            
         for key in self.wwise_streams.keys():
             toc_file.seek(file_position)
             file_position += 80
@@ -744,22 +755,6 @@ class FileReader:
             toc_file.write(pad_to_16_byte_align(stream.TocData))
             stream_file.seek(stream.toc_header.stream_file_offset)
             stream_file.write(pad_to_16_byte_align(stream.content.get_data()))
-            
-        for key in self.wwise_banks.keys():
-            toc_file.seek(file_position)
-            file_position += 80
-            bank = self.wwise_banks[key]
-            toc_file.write(bank.toc_header.get_data())
-            toc_file.seek(bank.toc_header.toc_data_offset)
-            toc_file.write(pad_to_16_byte_align(bank.toc_data_header + bank.generate(self.audio_sources)))
-            
-        for key in self.wwise_banks.keys():
-            toc_file.seek(file_position)
-            file_position += 80
-            bank = self.wwise_banks[key]
-            toc_file.write(bank.dep.toc_header.get_data())
-            toc_file.seek(bank.dep.toc_header.toc_data_offset)
-            toc_file.write(pad_to_16_byte_align(bank.dep.get_data()))
             
         for key in self.text_banks.keys():
             toc_file.seek(file_position)
@@ -791,7 +786,7 @@ class FileReader:
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
         
         for key, value in self.wwise_banks.items():
-            #value.generate(self.audio_sources, self.music_track_events)
+            value.generate(self.audio_sources, self.music_track_events)
             
             value.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
@@ -801,7 +796,7 @@ class FileReader:
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
             
         for key, value in self.text_banks.items():
-            #value.generate(string_entries=self.string_entries)
+            value.generate(string_entries=self.string_entries)
             value.toc_header.toc_data_offset = toc_file_offset
             toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
         
@@ -1530,22 +1525,21 @@ class FileHandler:
                     if "stream total samples" in line:
                         total_samples = int(line[22:line.index("(")-1])
                 len_ms = total_samples * 1000 / sample_rate
-                if audio.get_track_info() is not None:
-                    audio.get_track_info().set_data(play_at=0, begin_trim_offset=0, end_trim_offset=0, source_duration=len_ms)
                 # find music segment for Audio Source
                 stop = False
-                for segment in self.file_reader.music_segments.values():
-                    for track_id in segment.tracks:
-                        track = segment.soundbank.hierarchy.entries[track_id]
-                        for source in track.sources:
-                            if source.source_id == audio.get_short_id():
-                                segment.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
-                                stop = True
+                for bank in self.file_reader.wwise_banks.values():
+                    for segment in bank.hierarchy.get_type(MUSIC_SEGMENT):
+                        for track_id in segment.tracks:
+                            track = segment.soundbank.hierarchy.entries[track_id]
+                            for source in track.sources:
+                                if source.source_id == audio.get_short_id():
+                                    segment.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+                                    stop = True
+                                    break
+                            if stop:
                                 break
                         if stop:
                             break
-                    if stop:
-                        break
                         
     def create_external_sources_list(self, sources: list[str]): -> str
         root = etree.Element("ExternalSourcesList", attrib={
