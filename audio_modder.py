@@ -10,6 +10,7 @@ import shutil
 import wave
 import sys
 import pathlib
+import copy
 import xml.etree.ElementTree as etree
 from wwise_hierarchy import *
 
@@ -531,6 +532,7 @@ class StringEntry:
         self.text_old = ""
         self.string_id = 0
         self.modified = False
+        self.parent = None
         
     def get_id(self):
         return self.string_id
@@ -541,6 +543,7 @@ class StringEntry:
     def set_text(self, text):
         if not self.modified:
             self.text_old = self.text
+            self.parent.raise_modified()
         self.modified = True
         self.text = text
         
@@ -548,6 +551,7 @@ class StringEntry:
         if self.modified:
             self.text = self.text_old
             self.modified = False
+            self.parent.lower_modified()
         
 class TextBank:
     
@@ -556,6 +560,7 @@ class TextBank:
         self.entries = {}
         self.language = 0
         self.modified = False
+        self.modified_count = 0
      
     def set_data(self, data):
         self.entries.clear()
@@ -569,6 +574,7 @@ class TextBank:
         offset = 0
         for n in range(num_entries):
             entry = StringEntry()
+            entry.parent = self
             string_id = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
             string_offset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
             entry.string_id = string_id
@@ -577,6 +583,13 @@ class TextBank:
                 stopIndex += 1
             entry.text = data[string_offset:stopIndex].decode('utf-8')
             self.entries[string_id] = entry
+            
+    def revert_modifications(self, entry_id = 0):
+        if entry_id:
+            self.entries[entry_id].revert_modifications()
+        else:
+            for entry in self.entries.values():
+                entry.revert_modifications()
             
     def update(self):
         pass
@@ -623,6 +636,16 @@ class TextBank:
             return self.toc_header.entry_index
         except:
             return 0
+            
+    def raise_modified(self):
+        self.modified_count+=1
+        self.modified = True
+        
+    def lower_modified(self):
+        if self.modified:
+            self.modified_count-=1
+            if self.modified_count == 0:
+                self.modified = False
 
 class FileReader:
     
@@ -1176,13 +1199,10 @@ class FileHandler:
     def revert_all(self):
         for audio in self.file_reader.audio_sources.values():
             audio.revert_modifications()
-        for language in self.file_reader.string_entries.values():
-            for string in language.values():
-                string.revert_modifications()
-        for track_info in self.file_reader.music_track_events.values():
-            track_info.revert_modifications()
-        for music_segment in self.file_reader.music_segments.values():
-            music_segment.revert_modifications()
+        for bank in self.file_reader.wwise_banks.values():
+            bank.hierarchy.revert_modifications()
+        for bank in self.file_reader.text_banks.values():
+            bank.revert_modifications()
         
     def revert_audio(self, file_id):
         audio = self.get_audio_by_id(file_id)
@@ -1524,6 +1544,15 @@ class FileHandler:
                 for item in audio.parents:
                     if isinstance(item, MusicTrack):
                         item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+                        tracks = copy.deepcopy(item.track_info)
+                        for t in tracks:
+                            if t.source_id == audio.get_short_id():
+                                t.begin_trim_offset = 0
+                                t.end_trim_offset = 0
+                                t.source_duration = len_ms
+                                t.play_at = 0
+                                break
+                        item.set_data(track_info=tracks)
                         
     def create_external_sources_list(self, sources: list[str]) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
@@ -2307,6 +2336,103 @@ class StringEntryWindow:
             self.text_box.delete("1.0", END)
             self.text_box.insert(END, self.string_entry.get_text())
             self.update_modified()
+            
+class MusicTrackWindow:
+    
+    def __init__(self, parent, update_modified):
+        self.frame = Frame(parent)
+        self.selected_track = 0
+        self.update_modified = update_modified
+        self.fake_image = tkinter.PhotoImage(width=1, height=1)
+        self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), width=50, anchor="center")
+        self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
+        self.play_at_text_var = tkinter.StringVar(self.frame)
+        self.duration_text_var = tkinter.StringVar(self.frame)
+        self.start_offset_text_var = tkinter.StringVar(self.frame)
+        self.end_offset_text_var = tkinter.StringVar(self.frame)
+        self.source_selection_listbox = tkinter.Listbox(self.frame)
+        self.source_selection_listbox.bind("<Double-Button-1>", self.set_track_info)
+        
+        self.play_at_label = ttk.Label(self.frame,
+                                   text="Play At (ms)",
+                                   font=('Segoe UI', 12),
+                                   anchor="center")
+        self.play_at_text = ttk.Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=54)
+        
+        
+        self.duration_label = ttk.Label(self.frame,
+                                    text="Duration (ms)",
+                                    font=('Segoe UI', 12),
+                                    anchor="center")
+        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=54)
+        
+        
+        self.start_offset_label = ttk.Label(self.frame,
+                                        text="Start Trim (ms)",
+                                        font=('Segoe UI', 12),
+                                        anchor="center")
+        self.start_offset_text = ttk.Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=54)
+        
+        
+        self.end_offset_label = ttk.Label(self.frame,
+                                      text="End Trim (ms)",
+                                      font=('Segoe UI', 12),
+                                      anchor="center")
+        self.end_offset_text = ttk.Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=54)
+
+        self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
+        
+        self.title_label.pack(pady=5)
+        
+    def set_track_info(self, event=None, selection=0):
+        if not selection:
+            selection = self.source_selection_listbox.get(self.source_selection_listbox.curselection()[0])
+        for t in self.track.track_info:
+            if t.source_id == selection or t.event_id == selection:
+                track_info_struct = t
+                break
+                
+        self.selected_track = track_info_struct
+                
+        self.duration_text.delete(0, 'end')
+        self.duration_text.insert(END, str(track_info_struct.source_duration))
+        self.start_offset_text.delete(0, 'end')
+        self.start_offset_text.insert(END, str(track_info_struct.begin_trim_offset))
+        self.end_offset_text.delete(0, 'end')
+        self.end_offset_text.insert(END, str(track_info_struct.end_trim_offset))
+        self.play_at_text.delete(0, 'end')
+        self.play_at_text.insert(END, str(track_info_struct.play_at))
+        
+        self.play_at_label.pack()
+        self.play_at_text.pack()
+        self.duration_label.pack()
+        self.duration_text.pack()
+        self.start_offset_label.pack()
+        self.start_offset_text.pack()
+        self.end_offset_label.pack()
+        self.end_offset_text.pack()
+        
+        self.revert_button.pack(side="left")
+        
+    def set_track(self, track):
+        self.track = track
+        self.source_selection_listbox.delete(0, 'end')
+        for track_info_struct in self.track.track_info:
+            if track_info_struct.source_id != 0:
+                self.source_selection_listbox.insert(END, track_info_struct.source_id)
+            else:
+                self.source_selection_listbox.insert(END, track_info_struct.event_id)
+        
+        if len(track.track_info) > 0:
+            self.source_selection_listbox.pack()
+            self.set_track_info(selection=track.track_info[0].source_id if track.track_info[0].source_id != 0 else track.track_info[0].event_id)
+    def revert(self):
+        self.track.revert_modifications()
+        self.set_track(self.track)
+        
+    def apply_changes(self):
+        pass
+        
         
 class AudioSourceWindow:
     
@@ -2315,6 +2441,8 @@ class AudioSourceWindow:
         self.update_modified = update_modified
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.play = play
+        self.track_info = None
+        self.audio = None
         self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), width=50, anchor="center")
         self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
         self.play_button = ttk.Button(self.frame, text= '\u23f5', image=self.fake_image, compound='c', width=2)
@@ -2355,12 +2483,9 @@ class AudioSourceWindow:
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack(pady=5)
-       
         
     def set_audio(self, audio):
         self.audio = audio
-        self.track_info = None
-        #self.track_info = audio.get_track_info()
         self.title_label.configure(text=f"Info for {audio.get_id()}.wem")
         self.play_button.configure(text= '\u23f5')
         self.revert_button.pack_forget()
@@ -2385,37 +2510,10 @@ class AudioSourceWindow:
             self.audio.data = temp
         self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
         self.play_original_button.configure(command=partial(play_original_audio, self.play_original_button, audio.get_short_id(), partial(reset_button_icon, self.play_original_button)))
-        if self.track_info is not None:
-            self.play_at_text.delete(0, 'end')
-            self.duration_text.delete(0, 'end')
-            self.start_offset_text.delete(0, 'end')
-            self.end_offset_text.delete(0, 'end')
-            self.play_at_text.insert(END, f"{self.track_info.play_at}")
-            self.duration_text.insert(END, f"{self.track_info.source_duration}")
-            self.start_offset_text.insert(END, f"{self.track_info.begin_trim_offset}")
-            self.end_offset_text.insert(END, f"{self.track_info.end_trim_offset}")
-            self.play_at_label.pack()
-            self.play_at_text.pack()
-            self.duration_label.pack()
-            self.duration_text.pack()
-            self.start_offset_label.pack()
-            self.start_offset_text.pack()
-            self.end_offset_label.pack()
-            self.end_offset_text.pack()
+        
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left")
-        if self.track_info is not None:
-            self.apply_button.pack(side="left")
-        else:
-            self.play_at_label.forget()
-            self.play_at_text.forget()
-            self.duration_label.forget()
-            self.duration_text.forget()
-            self.start_offset_label.forget()
-            self.start_offset_text.forget()
-            self.end_offset_label.forget()
-            self.end_offset_text.forget()
-            self.apply_button.forget()
+        
         if self.audio.modified and self.audio.data_OLD != b"":
             self.play_original_label.pack(side="right")
             self.play_original_button.pack(side="right")
@@ -2884,6 +2982,8 @@ class MainWindow:
                                                    self.check_modified)
         self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
                                                      self.check_modified)
+                                                     
+        self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified)
                                                      
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
@@ -3513,6 +3613,9 @@ class MainWindow:
         elif selection_type == "Music Segment":
             self.segment_info_panel.set_segment_info(self.file_handler.get_hierarchy_entry(bank_id, selection_id))
             self.segment_info_panel.frame.pack()
+        elif selection_type == "Music Track":
+            self.track_info_panel.set_track(self.file_handler.get_hierarchy_entry(bank_id, selection_id))
+            self.track_info_panel.frame.pack()
         elif selection_type == "Sound Bank":
             pass
         elif selection_type == "Text Bank":
@@ -3680,17 +3783,17 @@ class MainWindow:
 
     def update_language_menu(self):
         self.options_menu.delete(1, "end") #change to delete only the language select menu
-        '''
-        if len(self.file_handler.get_strings()) > 0:
+        if len(self.file_handler.file_reader.text_banks) > 0:
             self.language_menu.delete(0, "end")
             first = ""
             self.options_menu.add_cascade(label="Game text language", menu=self.language_menu)
             for name, lang_id in LANGUAGE_MAPPING.items():
                 if first == "": first = name
-                if lang_id in self.file_handler.get_strings():
-                    self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
+                for text_bank in self.file_handler.file_reader.text_banks.values():
+                    if lang_id == text_bank.language:
+                        self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
+                        break
             self.selected_language.set(first)
-        '''
 
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = None):
         self.sound_handler.kill_sound()

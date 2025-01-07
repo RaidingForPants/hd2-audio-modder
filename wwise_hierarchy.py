@@ -38,6 +38,10 @@ class HircEntry:
     def set_data(self, entry = None, **data):
         if not self.modified:
             self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -45,19 +49,21 @@ class HircEntry:
             for name, value in data.items():
                 setattr(self, name, value)
         self.modified = True
-        self.size = len(self.get_data())
+        self.size = len(self.get_data())-5
         try:
             self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
         except:
             self.parent = None
-        self.raise_modified()
-        
+
     def revert_modifications(self):
         if self.modified:
             self.set_data(self.from_bytes(self.data_old))
             self.data_old = None
             self.modified = False
-            self.lower_modified()
+            if self.parent:
+                self.parent.lower_modified()
+            else:
+                self.soundbank.lower_modified()
         
     def import_entry(self, new_entry):
         if (
@@ -224,6 +230,31 @@ class MusicSegment(HircEntry):
                 entry.exit_marker = marker
         return entry
         
+    def set_data(self, entry = None, **data):
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                if name == "entry_marker":
+                    self.entry_marker[1] = value
+                elif name == "exit_marker":
+                    self.exit_marker[1] = value
+                else:
+                    setattr(self, name, value)
+        self.modified = True
+        self.size = len(self.get_data())
+        try:
+            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
+        except:
+            self.parent = None
+        
     def get_data(self):
         return (
             b"".join([
@@ -308,7 +339,10 @@ class MusicTrack(HircEntry):
         num_sub_tracks = stream.uint32_read()
         num_clip_automations = stream.uint32_read()
         for _ in range(num_clip_automations):
-            stream.advance(12)
+            stream.advance(8)
+            num_graph_points = stream.uint32_read()
+            for _ in range(num_graph_points):
+                stream.advance(12)
         stream.advance(5)
         end_position = stream.tell()
         stream.seek(start)
@@ -321,7 +355,7 @@ class MusicTrack(HircEntry):
     def get_data(self):
         b = b"".join([source.get_data() for source in self.sources])
         t = b"".join([track.get_data() for track in self.track_info])
-        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
+        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
     
 class Sound(HircEntry):
     
@@ -389,7 +423,6 @@ class WwiseHierarchy:
                 entry.parent = self.get_entry(entry.parent_id)
             except:
                 pass
-        print(self.type_lists.keys())
                 
     def import_hierarchy(self, new_hierarchy):
         for entry in new_hierarchy.get_entries():
