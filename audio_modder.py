@@ -10,6 +10,7 @@ import shutil
 import wave
 import sys
 import pathlib
+import locale
 import xml.etree.ElementTree as etree
 
 from functools import partial
@@ -50,6 +51,7 @@ WWISE_BANK = 6006249203084351385
 WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
 STRING = 979299457696010195
+SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
 LANGUAGE_MAPPING = ({
     "English (US)" : 0x03f97b57,
     "English (UK)" : 0x6f4515cb,
@@ -58,12 +60,12 @@ LANGUAGE_MAPPING = ({
     "Português 2": 1244441033,
     "Polski": 260593578,
     "日本語": 2427891497,
-    "中文（繁體）": 2663028010,
-    "中文（简体）": 2189905090,
+    "繁體中文": 2663028010,
+    "简体中文": 2189905090,
     "Nederlands": 291057413,
     "한국어": 3151476177,
-    "Español 1": 830498882,
-    "Español 2": 3854981686,
+    "Español (Castellano)": 830498882,
+    "Español (LatinoAmérica)": 3854981686,
     "Deutsch": 3124347884,
     "Italiano": 3808107213,
     "Русский": 3317373165
@@ -2070,31 +2072,6 @@ class FileHandler:
                     if (not old_audio.modified and new_audio.get_data() != old_audio.get_data()
                         or old_audio.modified and new_audio.get_data() != old_audio.data_OLD):
                         old_audio.set_data(new_audio.get_data())
-                    if old_audio.get_track_info() is not None and new_audio.get_track_info() is not None:
-                        old_info = old_audio.get_track_info()
-                        new_info = new_audio.get_track_info()
-                        if (
-                            (
-                                not old_info.modified 
-                                and (
-                                    old_info.play_at != new_info.play_at
-                                    or old_info.begin_trim_offset != new_info.begin_trim_offset
-                                    or old_info.end_trim_offset != new_info.end_trim_offset
-                                    or old_info.source_duration != new_info.source_duration
-                                )
-                            )
-                            or
-                            (
-                                old_info.modified
-                                and (
-                                    old_info.play_at_old != new_info.play_at
-                                    or old_info.begin_trim_offset_old != new_info.begin_trim_offset
-                                    or old_info.end_trim_offset_old != new_info.end_trim_offset
-                                    or old_info.source_duration_old != new_info.source_duration
-                                )
-                            )
-                        ):
-                            old_audio.get_track_info().set_data(play_at=new_info.play_at, begin_trim_offset=new_info.begin_trim_offset, end_trim_offset=new_info.end_trim_offset, source_duration=new_info.source_duration)
                 progress_window.step()
 
         for key, music_segment in patch_file_reader.music_segments.items():
@@ -2122,6 +2099,44 @@ class FileHandler:
                 )
             ):
                 old_music_segment.set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
+            for track_id in music_segment.tracks:
+                new_track = music_segment.soundbank.hierarchy.entries[track_id]
+                old_track = old_music_segment.soundbank.hierarchy.entries[track_id]
+                for idx, new_info in enumerate(new_track.track_info):
+                    for i in old_track.track_info:
+                        if (
+                            (
+                                new_info.source_id != 0 and new_info.source_id == i.source_id
+                            )
+                            or
+                            (
+                                new_info.event_id != 0 and new_info.event_id == i.event_id
+                            )
+                        ):
+                            old_info = i
+                            break
+                    if (
+                        (
+                            not old_info.modified
+                            and (
+                                old_info.play_at != new_info.play_at
+                                or old_info.begin_trim_offset != new_info.begin_trim_offset
+                                or old_info.end_trim_offset != new_info.end_trim_offset
+                                or old_info.source_duration != new_info.source_duration
+                            )
+                        )
+                        or
+                        (
+                            old_info.modified
+                            and (
+                                old_info.play_at_old != new_info.play_at
+                                or old_info.begin_trim_offset_old != new_info.begin_trim_offset
+                                or old_info.end_trim_offset_old != new_info.end_trim_offset
+                                or old_info.source_duration_old != new_info.source_duration
+                            )
+                        )
+                    ):
+                        old_info.set_data(play_at=new_info.play_at, begin_trim_offset=new_info.begin_trim_offset, end_trim_offset=new_info.end_trim_offset, source_duration=new_info.source_duration)
 
         for text_data in patch_file_reader.text_banks.values():
             for string_id in text_data.string_ids:
@@ -2212,7 +2227,7 @@ class FileHandler:
                 except:
                     logger.warning(f"Failed to get duration info for {wem}")
                     continue
-                for line in process.stdout.decode("utf-8").split("\n"):
+                for line in process.stdout.decode(locale.getpreferredencoding()).split("\n"):
                     if "sample rate" in line:
                         sample_rate = float(line[13:line.index("Hz")-1])
                     if "stream total samples" in line:
@@ -3712,6 +3727,7 @@ class MainWindow:
         self.workspace.bind("<Double-Button-1>", self.workspace_on_double_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
         self.treeview.dnd_bind("<<Drop>>", self.drop_import)
+        self.treeview.dnd_bind("<<DropPosition>>", self.drop_position)
         self.workspace.dnd_bind("<<Drop>>", self.drop_add_to_workspace)
         self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
@@ -3719,6 +3735,12 @@ class MainWindow:
 
         self.root.resizable(True, True)
         self.root.mainloop()
+        
+    def drop_position(self, event):
+        if event.data:
+            if len(event.widget.tk.splitlist(event.data)) != 1:
+                return
+        self.treeview.selection_set(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()))
 
     def workspace_drag_assist(self, event):
         selected_item = self.workspace.identify_row(event.y)
@@ -3733,35 +3755,44 @@ class MainWindow:
         renamed = False
         old_name = ""
         if event.data:
-            import_files = []
-            dropped_files = event.widget.tk.splitlist(event.data)
-            for file in dropped_files:
-                import_files.extend(list_files_recursive(file))
-            if (
-                len(import_files) == 1 
-                and os.path.splitext(import_files[0])[1] in [".mp3", ".wav", ".ogg", ".m4a", ".wem"]
-                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
-            ):
-                audio_id = self.file_handler.get_number_prefix(os.path.basename(import_files[0]))
-                if self.file_handler.get_audio_by_id(audio_id) is not None:
-                    answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
-                    if answer is None:
-                        return
-                    if not answer:
+            try:
+                import_files = []
+                dropped_files = event.widget.tk.splitlist(event.data)
+                for file in dropped_files:
+                    import_files.extend(list_files_recursive(file))
+                if os.path.exists(WWISE_CLI):
+                    import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
+                else:
+                    import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
+                print(import_files)
+                if (
+                    len(import_files) == 1 
+                    and os.path.splitext(import_files[0])[1] in [".mp3", ".wav", ".ogg", ".m4a", ".wem"]
+                    and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
+                ):
+                    audio_id = self.file_handler.get_number_prefix(os.path.basename(import_files[0]))
+                    if self.file_handler.get_audio_by_id(audio_id) is not None:
+                        answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
+                        if answer is None:
+                            return
+                        if not answer:
+                            new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
+                            shutil.copyfile(import_files[0], new_name)
+                            old_name = import_files[0]
+                            import_files[0] = new_name
+                            renamed = True
+                    else:
                         new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                        os.rename(import_files[0], new_name)
+                        shutil.copyfile(import_files[0], new_name)
                         old_name = import_files[0]
                         import_files[0] = new_name
                         renamed = True
-                else:
-                    new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                    os.rename(import_files[0], new_name)
-                    old_name = import_files[0]
-                    import_files[0] = new_name
-                    renamed = True
-            self.import_files(import_files)
-            if renamed:
-                os.rename(new_name, old_name)
+                print(import_files)
+                self.import_files(import_files)
+                if renamed:
+                    os.remove(new_name)
+            except:
+                pass
 
     def drop_add_to_workspace(self, event):
         if self.drag_source_widget is not self.workspace and event.data:
@@ -3964,7 +3995,7 @@ class MainWindow:
     def import_audio_files(self):
         
         if os.path.exists(WWISE_CLI):
-            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
+            available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
@@ -3976,7 +4007,10 @@ class MainWindow:
         wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
         
         # check other file extensions and call vgmstream to convert to wav, then add to wavs list
-        others = [file for file in files if os.path.splitext(file)[1] in [".mp3", ".ogg", ".m4a"]]
+        filetypes = list(SUPPORTED_AUDIO_TYPES)
+        filetypes.remove(".wav")
+        filetypes.remove(".wem")
+        others = [file for file in files if os.path.splitext(file)[1] in filetypes]
         temp_files = []
         for file in others:
             process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
@@ -4072,7 +4106,7 @@ class MainWindow:
         
     def targeted_import(self, targets):
         if os.path.exists(WWISE_CLI):
-            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
+            available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         filename = askopenfilename(title="Select audio file to import", filetypes=available_filetypes)
@@ -4148,14 +4182,12 @@ class MainWindow:
         old_name = filename
         for target in targets:
             new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
-            os.rename(filename, new_name)
+            shutil.copyfile(filename, new_name)
             self.import_files([new_name])
-            os.rename(new_name, old_name)
-        try:
-            if temp_file:
-                os.remove(filename)
-        except:
-            pass
+            try:
+                os.remove(new_name)
+            except:
+                pass
         
 
     def treeview_on_right_click(self, event):
