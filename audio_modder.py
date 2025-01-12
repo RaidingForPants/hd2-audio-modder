@@ -53,7 +53,7 @@ REV_AUDIO = 0x01A01052
 WWISE_BANK = 6006249203084351385
 WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
-STRING = 979299457696010195
+TEXT_BANK = 979299457696010195
 
 
 # constants (set once on runtime)
@@ -352,27 +352,13 @@ class WwiseBank(Subscriber):
         self.hierarchy.import_hierarchy(new_hierarchy)
         
     def add_content(self, content):
-        #content.parents.add(self)
-        #if content.track_info is not None:
-        #    content.track_info.soundbanks.add(self)
         self.content.append(content)
         
     def remove_content(self, content):
-        #try:
-        #    content.parents.remove(self)
-        #except:
-        #    pass
-            
         try:
             self.content.remove(content)
         except:
             pass
-            
-        #try:
-        #    content.track_info.soundbanks.remove(self)
-        #except:
-        #    pass
-  
     def get_content(self):
         return self.content
         
@@ -668,71 +654,53 @@ class FileReader:
                 stream_file = MemoryStream(f.read())
         self.load(toc_file, stream_file)
         
+    def write_type_header(self, toc_file, entry_type, num_entries):
+        if num_entries > 0:
+            toc_file.write(struct.pack("<QQQII", 0, entry_type, num_entries, 16, 64))
+        
     def to_file(self, path):
         toc_file = MemoryStream()
         stream_file = MemoryStream()
         self.num_files = len(self.wwise_streams) + 2*len(self.wwise_banks) + len(self.text_banks)
-        self.num_types = 0
-        if len(self.wwise_streams) > 0: self.num_types += 1
-        if len(self.wwise_banks) > 0: self.num_types += 2
-        if len(self.text_banks) > 0: self.num_types += 1
+        self.num_types = (1 if self.wwise_streams else 0) + (1 if self.text_banks else 0) + (2 if self.wwise_banks else 0)
         
-        toc_file.write(self.magic.to_bytes(4, byteorder="little"))
+        # write header
+        toc_file.write(struct.pack("<IIII56s", self.magic, self.num_types, self.num_files, self.unknown, self.unk4Data))
         
-        toc_file.write(self.num_types.to_bytes(4, byteorder="little"))
-        toc_file.write(self.num_files.to_bytes(4, byteorder="little"))
-        toc_file.write(self.unknown.to_bytes(4, byteorder="little"))
-        toc_file.write(self.unk4Data)
+        self.write_type_header(toc_file, WWISE_STREAM, len(self.wwise_streams))
+        self.write_type_header(toc_file, WWISE_BANK, len(self.wwise_banks))
+        self.write_type_header(toc_file, WWISE_DEP, len(self.wwise_banks))
+        self.write_type_header(toc_file, TEXT_BANK, len(self.text_banks))
         
-        if len(self.wwise_streams) > 0:
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = WWISE_STREAM
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.wwise_streams)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            
-        if len(self.wwise_banks) > 0:
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = WWISE_BANK
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.wwise_banks)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            
-            #deps
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = WWISE_DEP
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.wwise_banks)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            
-        if len(self.text_banks) > 0:
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = STRING
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.text_banks)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
+        toc_data_offset = toc_file.tell() + 80 * self.num_files
+        stream_file_offset = 0
         
-        file_position = toc_file.tell()
+        # generate data and toc entries
+        toc_entries = []
+        toc_data = []
+        stream_data = []
+        entry_index = 0
+        
+        for bank in self.wwise_banks.values():
+            bank_data = bank.generate()
+            bank_data = b"".join([b"Ø/vx", len(bank_data).to_bytes(4, byteorder="little"), bank.get_id().to_bytes(8, byteorder="little"), bank_data])
+            dep_data = bank.dep.get_data()
+            dep_data = b"".join([b"Ø/vx", len(dep_data).to_bytes(4, byteorder="little"), dep_data])
+            toc_entries.append(struct.pack("<QQQQQQQIIIIII",
+            bank.get_id(),
+            WWISE_BANK,
+            toc_data_offset,
+            stream_file_offset,
+            0,
+            0,
+            0,
+            len(bank_data),
+            0,
+            0,
+            16,
+            64,
+            entry_index))
+            toc_entries.append(bank.dep.
             
         for key in self.wwise_banks.keys():
             toc_file.seek(file_position)
@@ -874,7 +842,7 @@ class FileReader:
                     self.wwise_banks[toc_header.file_id].dep = dep
                 except KeyError:
                     pass
-            elif toc_header.type_id == STRING: #string_entry
+            elif toc_header.type_id == TEXT_BANK: #string_entry
                 toc_file.seek(toc_header.toc_data_offset)
                 data = toc_file.read(toc_header.toc_data_size)
                 text_bank = TextBank()
@@ -1377,7 +1345,6 @@ class FileHandler:
     def save_archive_file(self):
         folder = filedialog.askdirectory(title="Select folder to save files to")
         if os.path.exists(folder):
-            self.file_reader.rebuild_headers()
             self.file_reader.to_file(folder)
         else:
             print("Invalid folder selected, aborting save")
@@ -1502,7 +1469,6 @@ class FileHandler:
                         patch_file_reader.text_banks[key] = value
                         break
      
-            patch_file_reader.rebuild_headers()
             patch_file_reader.to_file(folder)
         else:
             raise Exception("Invalid folder selected for patch generation")
