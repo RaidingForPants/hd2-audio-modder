@@ -4114,11 +4114,11 @@ class MainWindow:
         if not filename or not os.path.exists(filename):
             return
         if os.path.splitext(filename)[1] in [".mp3", ".ogg", ".m4a"]:
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(filename))[0])}.wav", filename], stdout=subprocess.DEVNULL)
             if process.returncode != 0:
-                logger.error(f"Encountered error when importing {os.path.basename(file)}")
+                logger.error(f"Encountered error when importing {os.path.basename(filename)}")
             else:
-                filename = f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"
+                filename = f"{os.path.join(CACHE, os.path.splitext(os.path.basename(filename))[0])}.wav"
                 temp_file = True
         if os.path.splitext(filename)[1] == ".wav":
             source_list = self.file_handler.create_external_sources_list([filename])
