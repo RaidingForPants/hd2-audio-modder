@@ -1,6 +1,7 @@
 from typing import Any
 import struct
 import os
+from math import ceil
 
 LANGUAGE_MAPPING = ({
     "English (US)" : 0x03f97b57,
