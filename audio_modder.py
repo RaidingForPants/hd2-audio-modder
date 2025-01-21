@@ -1332,8 +1332,6 @@ class Mod:
         
     def remove_game_archive(self, archive_name: str = ""):
         
-        # need to remove the parents that don't exist anymore
-        
         if archive_name not in self.game_archives.keys():
             return
             
@@ -1385,7 +1383,6 @@ class Mod:
                 if key in self.get_wwise_banks().keys():
                     self.bank_count[key] += 1
                     for audio in game_archive.wwise_banks[key].get_content():
-                        # change soundbanks of AudioSource to the existing ones
                         parents = [p for p in audio.parents]
                         for parent in parents:
                             if isinstance(parent, HircEntry) and parent.soundbank.get_id() == key:
