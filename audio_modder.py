@@ -3323,6 +3323,8 @@ class MainWindow:
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
+        if not files:
+            return
         file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
         self.import_files(file_dict)
         
@@ -3801,6 +3803,8 @@ class MainWindow:
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
         if not archive_file:
             archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
+        if not archive_file:
+            return
         self.sound_handler.kill_sound()
         if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
             self.clear_search()
@@ -3882,6 +3886,8 @@ class MainWindow:
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
+        if not output_folder:
+            return
         self.mod_handler.get_active_mod().dump_all_as_wem(output_folder)
         
     def dump_all_as_wav(self):
@@ -3914,6 +3920,8 @@ class MainWindow:
     def import_patch(self):
         self.sound_handler.kill_sound()
         archive_file = askopenfilename(title="Select patch file")
+        if not archive_file:
+            return
         if self.mod_handler.get_active_mod().import_patch(archive_file):
             self.check_modified()
             self.show_info_window()
