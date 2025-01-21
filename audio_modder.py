@@ -11,6 +11,7 @@ import wave
 import sys
 import pathlib
 import copy
+import locale
 import xml.etree.ElementTree as etree
 
 from functools import partial
@@ -53,7 +54,7 @@ WWISE_BANK = 6006249203084351385
 WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
 TEXT_BANK = 979299457696010195
-
+SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
 
 # constants (set once on runtime)
 DIR = os.path.dirname(__file__)
@@ -1520,12 +1521,12 @@ class Mod:
                 try:
                     process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
                     process.check_returncode()
-                    for line in process.stdout.decode("utf-8").split("\n"):
-                    if "sample rate" in line:
-                        sample_rate = float(line[13:line.index("Hz")-1])
-                    if "stream total samples" in line:
-                        total_samples = int(line[22:line.index("(")-1])
-                    len_ms = total_samples * 1000 / sample_rate
+                    for line in process.stdout.decode(locale.getpreferredencoding()).split("\n"):
+                        if "sample rate" in line:
+                            sample_rate = float(line[13:line.index("Hz")-1])
+                        if "stream total samples" in line:
+                            total_samples = int(line[22:line.index("(")-1])
+                        len_ms = total_samples * 1000 / sample_rate
                 except:
                     logger.warning(f"Failed to get duration info for {wem}")
                     have_length = False
@@ -3091,6 +3092,7 @@ class MainWindow:
         self.workspace.bind("<Double-Button-1>", self.workspace_on_double_click)
         self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
         self.treeview.dnd_bind("<<Drop>>", self.drop_import)
+        self.treeview.dnd_bind("<<DropPosition>>", self.drop_position)
         self.workspace.dnd_bind("<<Drop>>", self.drop_add_to_workspace)
         self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
@@ -3098,6 +3100,12 @@ class MainWindow:
 
         self.root.resizable(True, True)
         self.root.mainloop()
+        
+    def drop_position(self, event):
+        if event.data:
+            if len(event.widget.tk.splitlist(event.data)) != 1:
+                return
+        self.treeview.selection_set(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()))
 
     def workspace_drag_assist(self, event):
         selected_item = self.workspace.identify_row(event.y)
@@ -3116,9 +3124,13 @@ class MainWindow:
             dropped_files = event.widget.tk.splitlist(event.data)
             for file in dropped_files:
                 import_files.extend(list_files_recursive(file))
+            if os.path.exists(WWISE_CLI):
+                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
+            else:
+                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
             if (
                 len(import_files) == 1 
-                and os.path.splitext(import_files[0])[1] in [".mp3", ".wav", ".ogg", ".m4a", ".wem"]
+                and os.path.splitext(import_files[0])[1] in SUPPORTED_AUDIO_TYPES
                 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
             ):
                 audio_id = get_number_prefix(os.path.basename(import_files[0]))
@@ -3339,7 +3351,7 @@ class MainWindow:
     def import_audio_files(self):
         
         if os.path.exists(WWISE_CLI):
-            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
+            available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
@@ -3351,7 +3363,10 @@ class MainWindow:
         wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
         
         # check other file extensions and call vgmstream to convert to wav, then add to wavs list
-        others = [file for file in files if os.path.splitext(file)[1] in [".mp3", ".ogg", ".m4a"]]
+        filetypes = list(SUPPORTED_AUDIO_TYPES)
+        filetypes.remove(".wav")
+        filetypes.remove(".wem")
+        others = [file for file in files if os.path.splitext(file)[1] in filetypes]
         temp_files = []
         for file in others:
             process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
@@ -3445,19 +3460,90 @@ class MainWindow:
         self.archive_search.focus_set()
         self.category_search.selection_clear()
         
-    def targeted_import(self, target):
+    def targeted_import(self, targets):
         if os.path.exists(WWISE_CLI):
-            available_filetypes = [("Audio Files", "*.wem *.wav *.mp3 *.ogg *.m4a")]
+            available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         filename = askopenfilename(title="Select audio file to import", filetypes=available_filetypes)
+        temp_file = False
         if not filename or not os.path.exists(filename):
             return
+        if os.path.splitext(filename)[1] in [".mp3", ".ogg", ".m4a"]:
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(filename))[0])}.wav", filename], stdout=subprocess.DEVNULL)
+            if process.returncode != 0:
+                logger.error(f"Encountered error when importing {os.path.basename(filename)}")
+            else:
+                filename = f"{os.path.join(CACHE, os.path.splitext(os.path.basename(filename))[0])}.wav"
+                temp_file = True
+        if os.path.splitext(filename)[1] == ".wav":
+            source_list = self.file_handler.create_external_sources_list([filename])
+        
+            try:
+                if SYSTEM in ["Windows", "Darwin"]:
+                    subprocess.run([
+                        WWISE_CLI,
+                        "migrate",
+                        DEFAULT_WWISE_PROJECT,
+                        "--quiet",
+                    ]).check_returncode()
+                else:
+                    showerror(title="Operation Failed",
+                        message="The current operating system does not support this feature yet")
+            except Exception as e:
+                logger.error(e)
+                showerror(title="Error", message="Error occurred during project migration. Please check log.txt.")
+            
+            convert_dest = os.path.join(CACHE, SYSTEM)
+            try:
+                if SYSTEM == "Darwin":
+                    subprocess.run([
+                        WWISE_CLI,
+                        "convert-external-source",
+                        DEFAULT_WWISE_PROJECT,
+                        "--platform", "Windows",
+                        "--source-file",
+                        source_list,
+                        "--output",
+                        CACHE,
+                    ]).check_returncode()
+                elif SYSTEM == "Windows":
+                    subprocess.run([
+                        WWISE_CLI,
+                        "convert-external-source",
+                        DEFAULT_WWISE_PROJECT,
+                        "--platform", "Windows",
+                        "--source-file",
+                        source_list,
+                        "--output",
+                        CACHE,
+                    ]).check_returncode()
+                else:
+                    showerror(title="Operation Failed",
+                        message="The current operating system does not support this feature yet")
+            except Exception as e:
+                logger.error(e)
+                showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
+        
+            if temp_file:
+                try:
+                    os.remove(filename)
+                except:
+                    pass
+                    
+            temp_file = True
+        
+            filename = os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filename))[0]}.wem")
+        
         old_name = filename
-        new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
-        os.rename(filename, new_name)
-        self.import_files([new_name])
-        os.rename(new_name, old_name)
+        for target in targets:
+            new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
+            shutil.copyfile(filename, new_name)
+            self.import_files([new_name])
+            try:
+                os.remove(new_name)
+            except:
+                pass
         
     def remove_game_archive(self, archive_name):
         self.mod_handler.get_active_mod().remove_game_archive(archive_name)
@@ -3493,11 +3579,10 @@ class MainWindow:
                 )
 
             if all_audio:
-                if is_single:
-                    self.right_click_menu.add_command(
-                        label="Import audio",
-                        command=lambda: self.targeted_import(target=self.treeview.item(select, option="tags")[0])
-                    )
+                self.right_click_menu.add_command(
+                    label="Import audio",
+                    command=lambda: self.targeted_import(targets=[self.treeview.item(select, option="tags")[0] for select in selects])
+                )
 
                 tags = self.treeview.item(selects[-1], option="tags")
                 assert(len(tags) == 1)
