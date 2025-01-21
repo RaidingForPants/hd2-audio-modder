@@ -2,6 +2,7 @@ from typing import Any
 import struct
 import os
 from math import ceil
+from itertools import takewhile
 
 LANGUAGE_MAPPING = ({
     "English (US)" : 0x03f97b57,
@@ -136,6 +137,13 @@ def _16_byte_align(addr):
 def bytes_to_long(bytes):
     assert len(bytes) == 8
     return sum((b << (k * 8) for k, b in enumerate(bytes)))
+    
+def get_number_prefix(self, n):
+    number = ''.join(takewhile(str.isdigit, n or ""))
+    try:
+        return int(number)
+    except:
+        return 0
 
 def murmur64_hash(data: Any, seed: int = 0):
 

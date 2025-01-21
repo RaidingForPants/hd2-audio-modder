@@ -12,11 +12,9 @@ import sys
 import pathlib
 import copy
 import xml.etree.ElementTree as etree
-from wwise_hierarchy import *
 
 from functools import partial
 from functools import cmp_to_key
-from itertools import takewhile
 from math import ceil
 from tkinterdnd2 import *
 from tkinter import *
@@ -36,6 +34,7 @@ import db
 import log
 import fileutil
 from util import *
+from wwise_hierarchy import *
 
 from log import logger
 
@@ -665,7 +664,7 @@ class GameArchive:
     def get_wwise_banks(self):
         return self.wwise_banks
         
-    def get_audio(self):
+    def get_audio_sources(self):
         return self.audio_sources
         
     def get_text_banks(self):
@@ -1099,13 +1098,30 @@ class Mod:
             bank.revert_modifications()
         
     def revert_audio(self, file_id):
-        audio = self.get_audio_by_id(file_id)
+        audio = self.get_audio_source(file_id)
         audio.revert_modifications()
+        
+    def revert_hierarchy_entry(self, soundbank_id: int, entry_id: int):
+        self.get_hierarchy_entry(soundbank_id, entry_id).revert_modifications()
+        
+    def revert_string_entry(self, textbank_id: int, entry_id: int):
+        self.get_string_entry(textbank_id, entry_id).revert_modifications()
+        
+    def revert_text_bank(self, textbank_id: int):
+        self.get_text_bank(textbank_id).revert_modifications()
+        
+    def revert_wwise_hierarchy(self, soundbank_id: int):
+        self.get_wwise_bank(soundbank_id).hierarchy.revert_modifications()
+        
+    def revert_wwise_bank(self, soundbank_id: int):
+        self.revert_wwise_hierarchy(soundbank_id)
+        for audio in self.get_wwise_bank(soundbank_id).get_content():
+            audio.revert_modifications()
         
     def dump_as_wem(self, file_id, output_file: str = ""):
         if not output_file:
             raise ValueError("Invalid output filename!")
-        output_file.write(self.get_audio_by_id(file_id).get_data())
+        output_file.write(self.get_audio_source(file_id).get_data())
         
     def dump_as_wav(self, file_id, output_file = "", muted: bool = False):
 
@@ -1127,7 +1143,7 @@ class Mod:
             return
 
         with open(f"{save_path}.wem", 'wb') as f:
-            f.write(self.get_audio_by_id(file_id).get_data())
+            f.write(self.get_audio_source(file_id).get_data())
 
         process = subprocess.run(
             [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], 
@@ -1145,7 +1161,7 @@ class Mod:
             raise ValueError("Invalid output folder!")
 
         for file_id in file_ids:
-            audio = self.get_audio_by_id(file_id)
+            audio = self.get_audio_source(file_id)
             if audio is not None:
                 save_path = os.path.join(folder, f"{audio.get_id()}")
                 progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wem")
@@ -1161,7 +1177,7 @@ class Mod:
             raise ValueError("Invalid output folder!")
 
         for i, file_id in enumerate(file_ids, start=0):
-            audio: int | None = self.get_audio_by_id(int(file_id))
+            audio: int | None = self.get_audio_source(int(file_id))
             if audio is None:
                 continue
             basename = str(audio.get_id())
@@ -1240,13 +1256,6 @@ class Mod:
             
         progress_window.destroy()
         
-    def get_number_prefix(self, n):
-        number = ''.join(takewhile(str.isdigit, n or ""))
-        try:
-            return int(number)
-        except:
-            log.logger.warning(f"File name must begin with a number: {n}")
-        
     def save_archive_file(self, game_archive: GameArchive, output_folder: str = ""):
 
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
@@ -1262,10 +1271,7 @@ class Mod:
         for game_archive in self.get_game_archives().values():
             self.save_archive_file(game_archive, output_folder)
             
-    def get_game_archives(self):
-        return self.game_archives
-            
-    def get_audio_by_id(self, file_id):
+    def get_audio_source(self, file_id):
         try:
             return self.audio_sources[file_id] #short_id
         except KeyError:
@@ -1286,6 +1292,24 @@ class Mod:
         except KeyError:
             return None
             
+    def get_wwise_bank(self, soundbank_id: int):
+        return self.wwise_banks[soundbank_id]
+        
+    def set_wwise_bank(self, soundbank_id: int, bank: WwiseBank):
+        self.wwise_banks[soundbank_id] = bank
+        
+    def get_wwise_stream(self, stream_id: int):
+        return self.wwise_streams[stream_id]
+        
+    def set_wwise_stream(self, stream_id: int, stream: WwiseStream):
+        self.wwise_streams[stream_id] = stream
+    
+    def get_text_bank(self, textbank_id: int):
+        return self.text_banks[textbank_id]
+    
+    def get_game_archives(self):
+        return self.game_archives
+        
     def get_game_archive(self, archive_name: str):
         return self.get_game_archives()[archive_name]
         
@@ -1295,7 +1319,7 @@ class Mod:
     def get_wwise_banks(self):
         return self.wwise_banks
         
-    def get_audio(self):
+    def get_audio_sources(self):
         return self.audio_sources
         
     def get_text_banks(self):
@@ -1314,6 +1338,18 @@ class Mod:
             logger.warning("Aborting load")
             return False
         return True
+        
+    def import_wwise_hierarchy(self, soundbank_id: int, new_hierarchy: WwiseHierarchy):
+        pass
+        
+    def add_hierarchy_entry(self, soundbank_id: int, new_entry: HircEntry):
+        pass
+        
+    def remove_hierarchy_entry(self, soundbank_id: int, entry_id: int):
+        pass
+        
+    def generate_hierarchy_id(self, soundbank_id: int):
+        pass
         
     def remove_game_archive(self, archive_name: str = ""):
         
@@ -1349,10 +1385,10 @@ class Mod:
                     del self.get_text_banks()[key]
                     del self.text_count[key]
         for key in game_archive.audio_sources.keys():
-            if key in self.get_audio().keys():
+            if key in self.get_audio_sources().keys():
                 self.audio_count[key] -= 1
                 if self.audio_count[key] == 0:
-                    del self.get_audio()[key]
+                    del self.get_audio_sources()[key]
                     del self.audio_count[key]
         
         try:
@@ -1360,8 +1396,6 @@ class Mod:
         except:
             pass
     
-    # need to set the parents of the Audio Sources when consolidating to a single soundbank
-    # if the soundbank already exists, get bank.content to get all the child sources?
     def add_game_archive(self, game_archive: GameArchive):
         key = game_archive.name
         if key in self.game_archives.keys():
@@ -1405,17 +1439,16 @@ class Mod:
                     self.text_count[key] = 1
                     self.get_text_banks()[key] = game_archive.text_banks[key]
             for key in game_archive.audio_sources.keys():
-                if key in self.get_audio().keys():
+                if key in self.get_audio_sources().keys():
                     self.audio_count[key] += 1
                     for parent in game_archive.audio_sources[key].parents:
-                        self.get_audio()[key].parents.add(parent)
-                    game_archive.audio_sources[key] = self.get_audio()[key]
+                        self.get_audio_sources()[key].parents.add(parent)
+                    game_archive.audio_sources[key] = self.get_audio_sources()[key]
                 else:
                     self.audio_count[key] = 1
-                    self.get_audio()[key] = game_archive.audio_sources[key]
+                    self.get_audio_sources()[key] = game_archive.audio_sources[key]
             
-            
-    def import_patch(self, patch_file: str = ""): #TO-DO: only import if DIFFERENT from original audio; makes it possible to import different mods that change the same soundbank
+    def import_patch(self, patch_file: str = ""):
         if os.path.splitext(patch_file)[1] in (".stream", ".gpu_resources"):
             patch_file = os.path.splitext(patch_file)[0]
         if not os.path.exists(patch_file) or not os.path.isfile(patch_file):
@@ -1433,8 +1466,8 @@ class Mod:
         for bank in patch_game_archive.get_wwise_banks().values():
             self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
 
-        for new_audio in patch_game_archive.get_audio().values():
-            old_audio = self.get_audio_by_id(new_audio.get_short_id())
+        for new_audio in patch_game_archive.get_audio_sources().values():
+            old_audio = self.get_audio_source(new_audio.get_short_id())
             if old_audio is not None:
                 if (not old_audio.modified and new_audio.get_data() != old_audio.get_data()
                     or old_audio.modified and new_audio.get_data() != old_audio.data_OLD):
@@ -1474,52 +1507,47 @@ class Mod:
  
         patch_game_archive.to_file(output_folder)
 
-    def import_wems(self, wems: Union[tuple[str, ...], Literal[""], None] = None, set_duration=True): 
+    def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
         if not wems:
             raise Exception("No wems selected for import")
-        for wem in wems:
-            basename = os.path.basename(wem)
-            splits: list[str] = basename.split("_", 1)
-            try:
-                match splits:
-                    case [prefix, name] if int(prefix) < 10000:
-                        basename = name
-            except:
-                pass
-            file_id: int | None = self.get_number_prefix(basename)
-            if file_id == None:
+        for filepath, targets in wems.items():
+            if not os.path.exists(filepath) or not os.path.isfile(filepath):
                 continue
-            audio: AudioSource | None = self.get_audio_by_id(file_id)
-            if audio == None:
-                continue
-            with open(wem, 'rb') as f:
-                audio.set_data(f.read())
+            with open(filepath, 'rb') as f:
+                audio_data = f.read()
+            have_length = True
             if set_duration:
                 try:
-                    process = subprocess.run([VGMSTREAM, "-m", wem], capture_output=True)
+                    process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
                     process.check_returncode()
-                except:
-                    logger.warning(f"Failed to get duration info for {wem}")
-                    continue
-                for line in process.stdout.decode("utf-8").split("\n"):
+                    for line in process.stdout.decode("utf-8").split("\n"):
                     if "sample rate" in line:
                         sample_rate = float(line[13:line.index("Hz")-1])
                     if "stream total samples" in line:
                         total_samples = int(line[22:line.index("(")-1])
-                len_ms = total_samples * 1000 / sample_rate
-                # find music segment for Audio Source
-                for item in audio.parents:
-                    if isinstance(item, MusicTrack):
-                        item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
-                        tracks = copy.deepcopy(item.track_info)
-                        for t in tracks:
-                            if t.source_id == audio.get_short_id():
-                                t.begin_trim_offset = 0
-                                t.end_trim_offset = 0
-                                t.source_duration = len_ms
-                                t.play_at = 0
-                                break
-                        item.set_data(track_info=tracks)
+                    len_ms = total_samples * 1000 / sample_rate
+                except:
+                    logger.warning(f"Failed to get duration info for {wem}")
+                    have_length = False
+                
+            for target in targets:
+                audio: AudioSource | None = self.get_audio_source(file_id)
+                if audio:
+                    audio.set_data(audio_data)
+                    if have_length:
+                        # find music segment for Audio Source
+                        for item in audio.parents:
+                            if isinstance(item, MusicTrack):
+                                item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+                                tracks = copy.deepcopy(item.track_info)
+                                for t in tracks:
+                                    if t.source_id == audio.get_short_id():
+                                        t.begin_trim_offset = 0
+                                        t.end_trim_offset = 0
+                                        t.source_duration = len_ms
+                                        t.play_at = 0
+                                        break
+                                item.set_data(track_info=tracks)
                         
     def create_external_sources_list(self, sources: list[str]) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
@@ -1537,14 +1565,11 @@ class Mod:
         
         return os.path.join(CACHE, "external_sources.wsources")
         
-        
-    def import_wavs(self, wavs: list[str] | None = None):
-        if wavs == None:
-            wavs = filedialog.askopenfilenames(title="Choose .wav files to import", filetypes=[("WAV audio", "*.wav")])
-        if wavs == "":
-            return
+    def import_wavs(self, wavs: dict[str, list[int]] | None = None):
+        if not wavs:
+            raise ValueError("No wav files selected for import!")
             
-        source_list = self.create_external_sources_list(wavs)
+        source_list = self.create_external_sources_list(wavs.keys())
         
         try:
             if SYSTEM in ["Windows", "Darwin"]:
@@ -1591,12 +1616,12 @@ class Mod:
         except Exception as e:
             logger.error(e)
             showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
-            
-        wems = [os.path.join(convert_dest, x) for x in os.listdir(convert_dest)]
+        
+        wems = {os.path.join(convert_dest, filepath): targets for filepath, targets in wavs.items()}
         
         self.import_wems(wems)
         
-        for wem in wems:
+        for wem in wems.keys():
             try:
                 os.remove(wem)
             except:
@@ -1844,13 +1869,13 @@ class Mod:
                     continue
 
                 if isinstance(dest, str):
-                    file_id: int | None = self.get_number_prefix(dest)
+                    file_id: int | None = get_number_prefix(dest)
                     if file_id == None:
                         logger.warning(f"{dest} does not contain a valid game "
                                        "asset file id. Skipping the current "
                                        "entry.")
                         continue
-                    audio = self.get_audio_by_id(file_id)
+                    audio = self.get_audio_source(file_id)
                     convert_dest = f"{file_id}.wem"
                     if audio == None:
                         logger.warning(f"No audio source is associated with "
@@ -1868,13 +1893,13 @@ class Mod:
                         if not isinstance(d, str):
                             logger.warning(f"{d} is not a string. Skipping the "
                                     "current entry.")
-                        file_id: int | None = self.get_number_prefix(d)
+                        file_id: int | None = get_number_prefix(d)
                         if file_id == None:
                             logger.warning(f"{d} does not contain a valid game "
                                            "asset file id. Skipping the current "
                                            "entry.")
                             continue
-                        audio = self.get_audio_by_id(file_id)
+                        audio = self.get_audio_source(file_id)
                         if audio == None:
                             logger.warning(f"No audio source is associated with "
                                            f"game asset file id {file_id}. "
@@ -2108,13 +2133,13 @@ class Mod:
                     continue
 
                 if isinstance(dest, str):
-                    file_id: int | None = self.get_number_prefix(dest)
+                    file_id: int | None = get_number_prefix(dest)
                     if file_id == None:
                         logger.warning(f"{dest} does not contain a valid game "
                                        "asset file id. Skipping the current "
                                        "entry.")
                         continue
-                    audio: str | None = self.get_audio_by_id(file_id)
+                    audio: str | None = self.get_audio_source(file_id)
                     if audio == None:
                         logger.warning(f"No audio source is associated with "
                                        "game asset file id {file_id}. Skipping "
@@ -2130,13 +2155,13 @@ class Mod:
                         if not isinstance(d, str):
                             logger.warning(f"{d} is not a string. Skipping the "
                                     "current entry.")
-                        file_id: int | None = self.get_number_prefix(d)
+                        file_id: int | None = get_number_prefix(d)
                         if file_id == None:
                             logger.warning(f"{d} does not contain a valid game "
                                            "asset file id. Skipping the current "
                                            "entry.")
                             continue
-                        audio: str | None = self.get_audio_by_id(file_id)
+                        audio: str | None = self.get_audio_source(file_id)
                         if audio == None:
                             logger.warning(f"No audio source is associated with "
                                     "game asset file id {file_id}. Skipping the "
@@ -3096,26 +3121,22 @@ class MainWindow:
                 and os.path.splitext(import_files[0])[1] in [".mp3", ".wav", ".ogg", ".m4a", ".wem"]
                 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
             ):
-                audio_id = self.mod_handler.get_active_mod().get_number_prefix(os.path.basename(import_files[0]))
-                if self.mod_handler.get_active_mod().get_audio_by_id(audio_id) is not None:
+                audio_id = get_number_prefix(os.path.basename(import_files[0]))
+                if self.mod_handler.get_active_mod().get_audio_source(audio_id) is not None:
                     answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
                     if answer is None:
                         return
                     if not answer:
-                        new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                        os.rename(import_files[0], new_name)
-                        old_name = import_files[0]
-                        import_files[0] = new_name
-                        renamed = True
+                        targets = [self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0]]
+                    else:
+                        targets = [audio_id]
                 else:
-                    new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                    os.rename(import_files[0], new_name)
-                    old_name = import_files[0]
-                    import_files[0] = new_name
-                    renamed = True
+                    targets = [self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0]]
+            else:
+                file_dict = {}
+                for file in import_files:
+                    file_dict[file] = []
             self.import_files(import_files)
-            if renamed:
-                os.rename(new_name, old_name)
 
     def drop_add_to_workspace(self, event):
         if self.drag_source_widget is not self.workspace and event.data:
@@ -3584,7 +3605,7 @@ class MainWindow:
             self.string_info_panel.set_string_entry(self.mod_handler.get_active_mod().get_string_entry(bank_id, selection_id))
             self.string_info_panel.frame.pack()
         elif selection_type == "Audio Source":
-            self.audio_info_panel.set_audio(self.mod_handler.get_active_mod().get_audio_by_id(selection_id))
+            self.audio_info_panel.set_audio(self.mod_handler.get_active_mod().get_audio_source(selection_id))
             self.audio_info_panel.frame.pack()
         elif selection_type == "Event":
             self.event_info_panel.set_track_info(self.mod_handler.get_active_mod().get_hierarchy_entry(bank_id, selection_id))
@@ -3694,7 +3715,7 @@ class MainWindow:
                             track_entry = self.create_treeview_entry(track, segment_entry)
                             for source in track.sources:
                                 if source.plugin_id == VORBIS:
-                                    self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_by_id(source.source_id), track_entry)
+                                    self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
                             for info in track.track_info:
                                 if info.event_id != 0:
                                     self.create_treeview_entry(info, track_entry)
@@ -3704,11 +3725,11 @@ class MainWindow:
                             sound = bank.hierarchy.entries[s_id]
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
-                                self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_by_id(sound.sources[0].source_id), container_entry)
+                                self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(sound.sources[0].source_id), container_entry)
                 for hierarchy_entry in bank.hierarchy.entries.values():
                     if isinstance(hierarchy_entry, Sound) and hierarchy_entry not in sequence_sources:
                         if hierarchy_entry.sources[0].plugin_id == VORBIS:
-                            self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
+                            self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(hierarchy_entry.sources[0].source_id), bank_entry)
             for text_bank in archive.text_banks.values():
                 if text_bank.language == language:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
@@ -3730,7 +3751,7 @@ class MainWindow:
                     for source in hierarchy_entry.sources:
                         if source.plugin_id == VORBIS and source.source_id not in existing_sources:
                             existing_sources.add(source.source_id)
-                            self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_by_id(source.source_id), bank_entry)
+                            self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), bank_entry)
             for text_bank in archive.text_banks.values():
                 if text_bank.language == language:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
@@ -3848,7 +3869,7 @@ class MainWindow:
                 self.treeview.tag_configure(entry.get_id(),
                                         background=bg,
                                         foreground=fg)
-        for audio in self.mod_handler.get_active_mod().get_audio().values():
+        for audio in self.mod_handler.get_active_mod().get_audio_sources().values():
             is_modified = audio.modified
             bg, fg = self.get_colors(modified=is_modified)
             self.treeview.tag_configure(audio.get_id(),
@@ -3891,7 +3912,7 @@ class MainWindow:
         self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
         
     def play_audio(self, file_id: int, callback=None):
-        audio = self.mod_handler.get_active_mod().get_audio_by_id(file_id)
+        audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
         self.sound_handler.play_audio(audio.get_short_id(), audio.get_data(), callback)
         
     def revert_audio(self, file_id):
