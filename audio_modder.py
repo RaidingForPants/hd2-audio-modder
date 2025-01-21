@@ -3125,9 +3125,9 @@ class MainWindow:
             for file in dropped_files:
                 import_files.extend(list_files_recursive(file))
             if os.path.exists(WWISE_CLI):
-                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
+                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES or ".patch_" in os.path.basename(file)]
             else:
-                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
+                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem" or ".patch_" in os.path.basename(file)]
             if (
                 len(import_files) == 1 
                 and os.path.splitext(import_files[0])[1] in SUPPORTED_AUDIO_TYPES
@@ -3144,11 +3144,12 @@ class MainWindow:
                         targets = [audio_id]
                 else:
                     targets = [self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0]]
+                file_dict = {import_files[0]: targets}
             else:
                 file_dict = {}
                 for file in import_files:
-                    file_dict[file] = []
-            self.import_files(import_files)
+                    file_dict[file] = [get_number_prefix(os.path.basename(file))]
+            self.import_files(file_dict)
 
     def drop_add_to_workspace(self, event):
         if self.drag_source_widget is not self.workspace and event.data:
@@ -3331,7 +3332,7 @@ class MainWindow:
                         label="Open",
                         command=lambda: self.load_archive(archive_file=values[0]),
                     )
-        wems = []
+        file_dict = {}
         for i in selects:
             tags = self.workspace.item(i, option="tags")
             assert(tags != '' and len(tags) == 1)
@@ -3341,9 +3342,10 @@ class MainWindow:
             assert(values != '' and len(values) == 1)
             if os.path.exists(values[0]):
                 wems.append(values[0])
+                file_dict[values[0]] = [get_number_prefix(values[0])]
         self.workspace_popup_menu.add_command(
             label="Import", 
-            command=lambda: self.import_files(files=wems)
+            command=lambda: self.import_files(file_dict)
         )
         self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
         self.workspace_popup_menu.grab_release()
@@ -3355,25 +3357,28 @@ class MainWindow:
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
-        self.import_files(files)
+        file_dict = {}
+        for file in files:
+            file_dict[file] = [get_number_prefix(os.path.basename(file))]
+        self.import_files(file_dict)
         
-    def import_files(self, files):
-        patches = [file for file in files if "patch" in os.path.splitext(file)[1]]
-        wems = [file for file in files if os.path.splitext(file)[1] == ".wem"]
-        wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
+    def import_files(self, file_dict):
+        patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
+        wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wem"}
+        wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wav"}
         
-        # check other file extensions and call vgmstream to convert to wav, then add to wavs list
+        # check other file extensions and call vgmstream to convert to wav, then add to wavs dict
         filetypes = list(SUPPORTED_AUDIO_TYPES)
         filetypes.remove(".wav")
         filetypes.remove(".wem")
-        others = [file for file in files if os.path.splitext(file)[1] in filetypes]
+        others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] in filetypes}
         temp_files = []
-        for file in others:
+        for file in others.keys():
             process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
             if process.returncode != 0:
                 logger.error(f"Encountered error when importing {os.path.basename(file)}")
             else:
-                wavs.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
+                wavs[f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"] = others[file]
                 temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
         
         for patch in patches:
@@ -3466,84 +3471,10 @@ class MainWindow:
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         filename = askopenfilename(title="Select audio file to import", filetypes=available_filetypes)
-        temp_file = False
         if not filename or not os.path.exists(filename):
             return
-        if os.path.splitext(filename)[1] in [".mp3", ".ogg", ".m4a"]:
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(filename))[0])}.wav", filename], stdout=subprocess.DEVNULL)
-            if process.returncode != 0:
-                logger.error(f"Encountered error when importing {os.path.basename(filename)}")
-            else:
-                filename = f"{os.path.join(CACHE, os.path.splitext(os.path.basename(filename))[0])}.wav"
-                temp_file = True
-        if os.path.splitext(filename)[1] == ".wav":
-            source_list = self.file_handler.create_external_sources_list([filename])
-        
-            try:
-                if SYSTEM in ["Windows", "Darwin"]:
-                    subprocess.run([
-                        WWISE_CLI,
-                        "migrate",
-                        DEFAULT_WWISE_PROJECT,
-                        "--quiet",
-                    ]).check_returncode()
-                else:
-                    showerror(title="Operation Failed",
-                        message="The current operating system does not support this feature yet")
-            except Exception as e:
-                logger.error(e)
-                showerror(title="Error", message="Error occurred during project migration. Please check log.txt.")
-            
-            convert_dest = os.path.join(CACHE, SYSTEM)
-            try:
-                if SYSTEM == "Darwin":
-                    subprocess.run([
-                        WWISE_CLI,
-                        "convert-external-source",
-                        DEFAULT_WWISE_PROJECT,
-                        "--platform", "Windows",
-                        "--source-file",
-                        source_list,
-                        "--output",
-                        CACHE,
-                    ]).check_returncode()
-                elif SYSTEM == "Windows":
-                    subprocess.run([
-                        WWISE_CLI,
-                        "convert-external-source",
-                        DEFAULT_WWISE_PROJECT,
-                        "--platform", "Windows",
-                        "--source-file",
-                        source_list,
-                        "--output",
-                        CACHE,
-                    ]).check_returncode()
-                else:
-                    showerror(title="Operation Failed",
-                        message="The current operating system does not support this feature yet")
-            except Exception as e:
-                logger.error(e)
-                showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
-        
-            if temp_file:
-                try:
-                    os.remove(filename)
-                except:
-                    pass
-                    
-            temp_file = True
-        
-            filename = os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filename))[0]}.wem")
-        
-        old_name = filename
-        for target in targets:
-            new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
-            shutil.copyfile(filename, new_name)
-            self.import_files([new_name])
-            try:
-                os.remove(new_name)
-            except:
-                pass
+        file_dict = {filename: targets}
+        self.import_files(file_dict)
         
     def remove_game_archive(self, archive_name):
         self.mod_handler.get_active_mod().remove_game_archive(archive_name)
@@ -3972,13 +3903,13 @@ class MainWindow:
                                         background=bg,
                                         foreground=fg)
                                             
-    def import_wems(self, wems: list[str] | None = None):
+    def import_wems(self, wems: dict[str, list[int]] | None = None):
         self.sound_handler.kill_sound()
         self.mod_handler.get_active_mod().import_wems(wems=wems)
         self.check_modified()
         self.show_info_window()
         
-    def import_wavs(self, wavs: list[str] | None = None):
+    def import_wavs(self, wavs: dict[str, list[int]] | None = None):
         self.sound_handler.kill_sound()
         self.mod_handler.get_active_mod().import_wavs(wavs=wavs)
         self.check_modified()
