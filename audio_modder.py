@@ -83,7 +83,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
 
     def on_created(self, event: FileSystemEvent) -> None:
         src_ext = os.path.splitext(event.src_path)[1]
-        if ".patch" in src_ext or src_ext in [".wav", ".wem"] or event.is_directory:
+        if ".patch" in src_ext or src_ext in SUPPORTED_AUDIO_TYPES or event.is_directory:
             parent = pathlib.Path(event.src_path).parents[0]
             parent_items = self.get_items_by_path(parent)
             new_item_name = os.path.basename(event.src_path)
@@ -119,7 +119,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
         dest_ext = os.path.splitext(event.dest_path)[1]
         for item in matching_items:
             self.workspace.delete(item)
-        if ".patch" in dest_ext or dest_ext in [".wav", ".wem"] or event.is_directory: 
+        if ".patch" in dest_ext or dest_ext in SUPPORTED_AUDIO_TYPES or event.is_directory: 
             idx = 0
             for i in self.workspace.get_children(new_parent_items[0]):
                 if event.is_directory and self.workspace.item(i, option="tags")[0] != "dir":
@@ -1490,6 +1490,8 @@ class Mod:
             if not os.path.exists(filepath) or not os.path.isfile(filepath):
                 continue
             have_length = True
+            with open(filepath, 'rb') as f:
+                audio_data = f.read()    
             if set_duration:
                 try:
                     process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
@@ -1503,8 +1505,6 @@ class Mod:
                 except:
                     logger.warning(f"Failed to get duration info for {filepath}")
                     have_length = False
-            with open(filepath, 'rb') as f:
-                audio_data = f.read()    
             for target in targets:
                 audio: AudioSource | None = self.get_audio_source(target)
                 if audio:
@@ -3114,11 +3114,11 @@ class MainWindow:
                     if answer is None:
                         return
                     if not answer:
-                        targets = [self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0]]
+                        targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                     else:
                         targets = [audio_id]
                 else:
-                    targets = [self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0]]
+                    targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                 file_dict = {import_files[0]: targets}
             else:
                 file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
@@ -3322,7 +3322,7 @@ class MainWindow:
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
         if not files:
             return
-        file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
+        file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in files}
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
@@ -3475,7 +3475,7 @@ class MainWindow:
             if all_audio:
                 self.right_click_menu.add_command(
                     label="Import audio",
-                    command=lambda: self.targeted_import(targets=[self.treeview.item(select, option="tags")[0] for select in selects])
+                    command=lambda: self.targeted_import(targets=[int(self.treeview.item(select, option="tags")[0]) for select in selects])
                 )
 
                 tags = self.treeview.item(selects[-1], option="tags")

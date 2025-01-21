@@ -26,7 +26,7 @@ def generate_file_tree(path) -> INode | None:
             curr.nodes.append(inode)
         for filename in filenames:
             f, ext = os.path.splitext(filename)
-            if ext in [".wav", ".wem"] or "patch" in ext:
+            if ext in [".wav", ".wem", ".mp3", ".ogg", ".m4a"] or "patch" in ext:
                 curr.nodes.append(INode(
                     False, os.path.join(dirpath, filename), filename))
                 
