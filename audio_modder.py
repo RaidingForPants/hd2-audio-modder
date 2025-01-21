@@ -3109,7 +3109,7 @@ class MainWindow:
                 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
             ):
                 audio_id = get_number_prefix(os.path.basename(import_files[0]))
-                if self.mod_handler.get_active_mod().get_audio_source(audio_id) is not None:
+                if audio_id != 0 and self.mod_handler.get_active_mod().get_audio_source(audio_id) is not None:
                     answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
                     if answer is None:
                         return
