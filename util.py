@@ -138,7 +138,7 @@ def bytes_to_long(bytes):
     assert len(bytes) == 8
     return sum((b << (k * 8) for k, b in enumerate(bytes)))
     
-def get_number_prefix(self, n):
+def get_number_prefix(n):
     number = ''.join(takewhile(str.isdigit, n or ""))
     try:
         return int(number)
