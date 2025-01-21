@@ -95,9 +95,15 @@ def _select_game_data_path() -> str | None:
             mustexist=True,
             title="Locate game data directory for Helldivers 2"
         )
-        if os.path.exists(game_data_path) \
-                and game_data_path.lower().endswith("steamapps/common/helldivers 2/data"):
-            return game_data_path
+        if os.path.exists(game_data_path):
+            if game_data_path.lower().endswith("steamapps/common/helldivers 2/data"):
+                return game_data_path
+            elif game_data_path.lower().endswith("steamapps/common/helldivers 2") and os.path.exists(os.path.join(game_data_path, "data")):
+                return os.path.join(game_data_path, "data")
+            elif game_data_path.lower().endswith("steamapps/common") and os.path.exists(os.path.join(game_data_path, "Helldivers 2", "data")):
+                return os.path.join(game_data_path, "Helldivers 2", "data")
+            elif game_data_path.lower().endswith("steamapps") and os.path.exists(os.path.join(game_data_path, "common", "Helldivers 2", "data")):
+                return os.path.join(game_data_path, "common", "Helldivers 2", "data")
         res = message_box.askretrycancel(title="Invalid Folder", message="Failed to locate valid Helldivers 2 install in this folder.")
         if not res:
             return ""
