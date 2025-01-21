@@ -1156,7 +1156,7 @@ class Mod:
 
         os.remove(f"{save_path}.wem")
         
-    def dump_multiple_as_wem(self, file_idsL list[int], output_folder: str = ""):
+    def dump_multiple_as_wem(self, file_ids: list[int], output_folder: str = ""):
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise ValueError("Invalid output folder!")
