@@ -1489,8 +1489,6 @@ class Mod:
         for filepath, targets in wems.items():
             if not os.path.exists(filepath) or not os.path.isfile(filepath):
                 continue
-            with open(filepath, 'rb') as f:
-                audio_data = f.read()
             have_length = True
             if set_duration:
                 try:
@@ -1501,13 +1499,14 @@ class Mod:
                             sample_rate = float(line[13:line.index("Hz")-1])
                         if "stream total samples" in line:
                             total_samples = int(line[22:line.index("(")-1])
-                        len_ms = total_samples * 1000 / sample_rate
+                    len_ms = total_samples * 1000 / sample_rate
                 except:
-                    logger.warning(f"Failed to get duration info for {wem}")
+                    logger.warning(f"Failed to get duration info for {filepath}")
                     have_length = False
-                
+            with open(filepath, 'rb') as f:
+                audio_data = f.read()    
             for target in targets:
-                audio: AudioSource | None = self.get_audio_source(file_id)
+                audio: AudioSource | None = self.get_audio_source(target)
                 if audio:
                     audio.set_data(audio_data)
                     if have_length:
@@ -3106,6 +3105,7 @@ class MainWindow:
             if (
                 len(import_files) == 1 
                 and os.path.splitext(import_files[0])[1] in SUPPORTED_AUDIO_TYPES
+                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
                 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
             ):
                 audio_id = get_number_prefix(os.path.basename(import_files[0]))
