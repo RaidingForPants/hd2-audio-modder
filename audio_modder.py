@@ -3146,9 +3146,7 @@ class MainWindow:
                     targets = [self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0]]
                 file_dict = {import_files[0]: targets}
             else:
-                file_dict = {}
-                for file in import_files:
-                    file_dict[file] = [get_number_prefix(os.path.basename(file))]
+                file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
             self.import_files(file_dict)
 
     def drop_add_to_workspace(self, event):
@@ -3332,17 +3330,7 @@ class MainWindow:
                         label="Open",
                         command=lambda: self.load_archive(archive_file=values[0]),
                     )
-        file_dict = {}
-        for i in selects:
-            tags = self.workspace.item(i, option="tags")
-            assert(tags != '' and len(tags) == 1)
-            if tags[0] != "file":
-                continue
-            values = self.workspace.item(i, option="values")
-            assert(values != '' and len(values) == 1)
-            if os.path.exists(values[0]):
-                wems.append(values[0])
-                file_dict[values[0]] = [get_number_prefix(values[0])]
+        file_dict = {self.workspace.item(i, option="values")[0]: [get_number_prefix(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
         self.workspace_popup_menu.add_command(
             label="Import", 
             command=lambda: self.import_files(file_dict)
@@ -3357,9 +3345,7 @@ class MainWindow:
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
-        file_dict = {}
-        for file in files:
-            file_dict[file] = [get_number_prefix(os.path.basename(file))]
+        file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
