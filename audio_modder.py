@@ -1156,7 +1156,7 @@ class Mod:
 
         os.remove(f"{save_path}.wem")
         
-    def dump_multiple_as_wem(self, file_ids, output_folder: str = ""):
+    def dump_multiple_as_wem(self, file_idsL list[int], output_folder: str = ""):
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise ValueError("Invalid output folder!")
@@ -1165,14 +1165,11 @@ class Mod:
             audio = self.get_audio_source(file_id)
             if audio is not None:
                 save_path = os.path.join(folder, f"{audio.get_id()}")
-                progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wem")
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
-            progress_window.step()
         
     def dump_multiple_as_wav(self, file_ids: list[str], output_folder: str = "", muted: bool = False,
                              with_seq: bool = False):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise ValueError("Invalid output folder!")
@@ -1209,54 +1206,35 @@ class Mod:
                     logger.error(f"Encountered error when converting {basename}.wem to .wav")
                 os.remove(f"{save_path}.wem")
 
-    def dump_all_as_wem(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
+    def dump_all_as_wem(self, output_folder: str = ""):
         
-        progress_window = ProgressWindow(title="Dumping Files", max_progress=len(self.game_archive.audio_sources))
-        progress_window.show()
-        
-        if os.path.exists(folder):
-            for bank in self.game_archive.wwise_banks.values():
-                subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
-                if not os.path.exists(subfolder):
-                    os.mkdir(subfolder)
-                for audio in bank.get_content():
-                    save_path = os.path.join(subfolder, f"{audio.get_id()}")
-                    progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wem")
-                    with open(save_path+".wem", "wb") as f:
-                        f.write(audio.get_data())
-                    progress_window.step()
-        else:
-            print("Invalid folder selected, aborting dump")
-            
-        progress_window.destroy()
+        if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
+            raise ValueError("Invalid output folder!")
+        for bank in self.game_archive.wwise_banks.values():
+            subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
+            if not os.path.exists(subfolder):
+                os.mkdir(subfolder)
+            for audio in bank.get_content():
+                save_path = os.path.join(subfolder, f"{audio.get_id()}")
+                with open(save_path+".wem", "wb") as f:
+                    f.write(audio.get_data())
     
-    def dump_all_as_wav(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
+    def dump_all_as_wav(self, output_folder: str = ""):
+        if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
+            raise ValueError("Invalid output folder!")
+        for bank in self.game_archive.wwise_banks.values():
+            subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
+            if not os.path.exists(subfolder):
+                os.mkdir(subfolder)
+            for audio in bank.get_content():
+                save_path = os.path.join(subfolder, f"{audio.get_id()}")
+                with open(save_path+".wem", "wb") as f:
+                    f.write(audio.get_data())
+                process = subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
+                if process.returncode != 0:
+                    logger.error(f"Encountered error when converting {os.path.basename(save_path)}.wem to .wav")
+                os.remove(f"{save_path}.wem")
 
-        progress_window = ProgressWindow(title="Dumping Files", max_progress=len(self.game_archive.audio_sources))
-        progress_window.show()
-        
-        if os.path.exists(folder):
-            for bank in self.game_archive.wwise_banks.values():
-                subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
-                if not os.path.exists(subfolder):
-                    os.mkdir(subfolder)
-                for audio in bank.get_content():
-                    save_path = os.path.join(subfolder, f"{audio.get_id()}")
-                    progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wav")
-                    with open(save_path+".wem", "wb") as f:
-                        f.write(audio.get_data())
-                    process = subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
-                    if process.returncode != 0:
-                        logger.error(f"Encountered error when converting {os.path.basename(save_path)}.wem to .wav")
-                    os.remove(f"{save_path}.wem")
-                    progress_window.step()
-        else:
-            print("Invalid folder selected, aborting dump")
-            
-        progress_window.destroy()
-        
     def save_archive_file(self, game_archive: GameArchive, output_folder: str = ""):
 
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
