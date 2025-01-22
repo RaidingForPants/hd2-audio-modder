@@ -445,7 +445,6 @@ class WwiseStream(Subscriber):
         self.audio_source = None
         self.modified = False
         self.file_id = 0
-        self.TocData = bytearray()
         
     def set_source(self, audio_source):
         try:
@@ -457,7 +456,6 @@ class WwiseStream(Subscriber):
         
     def update(self, audio_source):
         self.toc_header.stream_size = audio_source.size
-        self.TocData[8:12] = audio_source.size.to_bytes(4, byteorder='little')
         
     def raise_modified(self):
         self.modified = True
