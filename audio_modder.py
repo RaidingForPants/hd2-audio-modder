@@ -180,13 +180,13 @@ class AudioSource:
         self.resource_id = 0
         self.short_id = 0
         self.modified = False
-        self.data_OLD = b""
+        self.data_old = b""
         self.parents = set()
         self.stream_type = 0
         
     def set_data(self, data, notify_subscribers=True, set_modified=True):
         if not self.modified and set_modified:
-            self.data_OLD = self.data
+            self.data_old = self.data
         self.data = data
         self.size = len(self.data)
         if notify_subscribers:
@@ -218,9 +218,9 @@ class AudioSource:
     def revert_modifications(self, notify_subscribers=True):
         if self.modified:
             self.modified = False
-            if self.data_OLD != b"":
-                self.data = self.data_OLD
-                self.data_OLD = b""
+            if self.data_old != b"":
+                self.data = self.data_old
+                self.data_old = b""
             self.size = len(self.data)
             if notify_subscribers:
                 for item in self.parents:
@@ -1387,7 +1387,7 @@ class Mod:
             old_audio = self.get_audio_source(new_audio.get_short_id())
             if old_audio is not None:
                 if (not old_audio.modified and new_audio.get_data() != old_audio.get_data()
-                    or old_audio.modified and new_audio.get_data() != old_audio.data_OLD):
+                    or old_audio.modified and new_audio.get_data() != old_audio.data_old):
                     old_audio.set_data(new_audio.get_data())
 
         for text_bank in patch_game_archive.get_text_banks().values():
@@ -2444,7 +2444,7 @@ class AudioSourceWindow:
             else:
                 button.configure(text= '\u23f9')
             temp = self.audio.data
-            self.audio.data = self.audio.data_OLD
+            self.audio.data = self.audio.data_old
             self.play(file_id, callback)
             self.audio.data = temp
         self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
@@ -2453,7 +2453,7 @@ class AudioSourceWindow:
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left")
         
-        if self.audio.modified and self.audio.data_OLD != b"":
+        if self.audio.modified and self.audio.data_old != b"":
             self.play_original_label.pack(side="right")
             self.play_original_button.pack(side="right")
         else:
