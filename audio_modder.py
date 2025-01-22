@@ -1188,39 +1188,52 @@ class Mod:
         for source in self.audio_sources.values(): #resource_id
             if source.resource_id == audio_id:
                 return source
+        raise Exception(f"Cannot find audio source with id {audio_id}")
                 
     def get_string_entry(self, textbank_id: int, entry_id: int) -> StringEntry | None:
         try:
             return self.get_text_banks()[textbank_id].entries[entry_id]
         except KeyError:
-            return None
+            raise Exception(f"Cannot find string with id {entry_id} in textbank with id {textbank_id}")
                 
     def get_hierarchy_entry(self, soundbank_id: int, hierarchy_id: int) -> HircEntry | None:
         try:
             return self.get_wwise_banks()[soundbank_id].hierarchy.get_entry(hierarchy_id)
         except KeyError:
-            return None
+            raise Exception(f"Cannot find wwise hierarchy entry with id {hierarchy_id} in soundbank with id {soundbank_id}")
             
     def get_wwise_bank(self, soundbank_id: int) -> WwiseBank:
-        return self.wwise_banks[soundbank_id]
+        try:
+            return self.wwise_banks[soundbank_id]
+        except KeyError:
+            raise Exception(f"Cannot find soundbank with id {soundbank_id}")
         
     def set_wwise_bank(self, soundbank_id: int, bank: WwiseBank):
         self.wwise_banks[soundbank_id] = bank
         
     def get_wwise_stream(self, stream_id: int) -> WwiseStream:
-        return self.wwise_streams[stream_id]
+        try:
+            return self.wwise_streams[stream_id]
+        except KeyError:
+            raise Exception(f"Cannot find wwise stream with id {stream_id}")
         
     def set_wwise_stream(self, stream_id: int, stream: WwiseStream):
         self.wwise_streams[stream_id] = stream
     
     def get_text_bank(self, textbank_id: int) -> TextBank:
-        return self.text_banks[textbank_id]
+        try:
+            return self.text_banks[textbank_id]
+        except KeyError:
+            raise Exception(f"Cannot find text bank with id {textbank_id}")
     
     def get_game_archives(self) -> dict[str, GameArchive]:
         return self.game_archives
         
     def get_game_archive(self, archive_name: str) -> GameArchive:
-        return self.get_game_archives()[archive_name]
+        try:
+            return self.get_game_archives()[archive_name]
+        except KeyError:
+            raise Exception(f"Cannot find game archive {archive_name}")
         
     def get_wwise_streams(self) -> dict[int, WwiseStream]:
         return self.wwise_streams
@@ -1239,13 +1252,8 @@ class Mod:
             raise ValueError("Invalid path!")
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
-        try:
-            new_archive = GameArchive.from_file(archive_file)
-            self.add_game_archive(new_archive)
-        except Exception as e:
-            logger.error(f"Error occured when loading {archive_file}: {e}.")
-            logger.warning("Aborting load")
-            return False
+        new_archive = GameArchive.from_file(archive_file)
+        self.add_game_archive(new_archive)
         return True
         
     def import_wwise_hierarchy(self, soundbank_id: int, new_hierarchy: WwiseHierarchy):
