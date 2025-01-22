@@ -12,6 +12,7 @@ import sys
 import pathlib
 import copy
 import locale
+import random
 import xml.etree.ElementTree as etree
 
 from functools import partial
@@ -1037,7 +1038,7 @@ class Mod:
         for bank in self.text_banks.values():
             bank.revert_modifications()
         
-    def revert_audio(self, file_id):
+    def revert_audio(self, file_id: int):
         audio = self.get_audio_source(file_id)
         audio.revert_modifications()
         
@@ -1065,12 +1066,12 @@ class Mod:
         for audio in self.get_wwise_bank(soundbank_id).get_content():
             audio.revert_modifications()
         
-    def dump_as_wem(self, file_id, output_file: str = ""):
+    def dump_as_wem(self, file_id: int, output_file: str = ""):
         if not output_file:
             raise ValueError("Invalid output filename!")
         output_file.write(self.get_audio_source(file_id).get_data())
         
-    def dump_as_wav(self, file_id, output_file = "", muted: bool = False):
+    def dump_as_wav(self, file_id: int, output_file: str = "", muted: bool = False):
 
         if not output_file:
             raise ValueError("Invalid output filename!")
@@ -1196,58 +1197,58 @@ class Mod:
         for game_archive in self.get_game_archives().values():
             self.save_archive_file(game_archive, output_folder)
             
-    def get_audio_source(self, file_id):
+    def get_audio_source(self, audio_id: int) -> AudioSource | None:
         try:
-            return self.audio_sources[file_id] #short_id
+            return self.audio_sources[audio_id] #short_id
         except KeyError:
             pass
         for source in self.audio_sources.values(): #resource_id
-            if source.resource_id == file_id:
+            if source.resource_id == audio_id:
                 return source
                 
-    def get_string_entry(self, textbank_id, entry_id):
+    def get_string_entry(self, textbank_id: int, entry_id: int) -> StringEntry | None:
         try:
             return self.get_text_banks()[textbank_id].entries[entry_id]
         except KeyError:
             return None
                 
-    def get_hierarchy_entry(self, soundbank_id, hierarchy_id):
+    def get_hierarchy_entry(self, soundbank_id: int, hierarchy_id: int) -> HircEntry | None:
         try:
             return self.get_wwise_banks()[soundbank_id].hierarchy.get_entry(hierarchy_id)
         except KeyError:
             return None
             
-    def get_wwise_bank(self, soundbank_id: int):
+    def get_wwise_bank(self, soundbank_id: int) -> WwiseBank:
         return self.wwise_banks[soundbank_id]
         
     def set_wwise_bank(self, soundbank_id: int, bank: WwiseBank):
         self.wwise_banks[soundbank_id] = bank
         
-    def get_wwise_stream(self, stream_id: int):
+    def get_wwise_stream(self, stream_id: int) -> WwiseStream:
         return self.wwise_streams[stream_id]
         
     def set_wwise_stream(self, stream_id: int, stream: WwiseStream):
         self.wwise_streams[stream_id] = stream
     
-    def get_text_bank(self, textbank_id: int):
+    def get_text_bank(self, textbank_id: int) -> TextBank:
         return self.text_banks[textbank_id]
     
-    def get_game_archives(self):
+    def get_game_archives(self) -> dict[str, GameArchive]:
         return self.game_archives
         
-    def get_game_archive(self, archive_name: str):
+    def get_game_archive(self, archive_name: str) -> GameArchive:
         return self.get_game_archives()[archive_name]
         
-    def get_wwise_streams(self):
+    def get_wwise_streams(self) -> dict[int, WwiseStream]:
         return self.wwise_streams
         
-    def get_wwise_banks(self):
+    def get_wwise_banks(self) -> dict[int, WwiseBank]:
         return self.wwise_banks
         
-    def get_audio_sources(self):
+    def get_audio_sources(self) -> dict[int, AudioSource]:
         return self.audio_sources
         
-    def get_text_banks(self):
+    def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
         
     def load_archive_file(self, archive_file: str = ""):
@@ -1265,16 +1266,14 @@ class Mod:
         return True
         
     def import_wwise_hierarchy(self, soundbank_id: int, new_hierarchy: WwiseHierarchy):
-        pass
+        self.get_wwise_bank(soundbank_id).import_hierarchy(new_hierarchy)
         
-    def add_hierarchy_entry(self, soundbank_id: int, new_entry: HircEntry):
-        pass
-        
-    def remove_hierarchy_entry(self, soundbank_id: int, entry_id: int):
-        pass
-        
-    def generate_hierarchy_id(self, soundbank_id: int):
-        pass
+    def generate_hierarchy_id(self, soundbank_id: int) -> int:
+        hierarchy = self.get_wwise_bank(soundbank_id).hierarchy
+        new_id = random.randint(0, 0xffffffff)
+        while new_id in hierarchy.entries.keys():
+            new_id = random.randint(0, 0xffffffff)
+        return new_id
         
     def remove_game_archive(self, archive_name: str = ""):
         
@@ -3860,6 +3859,7 @@ class MainWindow:
             self.show_info_window()
 
 if __name__ == "__main__":
+    random.seed()
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)
