@@ -57,6 +57,7 @@ WWISE_DEP = 12624162998411505776
 WWISE_STREAM = 5785811756662211598
 TEXT_BANK = 979299457696010195
 SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
+WWISE_SUPPORTED_SYSTEMS = ["Windows", "Darwin"]
 
 # constants (set once on runtime)
 DIR = os.path.dirname(__file__)
@@ -1422,6 +1423,7 @@ class Mod:
     def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
         if not wems:
             raise Exception("No wems selected for import")
+        length_import_failed = False
         for filepath, targets in wems.items():
             if not os.path.exists(filepath) or not os.path.isfile(filepath):
                 continue
@@ -1439,8 +1441,8 @@ class Mod:
                             total_samples = int(line[22:line.index("(")-1])
                     len_ms = total_samples * 1000 / sample_rate
                 except:
-                    logger.warning(f"Failed to get duration info for {filepath}")
                     have_length = False
+                    length_import_failed = True
             for target in targets:
                 audio: AudioSource | None = self.get_audio_source(target)
                 if audio:
@@ -1459,8 +1461,10 @@ class Mod:
                                         t.play_at = 0
                                         break
                                 item.set_data(track_info=tracks)
+        if length_import_failed:
+            raise Exception("Failed to set track duration for some audio sources")
                         
-    def create_external_sources_list(self, sources: list[str]) -> str:
+    def create_external_sources_list(self, sources: list[str], converstion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": __file__
@@ -1469,64 +1473,43 @@ class Mod:
         for source in sources:
             etree.SubElement(root, "Source", attrib={
                 "Path": source,
-                "Conversion": DEFAULT_CONVERSION_SETTING,
+                "Conversion": conversion_setting,
                 "Destination": os.path.basename(source)
             })
         file.write(os.path.join(CACHE, "external_sources.wsources"))
         
         return os.path.join(CACHE, "external_sources.wsources")
         
-    def import_wavs(self, wavs: dict[str, list[int]] | None = None):
+    def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
         if not wavs:
             raise ValueError("No wav files selected for import!")
             
         source_list = self.create_external_sources_list(wavs.keys())
         
-        try:
-            if SYSTEM in ["Windows", "Darwin"]:
-                subprocess.run([
-                    WWISE_CLI,
-                    "migrate",
-                    DEFAULT_WWISE_PROJECT,
-                    "--quiet",
-                ]).check_returncode()
-            else:
-                showerror(title="Operation Failed",
-                    message="The current operating system does not support this feature yet")
-        except Exception as e:
-            logger.error(e)
-            showerror(title="Error", message="Error occurred during project migration. Please check log.txt.")
+        if SYSTEM in WWISE_SUPPORTED_SYSTEMS:
+            subprocess.run([
+                WWISE_CLI,
+                "migrate",
+                wwise_project,
+                "--quiet",
+            ]).check_returncode()
+        else:
+            raise Exception("The current operating system does not support this feature")
         
         convert_dest = os.path.join(CACHE, SYSTEM)
-        try:
-            if SYSTEM == "Darwin":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    DEFAULT_WWISE_PROJECT,
-                    "--platform", "Windows",
-                    "--source-file",
-                    source_list,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            elif SYSTEM == "Windows":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    DEFAULT_WWISE_PROJECT,
-                    "--platform", "Windows",
-                    "--source-file",
-                    source_list,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            else:
-                showerror(title="Operation Failed",
-                    message="The current operating system does not support this feature yet")
-        except Exception as e:
-            logger.error(e)
-            showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
+        if SYSTEM in WWISE_SUPPORTED_SYSTEMS:
+            subprocess.run([
+                WWISE_CLI,
+                "convert-external-source",
+                wwise_project,
+                "--platform", "Windows",
+                "--source-file",
+                source_list,
+                "--output",
+                CACHE,
+            ]).check_returncode()
+        else:
+            raise Exception("The current operating system does not support this feature")
         
         wems = {os.path.join(convert_dest, filepath): targets for filepath, targets in wavs.items()}
         
@@ -1543,7 +1526,7 @@ class Mod:
         except:
             pass
             
-    def import_files(self, file_dict):
+    def import_files(self, file_dict: dict[str, list[int]]):
         patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
         wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wem"}
         wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wav"}
@@ -1555,9 +1538,7 @@ class Mod:
         others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] in filetypes}
         temp_files = []
         for file in others.keys():
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
-            if process.returncode != 0:
-                logger.error(f"Encountered error when importing {os.path.basename(file)}")
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
             else:
                 wavs[f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"] = others[file]
                 temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
@@ -1575,7 +1556,7 @@ class Mod:
                 pass
                 
     def load_wav_by_mapping(self,
-                 project: str,
+                 wwise_project: str,
                  wems: list[tuple[str, AudioSource, int]],
                  schema: etree.Element) -> bool:
         if len(wems) == 0:
@@ -1585,49 +1566,25 @@ class Mod:
         tree.write(schema_path, encoding="utf-8", xml_declaration=True)
         convert_ok = True
         convert_dest = os.path.join(CACHE, SYSTEM)
-        try:
-            if SYSTEM == "Darwin":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    project,
-                    "--platform", "Windows",
-                    "--source-file",
-                    schema_path,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            elif SYSTEM == "Windows":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    project,
-                    "--platform", "Windows",
-                    "--source-file",
-                    schema_path,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            else:
-                convert_ok = False
-                showerror(title="Operation Failed",
-                    message="The current operating system does not support this feature yet")
-        except Exception as e:
-            convert_ok = False
-            logger.error(e)
-            showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
-
-        if not convert_ok:
-            return False
+        if SYSTEM in WWISE_SUPPORTED_SYSTEMS:
+            subprocess.run([
+                WWISE_CLI,
+                "convert-external-source",
+                wwise_project,
+                "--platform", "Windows",
+                "--source-file",
+                schema_path,
+                "--output",
+                CACHE,
+            ]).check_returncode()
+        else:
+            raise Exception("The current operating system does not support this feature")
 
         for wem in wems:
-            try:
-                dest_path = os.path.join(convert_dest, wem[0])
-                assert(os.path.exists(dest_path))
-                with open(dest_path, "rb") as f:
-                    wem[1].set_data(f.read())
-            except Exception as e:
-                logger.error(e)
+            dest_path = os.path.join(convert_dest, wem[0])
+            assert(os.path.exists(dest_path))
+            with open(dest_path, "rb") as f:
+                wem[1].set_data(f.read())
 
         try:
             os.remove(schema_path)
