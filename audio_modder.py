@@ -340,15 +340,13 @@ class WwiseBank(Subscriber):
     
     def __init__(self):
         self.bank_header = b""
-        self.data = b""
-        self.toc_data_header = b""
         self.bank_misc_data = b""
         self.modified = False
-        self.toc_header = None
         self.dep = None
         self.modified_count = 0
         self.hierarchy = None
         self.content = []
+        self.file_id = 0
         
     def import_hierarchy(self, new_hierarchy):
         self.hierarchy.import_hierarchy(new_hierarchy)
@@ -379,18 +377,9 @@ class WwiseBank(Subscriber):
         
     def get_id(self):
         try:
-            return self.toc_header.file_id
+            return self.file_id
         except:
             return 0
-            
-    def get_type_id(self):
-        try:
-            return self.toc_header.type_id
-        except:
-            return 0
-            
-    def get_data(self):
-        return self.data
             
     def generate(self, audio_sources):
         data = bytearray()
@@ -401,13 +390,6 @@ class WwiseBank(Subscriber):
         offset = 0
         
         #regenerate soundbank from the hierarchy information
-        max_progress = 0
-        for entry in self.hierarchy.entries.values():
-            if entry.hierarchy_type == SOUND:
-                max_progress += 1
-            elif entry.hierarchy_type == MUSIC_TRACK:
-                max_progress += len(entry.sources)
-                    
         
         didx_array = []
         data_array = []
@@ -455,23 +437,14 @@ class WwiseBank(Subscriber):
         data += "HIRC".encode('utf-8') + len(hierarchy_section).to_bytes(4, byteorder="little")
         data += hierarchy_section
         data += self.bank_misc_data
-        self.toc_header.toc_data_size = len(data) + len(self.toc_data_header)
-        self.toc_data_header[4:8] = len(data).to_bytes(4, byteorder="little")
-        self.data = data
         return data
-                     
-    def get_entry_index(self):
-        try:
-            return self.toc_header.entry_index
-        except:
-            return 0
         
 class WwiseStream(Subscriber):
 
     def __init__(self):
         self.audio_source = None
         self.modified = False
-        self.toc_header = None
+        self.file_id = 0
         self.TocData = bytearray()
         
     def set_source(self, audio_source):
@@ -494,19 +467,7 @@ class WwiseStream(Subscriber):
         
     def get_id(self):
         try:
-            return self.toc_header.file_id
-        except:
-            return 0
-        
-    def get_type_id(self):
-        try:
-            return self.toc_header.type_id
-        except:
-            return 0
-            
-    def get_entry_index(self):
-        try:
-            return self.toc_header.entry_index
+            return self.file_id
         except:
             return 0
             
@@ -544,7 +505,7 @@ class StringEntry:
 class TextBank:
     
     def __init__(self):
-        self.toc_header = None
+        self.file_id = 0
         self.entries = {}
         self.language = 0
         self.modified = False
@@ -604,26 +565,10 @@ class TextBank:
             stream.write(text_bytes)
             offset += len(text_bytes)
             stream.seek(initial_position)
-        self.toc_header.toc_data_size = len(stream.data)
         return stream.data
         
     def get_id(self):
-        try:
-            return self.toc_header.file_id
-        except:
-            return 0
-        
-    def get_type_id(self):
-        try:
-            return self.toc_header.type_id
-        except:
-            return 0
-            
-    def get_entry_index(self):
-        try:
-            return self.toc_header.entry_index
-        except:
-            return 0
+        return self.file_id
             
     def raise_modified(self):
         self.modified_count+=1
@@ -805,9 +750,8 @@ class GameArchive:
                 audio = AudioSource()
                 audio.stream_type = STREAM
                 entry = WwiseStream()
-                entry.toc_header = toc_header
+                entry.file_id = toc_header.file_id
                 toc_file.seek(toc_header.toc_data_offset)
-                entry.TocData = toc_file.read(toc_header.toc_data_size)
                 stream_file.seek(toc_header.stream_file_offset)
                 audio.set_data(stream_file.read(toc_header.stream_size), notify_subscribers=False, set_modified=False)
                 audio.resource_id = toc_header.file_id
@@ -815,11 +759,9 @@ class GameArchive:
                 self.wwise_streams[entry.get_id()] = entry
             elif toc_header.type_id == WWISE_BANK:
                 entry = WwiseBank()
-                entry.toc_header = toc_header
-                toc_data_offset = toc_header.toc_data_offset
-                toc_data_size = toc_header.toc_data_size
-                toc_file.seek(toc_data_offset)
-                entry.toc_data_header = toc_file.read(16)
+                toc_file.seek(toc_header.toc_data_offset)
+                toc_file.advance(16)
+                entry.file_id = toc_header.file_id
                 bank = BankParser()
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
@@ -842,7 +784,6 @@ class GameArchive:
                 self.wwise_banks[entry.get_id()] = entry
             elif toc_header.type_id == WWISE_DEP: #wwise dep
                 dep = WwiseDep()
-                dep.toc_header = toc_header
                 toc_file.seek(toc_header.toc_data_offset)
                 dep.from_memory_stream(toc_file)
                 try:
@@ -853,7 +794,7 @@ class GameArchive:
                 toc_file.seek(toc_header.toc_data_offset)
                 data = toc_file.read(toc_header.toc_data_size)
                 text_bank = TextBank()
-                text_bank.toc_header = toc_header
+                text_bank.file_id = toc_header.file_id
                 text_bank.set_data(data)
                 self.text_banks[text_bank.get_id()] = text_bank
         
