@@ -976,6 +976,7 @@ class ModHandler:
         new_mod = Mod()
         self.mods[mod_name] = new_mod
         self.active_mod = new_mod
+        return new_mod
         
     def get_active_mod(self) -> Mod:
         return self.active_mod
@@ -2966,7 +2967,9 @@ class MainWindow:
             label="Import"
         )
         
-        self.file_menu.add_command(label="Save", command=self.save_archive)
+        self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
+        
+        self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         
         self.file_menu.add_command(label="Add a Folder to Workspace",
@@ -3018,6 +3021,16 @@ class MainWindow:
 
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
+        
+    def combine_mods(self):
+        mod_files = askopenfilenames(title="Choose mod files to combine")
+        if mod_files:
+            combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
+            combined_mod.load_archive_file(mod_files[0])
+            for mod in mod_files[1:]:
+                combined_mod.load_archive_file(mod)
+                combined_mod.import_patch(mod)
+        self.save_archive()
 
     def drop_import(self, event):
         self.drag_source_widget = None
@@ -3718,9 +3731,9 @@ class MainWindow:
             for child in self.treeview.get_children():
                 self.treeview.delete(child)
 
-    def save_archive(self):
+    def save_mod(self):
         self.sound_handler.kill_sound()
-        self.mod_handler.get_active_mod().save_archive_file()
+        self.mod_handler.get_active_mod().save()
 
     def clear_treeview_background(self, item):
         bg_color, fg_color = self.get_colors()
