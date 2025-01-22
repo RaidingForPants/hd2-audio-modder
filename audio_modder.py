@@ -160,19 +160,6 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                 return self.get_item_by_path_recursion(item, path)
             elif str(child_path) == str(path):
                 return item
-
-class Subscriber:
-    def __init__(self):
-        pass
-        
-    def update(self, content):
-        pass
-        
-    def raise_modified(self):
-        pass
-        
-    def lower_modified(self):
-        pass
         
 class AudioSource:
 
@@ -336,7 +323,7 @@ class BankParser:
         except:
             return None
 
-class WwiseBank(Subscriber):
+class WwiseBank:
     
     def __init__(self):
         self.bank_header = b""
@@ -440,7 +427,7 @@ class WwiseBank(Subscriber):
         data += self.bank_misc_data
         return data
         
-class WwiseStream(Subscriber):
+class WwiseStream:
 
     def __init__(self):
         self.audio_source = None
@@ -454,9 +441,6 @@ class WwiseStream(Subscriber):
             pass
         self.audio_source = audio_source
         audio_source.parents.add(self)
-        
-    def update(self, audio_source: AudioSource):
-        self.toc_header.stream_size = audio_source.size
         
     def raise_modified(self):
         self.modified = True
@@ -1016,7 +1000,6 @@ class ModHandler:
                     break
         del self.mods[mod_name]
         
-
 class Mod:
 
     def __init__(self):
