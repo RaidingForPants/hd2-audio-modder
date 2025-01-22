@@ -1181,7 +1181,7 @@ class Mod:
         for game_archive in self.get_game_archives().values():
             self.save_archive_file(game_archive, output_folder)
             
-    def get_audio_source(self, audio_id: int) -> AudioSource | None:
+    def get_audio_source(self, audio_id: int) -> AudioSource:
         try:
             return self.audio_sources[audio_id] #short_id
         except KeyError:
@@ -1191,17 +1191,23 @@ class Mod:
                 return source
         raise Exception(f"Cannot find audio source with id {audio_id}")
                 
-    def get_string_entry(self, textbank_id: int, entry_id: int) -> StringEntry | None:
+    def get_string_entry(self, textbank_id: int, entry_id: int) -> StringEntry:
         try:
-            return self.get_text_banks()[textbank_id].entries[entry_id]
+            return self.get_text_bank(textbank_id).entries[entry_id]
         except KeyError:
             raise Exception(f"Cannot find string with id {entry_id} in textbank with id {textbank_id}")
+            
+    def get_string_entries(self, textbank_id: int) -> dict[int, StringEntry]:
+        return self.get_text_bank(textbank_id).entries
                 
-    def get_hierarchy_entry(self, soundbank_id: int, hierarchy_id: int) -> HircEntry | None:
+    def get_hierarchy_entry(self, soundbank_id: int, hierarchy_id: int) -> HircEntry:
         try:
-            return self.get_wwise_banks()[soundbank_id].hierarchy.get_entry(hierarchy_id)
-        except KeyError:
+            return self.get_wwise_bank(soundbank_id).hierarchy.get_entry(hierarchy_id)
+        except:
             raise Exception(f"Cannot find wwise hierarchy entry with id {hierarchy_id} in soundbank with id {soundbank_id}")
+            
+    def get_hierarchy_entries(self, soundbank_id: int) -> dict[int, HircEntry]:
+        return self.get_wwise_bank(soundbank_id).hierarchy.get_entries()
             
     def get_wwise_bank(self, soundbank_id: int) -> WwiseBank:
         try:
