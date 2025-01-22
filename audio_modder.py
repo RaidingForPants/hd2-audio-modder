@@ -27,7 +27,8 @@ from tkinter.messagebox import showwarning
 from tkinter.messagebox import showerror
 from tkinter.messagebox import askyesnocancel
 from tkinter.filedialog import askopenfilename
-from typing import Any, Literal, Callable, Union
+from typing import Any, Literal, Callable
+from typing_extensions import Self
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -185,38 +186,37 @@ class AudioSource:
         self.parents = set()
         self.stream_type = 0
         
-    def set_data(self, data, notify_subscribers=True, set_modified=True):
+    def set_data(self, data: bytes, notify_subscribers: bool = True, set_modified: bool = True):
         if not self.modified and set_modified:
             self.data_old = self.data
         self.data = data
         self.size = len(self.data)
         if notify_subscribers:
             for item in self.parents:
-                #item.update(self)
                 if not self.modified:
                     item.raise_modified()
         if set_modified:
             self.modified = True
             
-    def get_id(self):
+    def get_id(self) -> int:
         if self.stream_type == BANK:
             return self.get_short_id()
         else:
             return self.get_resource_id()
             
-    def is_modified(self):
+    def is_modified(self) -> bool:
         return self.modified
 
-    def get_data(self):
+    def get_data(self) -> bytes:
         return self.data
         
-    def get_resource_id(self):
+    def get_resource_id(self) -> int:
         return self.resource_id
         
-    def get_short_id(self):
+    def get_short_id(self) -> int:
         return self.short_id
         
-    def revert_modifications(self, notify_subscribers=True):
+    def revert_modifications(self, notify_subscribers: bool = True):
         if self.modified:
             self.modified = False
             if self.data_old != b"":
@@ -226,7 +226,6 @@ class AudioSource:
             if notify_subscribers:
                 for item in self.parents:
                     item.lower_modified()
-                    #item.update(self)
                 
 class TocHeader:
 
@@ -250,7 +249,7 @@ class TocHeader:
         self.unknown4            = stream.uint32_read()
         self.entry_index         = stream.uint32_read()
         
-    def get_data(self):
+    def get_data(self) -> bytes:
         return (struct.pack("<QQQQQQQIIIIII",
             self.file_id,
             self.type_id,
@@ -277,7 +276,7 @@ class WwiseDep:
         self.data_size = stream.uint32_read()
         self.data = stream.read(self.data_size).decode('utf-8')
         
-    def get_data(self):
+    def get_data(self) -> bytes:
         return (self.tag.to_bytes(4, byteorder='little')
                 + self.data_size.to_bytes(4, byteorder='little')
                 + self.data.encode('utf-8'))
@@ -292,7 +291,7 @@ class DidxEntry:
         e.id, e.offset, e.size = struct.unpack("<III", bytes)
         return e
         
-    def get_data(self):
+    def get_data(self) -> bytes:
         return struct.pack("<III", self.id, self.offset, self.size)
         
 class MediaIndex:
@@ -307,7 +306,7 @@ class MediaIndex:
             self.entries[entry.id] = entry
             self.data[entry.id] = dataChunk[entry.offset:entry.offset+entry.size]
         
-    def get_data(self):
+    def get_data(self) -> bytes:
         arr = [x.get_data() for x in self.entries.values()]
         data_arr = self.data.values()
         return b"".join(arr) + b"".join(data_arr)
@@ -349,18 +348,19 @@ class WwiseBank(Subscriber):
         self.content = []
         self.file_id = 0
         
-    def import_hierarchy(self, new_hierarchy):
+    def import_hierarchy(self, new_hierarchy: WwiseHierarchy):
         self.hierarchy.import_hierarchy(new_hierarchy)
         
-    def add_content(self, content):
+    def add_content(self, content: AudioSource):
         self.content.append(content)
         
-    def remove_content(self, content):
+    def remove_content(self, content: AudioSource):
         try:
             self.content.remove(content)
         except:
             pass
-    def get_content(self):
+            
+    def get_content(self) -> list[AudioSource]:
         return self.content
         
     def raise_modified(self):
@@ -373,16 +373,16 @@ class WwiseBank(Subscriber):
             if self.modified_count == 0:
                 self.modified = False
         
-    def get_name(self):
+    def get_name(self) -> str:
         return self.dep.data
         
-    def get_id(self):
+    def get_id(self) -> int:
         try:
             return self.file_id
         except:
             return 0
             
-    def generate(self, audio_sources):
+    def generate(self, audio_sources) -> bytearray:
         data = bytearray()
         data += self.bank_header
         
@@ -447,7 +447,7 @@ class WwiseStream(Subscriber):
         self.modified = False
         self.file_id = 0
         
-    def set_source(self, audio_source):
+    def set_source(self, audio_source: AudioSource):
         try:
             self.audio_source.parents.remove(self)
         except:
@@ -455,7 +455,7 @@ class WwiseStream(Subscriber):
         self.audio_source = audio_source
         audio_source.parents.add(self)
         
-    def update(self, audio_source):
+    def update(self, audio_source: AudioSource):
         self.toc_header.stream_size = audio_source.size
         
     def raise_modified(self):
@@ -464,13 +464,13 @@ class WwiseStream(Subscriber):
     def lower_modified(self):
         self.modified = False
         
-    def get_id(self):
+    def get_id(self) -> int:
         try:
             return self.file_id
         except:
             return 0
             
-    def get_data(self):
+    def get_data(self) -> bytes:
         return self.audio_source.get_data()
 
 class StringEntry:
@@ -482,13 +482,13 @@ class StringEntry:
         self.modified = False
         self.parent = None
         
-    def get_id(self):
+    def get_id(self) -> int:
         return self.string_id
         
-    def get_text(self):
+    def get_text(self) -> str:
         return self.text
         
-    def set_text(self, text):
+    def set_text(self, text: str):
         if not self.modified:
             self.text_old = self.text
             self.parent.raise_modified()
@@ -510,7 +510,7 @@ class TextBank:
         self.modified = False
         self.modified_count = 0
      
-    def set_data(self, data):
+    def set_data(self, data: bytearray):
         self.entries.clear()
         num_entries = int.from_bytes(data[8:12], byteorder='little')
         self.language = int.from_bytes(data[12:16], byteorder='little')
@@ -532,7 +532,7 @@ class TextBank:
             entry.text = data[string_offset:stopIndex].decode('utf-8')
             self.entries[string_id] = entry
             
-    def revert_modifications(self, entry_id = 0):
+    def revert_modifications(self, entry_id: int = 0):
         if entry_id:
             self.entries[entry_id].revert_modifications()
         else:
@@ -542,13 +542,13 @@ class TextBank:
     def update(self):
         pass
         
-    def get_language(self):
+    def get_language(self) -> int:
         return self.language
         
-    def is_modified(self):
+    def is_modified(self) -> bool:
         return self.modified
         
-    def generate(self):
+    def generate(self) -> bytearray:
         stream = MemoryStream()
         stream.write(b'\xae\xf3\x85\x3e\x01\x00\x00\x00')
         stream.write(len(self.entries).to_bytes(4, byteorder="little"))
@@ -566,7 +566,7 @@ class TextBank:
             stream.seek(initial_position)
         return stream.data
         
-    def get_id(self):
+    def get_id(self) -> int:
         return self.file_id
             
     def raise_modified(self):
@@ -588,7 +588,7 @@ class GameArchive:
         self.text_banks = {}
     
     @classmethod
-    def from_file(cls, path):
+    def from_file(cls, path: str) -> Self:
         archive = GameArchive()
         archive.name = os.path.basename(path)
         archive.path = path
@@ -603,24 +603,24 @@ class GameArchive:
         archive.load(toc_file, stream_file)
         return archive
         
-    def get_wwise_streams(self):
+    def get_wwise_streams(self) -> dict[int, WwiseStream]:
         return self.wwise_streams
         
-    def get_wwise_banks(self):
+    def get_wwise_banks(self) -> dict[int, WwiseBank]:
         return self.wwise_banks
         
-    def get_audio_sources(self):
+    def get_audio_sources(self) -> dict[int, AudioSource]:
         return self.audio_sources
         
-    def get_text_banks(self):
+    def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
         
         
-    def write_type_header(self, toc_file, entry_type, num_entries):
+    def write_type_header(self, toc_file: MemoryStream, entry_type: int, num_entries: int):
         if num_entries > 0:
             toc_file.write(struct.pack("<QQQII", 0, entry_type, num_entries, 16, 64))
         
-    def to_file(self, path):
+    def to_file(self, path: str):
         toc_file = MemoryStream()
         stream_file = MemoryStream()
         self.num_files = len(self.wwise_streams) + 2*len(self.wwise_banks) + len(self.text_banks)
@@ -723,7 +723,7 @@ class GameArchive:
             with open(os.path.join(path, self.name+".stream"), 'w+b') as f:
                 f.write(stream_file.data)
 
-    def load(self, toc_file, stream_file):
+    def load(self, toc_file: MemoryStream, stream_file: MemoryStream):
         self.wwise_streams.clear()
         self.wwise_banks.clear()
         self.audio_sources.clear()
@@ -866,7 +866,7 @@ class SoundHandler:
         cls.handler_instance = SoundHandler()
         
     @classmethod
-    def get_instance(cls):
+    def get_instance(cls) -> Self:
         if not cls.handler_instance:
             cls.create_instance()
         return cls.handler_instance
@@ -884,7 +884,7 @@ class SoundHandler:
                 pass
             self.audio_process = None
         
-    def play_audio(self, sound_id, sound_data, callback=None):
+    def play_audio(self, sound_id: int, sound_data: bytearray, callback: Callable = None):
         if not os.path.exists(VGMSTREAM):
             return
         self.kill_sound()
@@ -934,7 +934,7 @@ class SoundHandler:
                 stream_callback=read_stream)
         self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
         
-    def downmix_to_stereo(self, data, channels, channel_width, frame_count):
+    def downmix_to_stereo(self, data: bytearray, channels: int, channel_width: int, frame_count: int) -> bytes:
         if channel_width == 2:
             arr = numpy.frombuffer(data, dtype=numpy.int16)
             stereo_array = numpy.zeros(shape=(frame_count, 2), dtype=numpy.int16)
@@ -980,31 +980,31 @@ class ModHandler:
         cls.handler_instance = ModHandler()
         
     @classmethod
-    def get_instance(cls):
+    def get_instance(cls) -> Self:
         if cls.handler_instance == None:
             cls.create_instance()
         return cls.handler_instance
         
-    def create_new_mod(self, mod_name):
+    def create_new_mod(self, mod_name: str):
         if mod_name in self.mods.keys():
             raise ValueError("Mod name already exists!")
         new_mod = Mod()
         self.mods[mod_name] = new_mod
         self.active_mod = new_mod
         
-    def get_active_mod(self):
+    def get_active_mod(self) -> Mod:
         return self.active_mod
         
-    def set_active_mod(self, mod_name):
+    def set_active_mod(self, mod_name: str):
         try:
             self.active_mod = self.mods[mod_name]
         except:
             raise ValueError("No matching mod found")
             
-    def get_mod_names(self):
+    def get_mod_names(self) -> list[str]:
         return self.mods.keys()
         
-    def delete_mod(self, mod_name):
+    def delete_mod(self, mod_name: str):
         try:
             mod_to_delete = self.mods[mod_name]
         except:

@@ -131,14 +131,14 @@ def pad_to_16_byte_align(data):
     new_len = ceil(l/16)*16
     return b + bytearray(new_len-l)
     
-def _16_byte_align(addr):
+def _16_byte_align(addr: int) -> int:
     return ceil(addr/16)*16
     
 def bytes_to_long(bytes):
     assert len(bytes) == 8
     return sum((b << (k * 8) for k, b in enumerate(bytes)))
     
-def get_number_prefix(n):
+def get_number_prefix(n: str):
     number = ''.join(takewhile(str.isdigit, n or ""))
     try:
         return int(number)
@@ -195,7 +195,7 @@ def murmur64_hash(data: Any, seed: int = 0):
 
     return h
 	
-def list_files_recursive(path="."):
+def list_files_recursive(path: str = ".") -> list[str]:
     files = []
     if os.path.isfile(path):
         return [path]
