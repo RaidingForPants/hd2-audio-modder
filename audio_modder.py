@@ -1547,7 +1547,38 @@ class Mod:
             os.remove(source_list)
         except:
             pass
-
+            
+    def import_files(self, file_dict):
+        patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
+        wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wem"}
+        wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wav"}
+        
+        # check other file extensions and call vgmstream to convert to wav, then add to wavs dict
+        filetypes = list(SUPPORTED_AUDIO_TYPES)
+        filetypes.remove(".wav")
+        filetypes.remove(".wem")
+        others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] in filetypes}
+        temp_files = []
+        for file in others.keys():
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
+            if process.returncode != 0:
+                logger.error(f"Encountered error when importing {os.path.basename(file)}")
+            else:
+                wavs[f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"] = others[file]
+                temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
+        
+        for patch in patches:
+            self.import_patch(patch_file=patch)
+        if len(wems) > 0:
+            self.import_wems(wems)
+        if len(wavs) > 0:
+            self.import_wavs(wavs)
+        for file in temp_files:
+            try:
+                os.remove(file)
+            except:
+                pass
+                
     def load_wav_by_mapping(self,
                  project: str,
                  wems: list[tuple[str, AudioSource, int]],
@@ -3267,38 +3298,9 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
-        patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
-        wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wem"}
-        wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wav"}
-        
-        # check other file extensions and call vgmstream to convert to wav, then add to wavs dict
-        filetypes = list(SUPPORTED_AUDIO_TYPES)
-        filetypes.remove(".wav")
-        filetypes.remove(".wem")
-        others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] in filetypes}
-        temp_files = []
-        for file in others.keys():
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
-            if process.returncode != 0:
-                logger.error(f"Encountered error when importing {os.path.basename(file)}")
-            else:
-                wavs[f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"] = others[file]
-                temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
-        
-        for patch in patches:
-            self.mod_handler.get_active_mod().import_patch(patch_file=patch)
-        if len(wems) > 0:
-            self.import_wems(wems=wems)
-        if len(wavs) > 0:
-            self.import_wavs(wavs=wavs)
-        if len(wems) == 0 and len(wavs) == 0:
-            self.check_modified()
+        self.mod_handler.get_active_mod().import_files(file_dict)
+        self.check_modified()
         self.show_info_window()
-        for file in temp_files:
-            try:
-                os.remove(file)
-            except:
-                pass
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
@@ -3808,18 +3810,6 @@ class MainWindow:
                 self.treeview.tag_configure(entry.get_id(),
                                         background=bg,
                                         foreground=fg)
-                                            
-    def import_wems(self, wems: dict[str, list[int]] | None = None):
-        self.sound_handler.kill_sound()
-        self.mod_handler.get_active_mod().import_wems(wems=wems)
-        self.check_modified()
-        self.show_info_window()
-        
-    def import_wavs(self, wavs: dict[str, list[int]] | None = None):
-        self.sound_handler.kill_sound()
-        self.mod_handler.get_active_mod().import_wavs(wavs=wavs)
-        self.check_modified()
-        self.show_info_window()
         
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
