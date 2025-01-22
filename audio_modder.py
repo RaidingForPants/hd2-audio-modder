@@ -1041,6 +1041,13 @@ class Mod:
         audio = self.get_audio_source(file_id)
         audio.revert_modifications()
         
+    def add_new_hierarchy_entry(self, soundbank_id: int, entry: HircEntry):
+        self.get_wwise_bank(soundbank_id).hierarchy.add_entry(entry)
+        
+    def remove_hierarchy_entry(self, soundbank_id: int, entry_id: int):
+        entry = self.get_hierarchy_entry(soundbank_id, entry_id)
+        self.get_wwise_bank(soundbank_id).hierarchy.remove_entry(entry)
+        
     def revert_hierarchy_entry(self, soundbank_id: int, entry_id: int):
         self.get_hierarchy_entry(soundbank_id, entry_id).revert_modifications()
         
