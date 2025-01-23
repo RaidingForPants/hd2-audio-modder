@@ -3010,7 +3010,7 @@ class MainWindow:
             label="Import"
         )
         
-        self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
+        #self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
         
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
