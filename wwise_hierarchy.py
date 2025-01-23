@@ -429,6 +429,7 @@ class WwiseHierarchy:
             try:
                 self.get_entry(entry.get_id()).import_entry(entry)
             except KeyError:
+                pass
                 self.entries[entry.get_id()] = entry
                 self.added_entries[entry.get_id()] = entry
                 try:

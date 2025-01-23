@@ -391,6 +391,7 @@ class WwiseBank:
                     try:
                         audio = audio_sources[source.source_id]
                     except KeyError as e:
+                        print(e)
                         continue
                     if source.stream_type == PREFETCH_STREAM and source.source_id not in added_sources:
                         data_array.append(audio.get_data()[:source.mem_size])
@@ -1297,7 +1298,10 @@ class Mod:
                         for parent in parents:
                             if isinstance(parent, HircEntry) and parent.soundbank.get_id() == key:
                                 audio.parents.remove(parent)
-                                new_parent = self.get_hierarchy_entry(key, parent.get_id())
+                                try:
+                                    new_parent = self.get_hierarchy_entry(key, parent.get_id())
+                                except:
+                                    continue
                                 audio.parents.add(new_parent)
                                 if audio.modified:
                                     new_parent.raise_modified()
@@ -1348,16 +1352,32 @@ class Mod:
             logger.error(f"Error occured when loading {patch_file}: {e}.")
             logger.warning("Aborting load")
             return False
-        
-        for bank in patch_game_archive.get_wwise_banks().values():
-            self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
-
+                                
         for new_audio in patch_game_archive.get_audio_sources().values():
             old_audio = self.get_audio_source(new_audio.get_short_id())
             if old_audio is not None:
                 if (not old_audio.modified and new_audio.get_data() != old_audio.get_data()
                     or old_audio.modified and new_audio.get_data() != old_audio.data_old):
                     old_audio.set_data(new_audio.get_data())
+                    sample_rate = int.from_bytes(new_audio.get_data()[24:28], byteorder="little")
+                    num_samples = int.from_bytes(new_audio.get_data()[44:48], byteorder="little")
+                    len_ms = num_samples * 1000 / sample_rate
+                    for item in old_audio.parents:
+                        if isinstance(item, MusicTrack):
+                            item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+                            tracks = copy.deepcopy(item.track_info)
+                            for t in tracks:
+                                if t.source_id == old_audio.get_short_id():
+                                    t.begin_trim_offset = 0
+                                    t.end_trim_offset = 0
+                                    t.source_duration = len_ms
+                                    t.play_at = 0
+                                    break
+                            item.set_data(track_info=tracks)
+                            
+        for bank in patch_game_archive.get_wwise_banks().values():
+            self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+                            
 
         for text_bank in patch_game_archive.get_text_banks().values():
             self.get_text_banks()[text_bank.get_id()].import_text(text_bank)
