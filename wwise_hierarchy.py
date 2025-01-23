@@ -249,7 +249,7 @@ class MusicSegment(HircEntry):
                 else:
                     setattr(self, name, value)
         self.modified = True
-        self.size = len(self.get_data())
+        self.size = len(self.get_data()) - 5
         try:
             self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
         except:
