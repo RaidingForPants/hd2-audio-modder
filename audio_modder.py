@@ -36,6 +36,7 @@ import config as cfg
 import db
 import log
 import fileutil
+import util
 from util import *
 from wwise_hierarchy import *
 
@@ -373,9 +374,6 @@ class WwiseBank:
     def generate(self, audio_sources) -> bytearray:
         data = bytearray()
         data += self.bank_header
-        
-        didx_section = b""
-        data_section = b""
         offset = 0
         
         #regenerate soundbank from the hierarchy information
@@ -385,22 +383,22 @@ class WwiseBank:
         
         added_sources = set()
         
-        for entry in self.hierarchy.get_type(SOUND):
+        for entry in self.hierarchy.get_type(SOUND) + self.hierarchy.get_type(MUSIC_TRACK):
             for source in entry.sources:
                 if source.plugin_id == VORBIS:
                     try:
                         audio = audio_sources[source.source_id]
-                    except KeyError:
+                    except KeyError as e:
                         continue
                     if source.stream_type == PREFETCH_STREAM and source.source_id not in added_sources:
-                        data_array.append(audio.get_data()[:source.mem_size])
+                        data_array.append(pad_to_16_byte_align(audio.get_data()[:source.mem_size]))
                         didx_array.append(struct.pack("<III", source.source_id, offset, source.mem_size))
-                        offset += source.mem_size
+                        offset += align_16_byte(source.mem_size)
                         added_sources.add(source.source_id)
                     elif source.stream_type == BANK and source.source_id not in added_sources:
-                        data_array.append(audio.get_data())
+                        data_array.append(pad_to_16_byte_align(audio.get_data()))
                         didx_array.append(struct.pack("<III", source.source_id, offset, audio.size))
-                        offset += audio.size
+                        offset += align_16_byte(audio.size)
                         added_sources.add(source.source_id)
                 elif source.plugin_id == REV_AUDIO:
                     try:
@@ -412,10 +410,11 @@ class WwiseBank:
                     except KeyError:
                         continue
                     if source.stream_type == BANK and source.source_id not in added_sources:
-                        data_array.append(audio.get_data())
+                        data_array.append(pad_to_16_byte_align(audio.get_data()))
                         didx_array.append(struct.pack("<III", media_index_id, offset, audio.size))
-                        offset += audio.size
+                        offset += align_16_byte(audio.size)
                         added_sources.add(media_index_id)
+                        
         if len(didx_array) > 0:
             data += "DIDX".encode('utf-8') + (12*len(didx_array)).to_bytes(4, byteorder="little")
             data += b"".join(didx_array)
@@ -672,7 +671,6 @@ class GameArchive:
             toc_entry.toc_data_size = len(bank_data) + 8
             toc_entry.entry_index = entry_index
             toc_entries.append(toc_entry)
-            #dep_data = pad_to_16_byte_align(b"".join([bytes.fromhex("D82F7678"), len(dep_data).to_bytes(4, byteorder="little"), dep_data]))
             dep_data = pad_to_16_byte_align(dep_data)
             toc_data.append(dep_data)
             
@@ -828,9 +826,9 @@ class GameArchive:
                     except:
                         continue
                 for source in entry.sources:
-                    if source.plugin_id == VORBIS:
-                        self.audio_sources[source.source_id].parents.add(entry)
                     try:
+                        if source.plugin_id == VORBIS:
+                            self.audio_sources[source.source_id].parents.add(entry)
                         if source.plugin_id == VORBIS and self.audio_sources[source.source_id] not in bank.get_content(): #may be missing streamed audio if the patch didn't change it
                             bank.add_content(self.audio_sources[source.source_id])
                     except:
@@ -951,60 +949,10 @@ class SoundHandler:
             stereo_array[index][1] = frame[1]
         
         return stereo_array.tobytes()
-     
-class ModHandler:
-    
-    handler_instance = None
-    
-    def __init__(self):
-        self.mods = {}
-        self.active_mod = Mod()
-        
-    @classmethod
-    def create_instance(cls):
-        cls.handler_instance = ModHandler()
-        
-    @classmethod
-    def get_instance(cls) -> Self:
-        if cls.handler_instance == None:
-            cls.create_instance()
-        return cls.handler_instance
-        
-    def create_new_mod(self, mod_name: str):
-        if mod_name in self.mods.keys():
-            raise ValueError("Mod name already exists!")
-        new_mod = Mod()
-        self.mods[mod_name] = new_mod
-        self.active_mod = new_mod
-        return new_mod
-        
-    def get_active_mod(self) -> Mod:
-        return self.active_mod
-        
-    def set_active_mod(self, mod_name: str):
-        try:
-            self.active_mod = self.mods[mod_name]
-        except:
-            raise ValueError("No matching mod found")
-            
-    def get_mod_names(self) -> list[str]:
-        return self.mods.keys()
-        
-    def delete_mod(self, mod_name: str):
-        try:
-            mod_to_delete = self.mods[mod_name]
-        except:
-            raise ValueError("No matching mod found")
-        if mod_to_delete is self.active_mod:
-            for mod in self.mods.values():
-                if mod is not self.active_mod:
-                    self.active_mod = mod
-                    break
-        del self.mods[mod_name]
         
 class Mod:
 
-    def __init__(self):
+    def __init__(self, name):
         self.wwise_streams = {}
         self.stream_count = {}
         self.wwise_banks = {}
@@ -1014,6 +962,7 @@ class Mod:
         self.text_banks = {}
         self.text_count = {}
         self.game_archives = {}
+        self.name = name
         
     def revert_all(self):
         for audio in self.audio_sources.values():
@@ -1091,7 +1040,7 @@ class Mod:
     def dump_multiple_as_wem(self, file_ids: list[int], output_folder: str = ""):
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
-            raise ValueError("Invalid output folder!")
+            raise ValueError(f"Invalid output folder '{output_folder}'")
 
         for file_id in file_ids:
             audio = self.get_audio_source(file_id)
@@ -1104,7 +1053,7 @@ class Mod:
                              with_seq: bool = False):
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
-            raise ValueError("Invalid output folder!")
+            raise ValueError(f"Invalid output folder '{output_folder}'")
 
         for i, file_id in enumerate(file_ids, start=0):
             audio: int | None = self.get_audio_source(int(file_id))
@@ -1141,7 +1090,7 @@ class Mod:
     def dump_all_as_wem(self, output_folder: str = ""):
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
-            raise ValueError("Invalid output folder!")
+            raise ValueError(f"Invalid output folder '{output_folder}'")
         for bank in self.game_archive.wwise_banks.values():
             subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
@@ -1153,7 +1102,7 @@ class Mod:
     
     def dump_all_as_wav(self, output_folder: str = ""):
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
-            raise ValueError("Invalid output folder!")
+            raise ValueError(f"Invalid output folder '{output_folder}'")
         for bank in self.game_archive.wwise_banks.values():
             subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
@@ -1170,17 +1119,31 @@ class Mod:
     def save_archive_file(self, game_archive: GameArchive, output_folder: str = ""):
 
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
-            raise ValueError("Invalid output folder!")
+            raise ValueError(f"Invalid output folder '{output_folder}'")
         
         game_archive.to_file(output_folder)
         
-    def save(self, output_folder: str = ""):
+    def save(self, output_folder: str = "", combined = True):
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
-            raise ValueError("Invalid output folder!")
-            
-        for game_archive in self.get_game_archives().values():
-            self.save_archive_file(game_archive, output_folder)
+            raise ValueError(f"Invalid output folder '{output_folder}'")
+        
+        if combined:
+            combined_game_archive = GameArchive()
+            combined_game_archive.name = "9ba626afa44a3aa3.patch_0"
+            combined_game_archive.magic = 0xF0000011
+            combined_game_archive.num_types = 0
+            combined_game_archive.num_files = 0
+            combined_game_archive.unknown = 0
+            combined_game_archive.unk4Data = bytes.fromhex("CE09F5F4000000000C729F9E8872B8BD00A06B02000000000079510000000000000000000000000000000000000000000000000000000000")
+            combined_game_archive.audio_sources = self.audio_sources
+            combined_game_archive.wwise_banks = self.wwise_banks
+            combined_game_archive.wwise_streams = self.wwise_streams
+            combined_game_archive.text_banks = self.text_banks
+            combined_game_archive.to_file(output_folder)
+        else:
+            for game_archive in self.get_game_archives().values():
+                self.save_archive_file(game_archive, output_folder)
             
     def get_audio_source(self, audio_id: int) -> AudioSource:
         try:
@@ -1400,7 +1363,7 @@ class Mod:
 
     def write_patch(self, output_folder: str = ""):
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
-            raise ValueError("Invalid output folder!")
+            raise ValueError(f"Invalid output folder '{output_folder}'")
         patch_game_archive = GameArchive()
         patch_game_archive.name = "9ba626afa44a3aa3.patch_0"
         patch_game_archive.magic = 0xF0000011
@@ -1470,7 +1433,7 @@ class Mod:
                                 item.set_data(track_info=tracks)
         if length_import_failed:
             raise Exception("Failed to set track duration for some audio sources")
-                        
+    
     def create_external_sources_list(self, sources: list[str], converstion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
@@ -1546,9 +1509,8 @@ class Mod:
         temp_files = []
         for file in others.keys():
             process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
-            else:
-                wavs[f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"] = others[file]
-                temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
+            wavs[f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"] = others[file]
+            temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
         
         for patch in patches:
             self.import_patch(patch_file=patch)
@@ -2147,8 +2109,64 @@ class Mod:
             for patched_id in patched_ids:
                 self.revert_audio(patched_id)
         patched_ids.clear()
-
-
+        
+class ModHandler:
+    
+    handler_instance = None
+    
+    def __init__(self):
+        self.mods = {}
+        
+    @classmethod
+    def create_instance(cls):
+        cls.handler_instance = ModHandler()
+        
+    @classmethod
+    def get_instance(cls) -> Self:
+        if cls.handler_instance == None:
+            cls.create_instance()
+        return cls.handler_instance
+        
+    def create_new_mod(self, mod_name: str):
+        if mod_name in self.mods.keys():
+            raise ValueError(f"Mod name '{mod_name}' already exists!")
+        new_mod = Mod(mod_name)
+        self.mods[mod_name] = new_mod
+        self.active_mod = new_mod
+        return new_mod
+        
+    def get_active_mod(self) -> Mod:
+        if not self.active_mod:
+            raise Exception("No active mod!")
+        return self.active_mod
+        
+    def set_active_mod(self, mod_name: str):
+        try:
+            self.active_mod = self.mods[mod_name]
+        except:
+            raise ValueError(f"No matching mod found for '{mod_name}'")
+            
+    def get_mod_names(self) -> list[str]:
+        return self.mods.keys()
+        
+    def delete_mod(self, mod: str | Mod):
+        if isinstance(mod, Mod):
+            mod_name = mod.name
+        else:
+            mod_name = mod
+        try:
+            mod_to_delete = self.mods[mod_name]
+        except:
+            raise ValueError(f"No matching mod found for '{mod}'")
+        if mod_to_delete is self.active_mod:
+            if len(self.mods) > 1:
+                for mod in self.mods.values():
+                    if mod is not self.active_mod:
+                        self.active_mod = mod
+                        break
+            else:
+                self.active_mod = None
+        del self.mods[mod_name]
 class ProgressWindow:
     def __init__(self, title, max_progress):
         self.title = title
@@ -2794,6 +2812,7 @@ class MainWindow:
         self.sound_handler = SoundHandler.get_instance()
         self.watched_paths = []
         self.mod_handler = ModHandler.get_instance()
+        self.mod_handler.create_new_mod("default")
         
         self.root = TkinterDnD.Tk()
         if os.path.exists("icon.ico"):
@@ -3023,14 +3042,15 @@ class MainWindow:
         self.workspace_selection = self.workspace.selection()
         
     def combine_mods(self):
-        mod_files = askopenfilenames(title="Choose mod files to combine")
+        mod_files = filedialog.askopenfilenames(title="Choose mod files to combine")
         if mod_files:
             combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
             combined_mod.load_archive_file(mod_files[0])
             for mod in mod_files[1:]:
                 combined_mod.load_archive_file(mod)
                 combined_mod.import_patch(mod)
-        self.save_archive()
+            self.save_mod()
+            self.mod_handler.delete_mod("combined_mods_temp")
 
     def drop_import(self, event):
         self.drag_source_widget = None
@@ -3608,7 +3628,10 @@ class MainWindow:
                             track_entry = self.create_treeview_entry(track, segment_entry)
                             for source in track.sources:
                                 if source.plugin_id == VORBIS:
-                                    self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
+                                    try:
+                                        self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
+                                    except:
+                                        pass
                             for info in track.track_info:
                                 if info.event_id != 0:
                                     self.create_treeview_entry(info, track_entry)
@@ -3618,11 +3641,17 @@ class MainWindow:
                             sound = bank.hierarchy.entries[s_id]
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
-                                self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(sound.sources[0].source_id), container_entry)
+                                try:
+                                    self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(sound.sources[0].source_id), container_entry)
+                                except:
+                                    pass
                 for hierarchy_entry in bank.hierarchy.entries.values():
                     if isinstance(hierarchy_entry, Sound) and hierarchy_entry not in sequence_sources:
                         if hierarchy_entry.sources[0].plugin_id == VORBIS:
-                            self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(hierarchy_entry.sources[0].source_id), bank_entry)
+                            try:
+                                self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(hierarchy_entry.sources[0].source_id), bank_entry)
+                            except:
+                                pass
             for text_bank in archive.text_banks.values():
                 if text_bank.language == language:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
@@ -3644,7 +3673,10 @@ class MainWindow:
                     for source in hierarchy_entry.sources:
                         if source.plugin_id == VORBIS and source.source_id not in existing_sources:
                             existing_sources.add(source.source_id)
-                            self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), bank_entry)
+                            try:
+                                self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), bank_entry)
+                            except:
+                                pass
             for text_bank in archive.text_banks.values():
                 if text_bank.language == language:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
@@ -3732,8 +3764,10 @@ class MainWindow:
                 self.treeview.delete(child)
 
     def save_mod(self):
-        self.sound_handler.kill_sound()
-        self.mod_handler.get_active_mod().save()
+        output_folder = filedialog.askdirectory(title="Select location to save combined mod")
+        if output_folder and os.path.exists(output_folder):
+            self.sound_handler.kill_sound()
+            self.mod_handler.get_active_mod().save(output_folder)
 
     def clear_treeview_background(self, item):
         bg_color, fg_color = self.get_colors()
@@ -3919,7 +3953,6 @@ if __name__ == "__main__":
         showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
         
     language = language_lookup("English (US)")
-    ModHandler.get_instance().create_new_mod("mod")
     window = MainWindow(app_state, lookup_store)
     
     app_state.save_config()

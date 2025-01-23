@@ -131,7 +131,7 @@ def pad_to_16_byte_align(data):
     new_len = ceil(l/16)*16
     return b + bytearray(new_len-l)
     
-def _16_byte_align(addr: int) -> int:
+def align_16_byte(addr: int) -> int:
     return ceil(addr/16)*16
     
 def bytes_to_long(bytes):
