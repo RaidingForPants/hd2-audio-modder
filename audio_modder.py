@@ -221,7 +221,9 @@ class TocHeader:
     def __init__(self):
         self.file_id = self.type_id = self.toc_data_offset = self.stream_file_offset = self.gpu_resource_offset = 0
         self.unknown1 = self.unknown2 = self.toc_data_size = self.stream_size = self.gpu_resource_size = 0
-        self.unknown3 = self.unknown4 = self.entry_index = 0
+        self.unknown3 = 16
+        self.unknown4 = 64
+        self.entry_index = 0
         
     def from_memory_stream(self, stream: MemoryStream):
         self.file_id             = stream.uint64_read()
@@ -391,14 +393,14 @@ class WwiseBank:
                     except KeyError as e:
                         continue
                     if source.stream_type == PREFETCH_STREAM and source.source_id not in added_sources:
-                        data_array.append(pad_to_16_byte_align(audio.get_data()[:source.mem_size]))
+                        data_array.append(audio.get_data()[:source.mem_size])
                         didx_array.append(struct.pack("<III", source.source_id, offset, source.mem_size))
-                        offset += align_16_byte(source.mem_size)
+                        offset += source.mem_size
                         added_sources.add(source.source_id)
                     elif source.stream_type == BANK and source.source_id not in added_sources:
-                        data_array.append(pad_to_16_byte_align(audio.get_data()))
+                        data_array.append(audio.get_data())
                         didx_array.append(struct.pack("<III", source.source_id, offset, audio.size))
-                        offset += align_16_byte(audio.size)
+                        offset += audio.size
                         added_sources.add(source.source_id)
                 elif source.plugin_id == REV_AUDIO:
                     try:
@@ -410,9 +412,9 @@ class WwiseBank:
                     except KeyError:
                         continue
                     if source.stream_type == BANK and source.source_id not in added_sources:
-                        data_array.append(pad_to_16_byte_align(audio.get_data()))
+                        data_array.append(audio.get_data())
                         didx_array.append(struct.pack("<III", media_index_id, offset, audio.size))
-                        offset += align_16_byte(audio.size)
+                        offset += audio.size
                         added_sources.add(media_index_id)
                         
         if len(didx_array) > 0:
@@ -662,21 +664,6 @@ class GameArchive:
             toc_data_offset += len(bank_data)
             entry_index += 1
             
-            dep_data = bank.dep.get_data()
-            toc_entry = TocHeader()
-            toc_entry.file_id = bank.get_id()
-            toc_entry.type_id = WWISE_DEP
-            toc_entry.toc_data_offset = toc_data_offset
-            toc_entry.stream_file_offset = stream_file_offset
-            toc_entry.toc_data_size = len(bank_data) + 8
-            toc_entry.entry_index = entry_index
-            toc_entries.append(toc_entry)
-            dep_data = pad_to_16_byte_align(dep_data)
-            toc_data.append(dep_data)
-            
-            toc_data_offset += len(dep_data)
-            entry_index += 1
-            
         for text_bank in self.text_banks.values():
             text_data = text_bank.generate()
             toc_entry = TocHeader()
@@ -692,6 +679,22 @@ class GameArchive:
             toc_data.append(text_data)
             
             toc_data_offset += len(text_data)
+            entry_index += 1
+        
+        for bank in self.wwise_banks.values():
+            dep_data = bank.dep.get_data()
+            toc_entry = TocHeader()
+            toc_entry.file_id = bank.get_id()
+            toc_entry.type_id = WWISE_DEP
+            toc_entry.toc_data_offset = toc_data_offset
+            toc_entry.stream_file_offset = stream_file_offset
+            toc_entry.toc_data_size = len(dep_data)
+            toc_entry.entry_index = entry_index
+            toc_entries.append(toc_entry)
+            dep_data = pad_to_16_byte_align(dep_data)
+            toc_data.append(dep_data)
+            
+            toc_data_offset += len(dep_data)
             entry_index += 1
             
         toc_file.write(b"".join([entry.get_data() for entry in toc_entries]))
