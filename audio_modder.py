@@ -391,7 +391,6 @@ class WwiseBank:
                     try:
                         audio = audio_sources[source.source_id]
                     except KeyError as e:
-                        print(e)
                         continue
                     if source.stream_type == PREFETCH_STREAM and source.source_id not in added_sources:
                         data_array.append(audio.get_data()[:source.mem_size])
@@ -1301,7 +1300,7 @@ class Mod:
                                 try:
                                     new_parent = self.get_hierarchy_entry(key, parent.get_id())
                                 except:
-                                    continue
+                                    continue # add missing hierarchy entry?
                                 audio.parents.add(new_parent)
                                 if audio.modified:
                                     new_parent.raise_modified()
@@ -3068,9 +3067,9 @@ class MainWindow:
         mod_files = filedialog.askopenfilenames(title="Choose mod files to combine")
         if mod_files:
             combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
-            combined_mod.load_archive_file(mod_files[0])
-            for mod in mod_files[1:]:
+            for mod in mod_files:
                 combined_mod.load_archive_file(mod)
+            for mod in mod_files:
                 combined_mod.import_patch(mod)
             self.save_mod()
             self.mod_handler.delete_mod("combined_mods_temp")
