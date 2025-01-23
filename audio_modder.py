@@ -1297,7 +1297,7 @@ class Mod:
                         for parent in parents:
                             if isinstance(parent, HircEntry) and parent.soundbank.get_id() == key:
                                 audio.parents.remove(parent)
-                                new_parent = self.get_wwise_banks()[key].get_hierarchy_entry(parent.get_id())
+                                new_parent = self.get_hierarchy_entry(key, parent.get_id())
                                 audio.parents.add(new_parent)
                                 if audio.modified:
                                     new_parent.raise_modified()
