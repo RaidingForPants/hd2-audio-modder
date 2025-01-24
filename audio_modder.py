@@ -13,6 +13,7 @@ import pathlib
 import copy
 import locale
 import random
+import zipfile
 import xml.etree.ElementTree as etree
 
 from functools import partial
@@ -3010,7 +3011,7 @@ class MainWindow:
             label="Import"
         )
         
-        #self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
+        self.file_menu.add_command(label="Combine Music Mods", command=self.combine_music_mods)
         
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
@@ -3065,15 +3066,47 @@ class MainWindow:
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
         
-    def combine_mods(self):
-        mod_files = filedialog.askopenfilenames(title="Choose mod files to combine")
+    def combine_music_mods(self):
+        self.sound_handler.kill_sound()
+        if not self.app_state.game_data_path or not os.path.exists(self.app_state.game_data_path):
+            showwarning(title="Error", message="Unable to locate Helldivers 2 game files. Cannot automatically merge mods.")
+        mod_files = filedialog.askopenfilenames(title="Choose mod files to combine", filetypes=[("Zip Archive", "*.zip")])
         if mod_files:
             combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
+            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "046d4441a6dae0a9"))
+            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "89de9c3d26d2adc1"))
+            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "fdf011daecf24312"))
+            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "2e24ba9dd702da5c"))
+            extracted_mods = []
             for mod in mod_files:
-                combined_mod.load_archive_file(mod)
-            for mod in mod_files:
+                zip = zipfile.ZipFile(mod)
+                zip.extractall(path=CACHE)
+            for mod in [os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]]:
                 combined_mod.import_patch(mod)
-            self.save_mod()
+            for file in os.listdir(CACHE):
+                file = os.path.join(CACHE, file)
+                try:
+                    if os.path.isfile(file):
+                        os.remove(file)
+                    elif os.path.isdir(file):
+                        shutil.rmtree(file)
+                except:
+                    pass
+            output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
+            if output_file:
+                combined_mod.write_patch(CACHE)
+                zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
+                with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"), 'rb') as patch_file:
+                    zip.writestr("9ba626afa44a3aa3.patch_0", patch_file.read())
+                if os.path.exists(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream")):
+                    with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"), 'rb') as stream_file:
+                        zip.writestr("9ba626afa44a3aa3.patch_0.stream", stream_file.read())
+                zip.close()
+                try:
+                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"))
+                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"))
+                except:
+                    pass
             self.mod_handler.delete_mod("combined_mods_temp")
 
     def drop_import(self, event):
