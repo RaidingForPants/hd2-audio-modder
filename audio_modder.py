@@ -3081,17 +3081,17 @@ class MainWindow:
             for mod in mod_files:
                 zip = zipfile.ZipFile(mod)
                 zip.extractall(path=CACHE)
-            for mod in [os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]]:
-                combined_mod.import_patch(mod)
-            for file in os.listdir(CACHE):
-                file = os.path.join(CACHE, file)
-                try:
-                    if os.path.isfile(file):
-                        os.remove(file)
-                    elif os.path.isdir(file):
-                        shutil.rmtree(file)
-                except:
-                    pass
+                for patch_file in [os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]]:
+                    combined_mod.import_patch(patch_file)
+                for file in os.listdir(CACHE):
+                    file = os.path.join(CACHE, file)
+                    try:
+                        if os.path.isfile(file):
+                            os.remove(file)
+                        elif os.path.isdir(file):
+                            shutil.rmtree(file)
+                    except:
+                        pass
             output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
             if output_file:
                 combined_mod.write_patch(CACHE)
