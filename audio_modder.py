@@ -1378,11 +1378,17 @@ class Mod:
                         item.set_data(track_info=tracks)
                             
         for bank in patch_game_archive.get_wwise_banks().values():
-            self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+            try:
+                self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+            except KeyError:
+                pass
                             
 
         for text_bank in patch_game_archive.get_text_banks().values():
-            self.get_text_banks()[text_bank.get_id()].import_text(text_bank)
+            try:
+                self.get_text_banks()[text_bank.get_id()].import_text(text_bank)
+            except KeyError:
+                pass
         
         return True
 
@@ -3317,14 +3323,6 @@ class MainWindow:
                 return
             elif tags[0] == "dir":
                 return
-            elif tags[0] == "file":
-                values = self.workspace.item(select, option="values")
-                assert(values != '' and len(values) == 1)
-                if "patch" in os.path.splitext(values[0])[1] and os.path.exists(values[0]):
-                    self.workspace_popup_menu.add_command(
-                        label="Open",
-                        command=lambda: self.load_archive(archive_file=values[0]),
-                    )
         file_dict = {self.workspace.item(i, option="values")[0]: [get_number_prefix(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
         self.workspace_popup_menu.add_command(
             label="Import", 
@@ -3804,6 +3802,9 @@ class MainWindow:
         if not archive_file:
             archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
         if not archive_file:
+            return
+        if ".patch" in archive_file:
+            showwarning(title="Invalid archive", message="Cannot open patch files. Use Import Patch to apply a patch file's changes to the loaded archive(s)")
             return
         self.sound_handler.kill_sound()
         if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
