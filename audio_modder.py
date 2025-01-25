@@ -3524,7 +3524,7 @@ class MainWindow:
             values = self.workspace.item(select, option="values")
             tags = self.workspace.item(select, option="tags")
             assert(len(values) == 1 and len(tags) == 1)
-            if tags[0] == "file" and os.path.splitext(values[0])[1] == ".wem" and os.path.exists(values[0]):
+            if tags[0] == "file" and os.path.splitext(values[0])[1] in SUPPORTED_AUDIO_TYPES and os.path.exists(values[0]):
                 audio_data = None
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
@@ -4012,6 +4012,7 @@ if __name__ == "__main__":
     language = language_lookup("English (US)")
     window = MainWindow(app_state, lookup_store)
     
+    SoundHandler.get_instance().kill_sound()
     app_state.save_config()
 
     if os.path.exists(CACHE):
