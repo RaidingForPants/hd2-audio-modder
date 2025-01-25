@@ -12,6 +12,9 @@ import xml.etree.ElementTree as etree
 from typing import Callable
 from typing_extensions import Self
 
+from const import *
+from env import *
+from xlocale import *
 from util import *
 from wwise_hierarchy import *
 
@@ -180,7 +183,7 @@ class BankParser:
         try:
             return self.chunks[chunk_tag]
         except:
-            return None
+            return bytearray()
 
 class WwiseBank:
     
@@ -245,7 +248,7 @@ class WwiseBank:
                 if source.plugin_id == VORBIS:
                     try:
                         audio = audio_sources[source.source_id]
-                    except KeyError as e:
+                    except KeyError as _:
                         continue
                     if source.stream_type == PREFETCH_STREAM and source.source_id not in added_sources:
                         data_array.append(audio.get_data()[:source.mem_size])
@@ -360,7 +363,6 @@ class TextBank:
         data_section_start = offset_section_start + 4 * num_entries
         ids = data[id_section_start:offset_section_start]
         offsets = data[offset_section_start:data_section_start]
-        offset = 0
         for n in range(num_entries):
             entry = StringEntry()
             entry.parent = self
@@ -735,22 +737,27 @@ class SoundHandler:
             return
         filename = f"temp{sound_id}"
         if not os.path.isfile(f"{filename}.wav"):
-            with open(f'{os.path.join(CACHE, filename)}.wem', 'wb') as f:
+            with open(f'{os.path.join(TMP, filename)}.wem', 'wb') as f:
                 f.write(sound_data)
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, filename)}.wav", f"{os.path.join(CACHE, filename)}.wem"], stdout=subprocess.DEVNULL)
-            os.remove(f"{os.path.join(CACHE, filename)}.wem")
+            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, filename)}.wav", f"{os.path.join(TMP, filename)}.wem"], stdout=subprocess.DEVNULL)
+            os.remove(f"{os.path.join(TMP, filename)}.wem")
             if process.returncode != 0:
                 logger.error(f"Encountered error when converting {sound_id}.wem for playback")
                 self.callback = None
                 return
             
         self.audio_id = sound_id
-        self.wave_file = wave.open(f"{os.path.join(CACHE, filename)}.wav")
-        self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
+        self.wave_file = wave.open(f"{os.path.join(TMP, filename)}.wav")
+        self.audio_file = f"{os.path.join(TMP, filename)}.wav"
         self.frame_count = 0
         self.max_frames = self.wave_file.getnframes()
         
-        def read_stream(input_data, frame_count, time_info, status):
+        def read_stream(
+            _, 
+            frame_count, 
+            __, 
+            ___
+        ):
             self.frame_count += frame_count
             if self.frame_count > self.max_frames:
                 if self.callback is not None:
@@ -773,7 +780,7 @@ class SoundHandler:
                 rate=self.wave_file.getframerate(),
                 output=True,
                 stream_callback=read_stream)
-        self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
+        self.audio_file = f"{os.path.join(TMP, filename)}.wav"
         
     def downmix_to_stereo(self, data: bytearray, channels: int, channel_width: int, frame_count: int) -> bytes:
         if channel_width == 2:
@@ -903,24 +910,22 @@ class Mod:
         for file_id in file_ids:
             audio = self.get_audio_source(file_id)
             if audio is not None:
-                save_path = os.path.join(folder, f"{audio.get_id()}")
+                save_path = os.path.join(output_folder, f"{audio.get_id()}")
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
         
-    def dump_multiple_as_wav(self, file_ids: list[str], output_folder: str = "", muted: bool = False,
+    def dump_multiple_as_wav(self, file_ids: list[int], output_folder: str = "", muted: bool = False,
                              with_seq: bool = False):
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise ValueError(f"Invalid output folder '{output_folder}'")
 
         for i, file_id in enumerate(file_ids, start=0):
-            audio: int | None = self.get_audio_source(int(file_id))
-            if audio is None:
-                continue
+            audio: int = self.get_audio_source(int(file_id))
             basename = str(audio.get_id())
             if with_seq:
                 basename = f"{i:02d}" + "_" + basename
-            save_path = os.path.join(folder, basename)
+            save_path = os.path.join(output_folder, basename)
             if muted:
                 subprocess.run([
                     FFMPEG, 
@@ -946,8 +951,9 @@ class Mod:
         
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise ValueError(f"Invalid output folder '{output_folder}'")
+
         for bank in self.game_archive.wwise_banks.values():
-            subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
+            subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
             for audio in bank.get_content():
@@ -959,7 +965,7 @@ class Mod:
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise ValueError(f"Invalid output folder '{output_folder}'")
         for bank in self.game_archive.wwise_banks.values():
-            subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
+            subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
             for audio in bank.get_content():
@@ -1310,7 +1316,7 @@ class Mod:
         if length_import_failed:
             raise Exception("Failed to set track duration for some audio sources")
     
-    def create_external_sources_list(self, sources: list[str], converstion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
+    def create_external_sources_list(self, sources: list[str], conversion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": __file__
@@ -1322,9 +1328,9 @@ class Mod:
                 "Conversion": conversion_setting,
                 "Destination": os.path.basename(source)
             })
-        file.write(os.path.join(CACHE, "external_sources.wsources"))
+        file.write(os.path.join(TMP, "external_sources.wsources"))
         
-        return os.path.join(CACHE, "external_sources.wsources")
+        return os.path.join(TMP, "external_sources.wsources")
         
     def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
         if not wavs:
@@ -1342,7 +1348,7 @@ class Mod:
         else:
             raise Exception("The current operating system does not support this feature")
         
-        convert_dest = os.path.join(CACHE, SYSTEM)
+        convert_dest = os.path.join(TMP, SYSTEM)
         if SYSTEM in WWISE_SUPPORTED_SYSTEMS:
             subprocess.run([
                 WWISE_CLI,
@@ -1352,7 +1358,7 @@ class Mod:
                 "--source-file",
                 source_list,
                 "--output",
-                CACHE,
+                TMP,
             ]).check_returncode()
         else:
             raise Exception("The current operating system does not support this feature")
@@ -1384,9 +1390,9 @@ class Mod:
         others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] in filetypes}
         temp_files = []
         for file in others.keys():
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
-            wavs[f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav"] = others[file]
-            temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
+            subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
+            wavs[f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav"] = others[file]
+            temp_files.append(f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav")
         
         for patch in patches:
             self.import_patch(patch_file=patch)
