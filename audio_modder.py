@@ -1459,7 +1459,7 @@ class Mod:
         if length_import_failed:
             raise Exception("Failed to set track duration for some audio sources")
     
-    def create_external_sources_list(self, sources: list[str], converstion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
+    def create_external_sources_list(self, sources: list[str], conversion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
             "SchemaVersion": "1",
             "Root": __file__
