@@ -1048,7 +1048,7 @@ class Mod:
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise OSError(f"Invalid output folder '{output_folder}'")
 
-        for bank in self.game_archive.wwise_banks.values():
+        for bank in self.get_wwise_banks().values():
             subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
@@ -1066,7 +1066,7 @@ class Mod:
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise OSError(f"Invalid output folder '{output_folder}'")
 
-        for bank in self.game_archive.wwise_banks.values():
+        for bank in self.get_wwise_banks().values():
             subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
