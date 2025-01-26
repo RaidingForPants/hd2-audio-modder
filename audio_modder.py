@@ -28,13 +28,12 @@ import config as cfg
 import db
 import log
 import fileutil
-import util
 from util import *
 from wwise_hierarchy import *
 from core import *
-import xlocale
-import env
-import const
+from xlocale import *
+from env import *
+from const import *
 
 from log import logger
 
@@ -1845,6 +1844,8 @@ if __name__ == "__main__":
     try:
         if not os.path.exists(CACHE):
             os.mkdir(CACHE, mode=0o777)
+        if not os.path.exists(TMP):
+            os.mkdir(TMP, mode=0o777)
     except Exception as e:
         showerror("Error when initiating application", 
                     "Failed to create application caching space")
