@@ -338,7 +338,7 @@ class WwiseStream:
     def get_data(self) -> bytearray | bytes:
         if self.audio_source == None:
             raise AssertionError(
-                f"No audio source is attached ot WwiseStream {self.file_id}"
+                f"No audio source is attached to WwiseStream {self.file_id}"
             )
         return self.audio_source.get_data()
 
@@ -681,7 +681,7 @@ class GameArchive:
         # Create all AudioSource objects
         for bank in self.wwise_banks.values():
             if bank.hierarchy == None:
-                logger.error(f"WwiseBank {bank.file_id} with no WwiseHierarchy")
+                logger.error(f"WwiseBank {bank.file_id} has no WwiseHierarchy")
                 continue
 
             for entry in bank.hierarchy.get_entries():
@@ -689,7 +689,7 @@ class GameArchive:
                     if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
                         if source.source_id not in media_index.data:
                             logger.error(
-                                f"Source ID {source.source_id} with no entry in "
+                                f"Source ID {source.source_id} has no entry in "
                                 " media index."
                             )
                             continue
@@ -702,19 +702,19 @@ class GameArchive:
                     elif source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
                         if bank.dep == None:
                             raise AssertionError(
-                                f"WwiseBank {bank.file_id} with WwiseDep"
+                                f"WwiseBank {bank.file_id} has no WwiseDep"
                             )
                         stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
                         if stream_resource_id not in self.wwise_streams:
                             logger.error(
-                                f"Stream {stream_resource_id} with no WwiseStream"
+                                f"Stream {stream_resource_id} corresponds to no WwiseStream object"
                             )
                             continue
 
                         audio = self.wwise_streams[stream_resource_id].audio_source
                         if audio == None:
                             logger.error(
-                                f"WwiseStream {stream_resource_id} with no "
+                                f"WwiseStream {stream_resource_id} has no "
                                 "audio source"
                             )
                             continue
@@ -738,7 +738,7 @@ class GameArchive:
         #add track_info to audio sources?
         for bank in self.wwise_banks.values():
             if bank.hierarchy == None:
-                logger.error(f"WwiseBank {bank.file_id} with no WwiseHierarchy")
+                logger.error(f"WwiseBank {bank.file_id} has no WwiseHierarchy")
                 continue
 
             for entry in bank.hierarchy.entries.values():
@@ -1016,9 +1016,7 @@ class Mod:
 
         for i, file_id in enumerate(file_ids, start=0):
             audio: AudioSource = self.get_audio_source(int(file_id))
-            basename = str(audio.get_id())
-            if with_seq:
-                basename = f"{i:02d}" + "_" + basename
+            basename = str(audio.get_id()) if not with_seq else f"{i:02d}_{audio.get_id()}"
             save_path = os.path.join(output_folder, basename)
             if muted:
                 subprocess.run([
@@ -1120,8 +1118,8 @@ class Mod:
             
     def get_audio_source(self, audio_id: int) -> AudioSource:
         """
-        @excetpion
-        - ValueError
+        @exception
+        - KeyError
         """
         try:
             return self.audio_sources[audio_id] #short_id
@@ -1130,7 +1128,7 @@ class Mod:
         for source in self.audio_sources.values(): #resource_id
             if source.resource_id == audio_id:
                 return source
-        raise ValueError(f"Cannot find audio source with id {audio_id}")
+        raise KeyError(f"Cannot find audio source with id {audio_id}")
                 
     def get_string_entry(self, textbank_id: int, entry_id: int) -> StringEntry:
         """
@@ -1148,7 +1146,7 @@ class Mod:
     def get_hierarchy_entry(self, soundbank_id: int, hierarchy_id: int) -> HircEntry:
         """
         @exception
-        - ValueError
+        - KeyError
             - Trivial
         - AssertionError
         """
@@ -1157,8 +1155,8 @@ class Mod:
             raise AssertionError(f"WwiseBank {soundbank_id} without WwiseHierarchy")
         try:
             return bank.hierarchy.get_entry(hierarchy_id)
-        except ValueError:
-            raise ValueError(f"Cannot find wwise hierarchy entry with id {hierarchy_id} in soundbank with id {soundbank_id}")
+        except KeyError:
+            raise KeyError(f"Cannot find wwise hierarchy entry with id {hierarchy_id} in soundbank with id {soundbank_id}")
             
     def get_hierarchy_entries(self, soundbank_id: int):
         """
@@ -1341,7 +1339,7 @@ class Mod:
 
                 if audio == None:
                     raise AssertionError(
-                        f"WwiseStream {key} with no audio source"
+                        f"WwiseStream {key} has no audio source"
                     )
 
                 audio.parents.remove(game_archive.wwise_streams[key])
@@ -1418,7 +1416,7 @@ class Mod:
         for bank in patch_game_archive.get_wwise_banks().values():
             if bank.hierarchy == None:
                 raise AssertionError(
-                    f"WwiseBank {bank.file_id} with no WwiseHierarchy"
+                    f"WwiseBank {bank.file_id} has no WwiseHierarchy"
                 )
 
             self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)

@@ -14,8 +14,10 @@ SOUND = 2
 STREAM = 2
 # [End]
 
+# [Plugin IDs]
 VORBIS = 0x00040001
 REV_AUDIO = 0x01A01052
+# [End]
 
 # [Conversion]
 DEFAULT_CONVERSION_SETTING = "Vorbis Quality High"
