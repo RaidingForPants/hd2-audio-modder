@@ -2,6 +2,7 @@ import os
 import pickle
 import tkinter.messagebox as message_box
 import tkinter.filedialog as file_dialog
+import pathlib
 
 from log import logger
 
@@ -96,14 +97,28 @@ def _select_game_data_path() -> str | None:
             title="Locate game data directory for Helldivers 2"
         )
         if os.path.exists(game_data_path):
-            if game_data_path.lower().endswith("steamapps/common/helldivers 2/data"):
+            path = pathlib.Path(game_data_path)
+            if path.match("*/steamapps/common/Helldivers 2/data"):
                 return game_data_path
-            elif game_data_path.lower().endswith("steamapps/common/helldivers 2") and os.path.exists(os.path.join(game_data_path, "data")):
-                return os.path.join(game_data_path, "data")
-            elif game_data_path.lower().endswith("steamapps/common") and os.path.exists(os.path.join(game_data_path, "Helldivers 2", "data")):
-                return os.path.join(game_data_path, "Helldivers 2", "data")
-            elif game_data_path.lower().endswith("steamapps") and os.path.exists(os.path.join(game_data_path, "common", "Helldivers 2", "data")):
-                return os.path.join(game_data_path, "common", "Helldivers 2", "data")
-        res = message_box.askretrycancel(title="Invalid Folder", message="Failed to locate valid Helldivers 2 install in this folder.")
-        if not res:
+            elif path.match("*/steamapps/common/Helldivers 2/*") or path.match("*/steamapps/common/Helldivers 2/*/*"):
+                for parent_path in path.parents:
+                    if parent_path.match("*/steamapps/common/Helldivers 2") and os.path.exists(os.path.join(str(parent_path), "data")):
+                        return os.path.join(str(parent_path), "data")
+            elif path.match("*/steamapps/common/Helldivers 2"):
+                if os.path.exists(os.path.join(str(path), "data")):
+                    return os.path.join(str(path), "data")
+            elif path.match("*/steamapps/common"):
+                if os.path.exists(os.path.join(str(path), "data")):
+                    return os.path.join(str(path), "data")
+            elif path.match("*/steamapps"):
+                if os.path.exists(os.path.join(str(path), "common", "Helldivers 2", "data")):
+                    return os.path.join(str(path), "common", "Helldivers 2", "data")
+        if not game_data_path:
             return ""
+        response = message_box.askyesnocancel(title="Unexpected folder location", message=f"{game_data_path} does not appear to be the default install location for Helldivers 2. Would you like to use this as your game data folder?")
+        if response == None or response == ():
+            return ""
+        if response:
+            return game_data_path
+        if not response:
+            pass
