@@ -1,4 +1,8 @@
 import os
+import pathlib
+
+from const import SUPPORTED_AUDIO_TYPES
+
 
 class INode:
 
@@ -7,6 +11,7 @@ class INode:
         self.basename: str = basename
         self.isdir = isdir
         self.nodes: list[INode] = []
+
 
 def generate_file_tree(path) -> INode | None:
     if not os.path.exists(path):
@@ -25,12 +30,13 @@ def generate_file_tree(path) -> INode | None:
             inodes[absolute_path] = inode
             curr.nodes.append(inode)
         for filename in filenames:
-            f, ext = os.path.splitext(filename)
-            if ext in [".wav", ".wem", ".mp3", ".ogg", ".m4a"] or "patch" in ext:
+            _, ext = os.path.splitext(filename)
+            if ext in SUPPORTED_AUDIO_TYPES or "patch" in ext:
                 curr.nodes.append(INode(
                     False, os.path.join(dirpath, filename), filename))
                 
     return inodes[path]
+
 
 def traverse(node):
     stack: list[INode] = [node]
@@ -39,3 +45,7 @@ def traverse(node):
         for node in top.nodes:
             if node.isdir:
                 stack.append(node)
+
+
+def to_posix(path: str):
+    return pathlib.PurePath(path).as_posix()
