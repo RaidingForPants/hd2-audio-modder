@@ -1572,9 +1572,8 @@ class Mod:
             "--output",
             TMP,
         ]).check_returncode()
-        
-        wems = {os.path.join(convert_dest, f"{os.path.splitext(filepath)[0]}.wem"): targets for filepath, targets in wavs.items()}
-        
+        wems = {os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"): targets for filepath, targets in wavs.items()}
+
         self.import_wems(wems)
         
         for wem in wems.keys():
