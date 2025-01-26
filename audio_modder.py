@@ -1904,3 +1904,6 @@ if __name__ == "__main__":
 
     if os.path.exists(CACHE):
         shutil.rmtree(CACHE)
+        
+    if os.path.exists(TMP):
+        shutil.rmtree(TMP)

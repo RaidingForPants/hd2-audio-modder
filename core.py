@@ -780,7 +780,10 @@ class SoundHandler:
     def kill_sound(self):
         if self.audio_process is not None:
             if self.callback is not None:
-                self.callback()
+                try:
+                    self.callback()
+                except:
+                    pass
                 self.callback = None
             self.audio_process.close()
             self.wave_file.close()
