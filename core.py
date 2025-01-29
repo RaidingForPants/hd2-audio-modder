@@ -1634,6 +1634,18 @@ class ModHandler:
         if cls.handler_instance == None:
             cls.handler_instance = ModHandler()
         return cls.handler_instance
+
+    def add_new_mod(self, mod_name: str, mod: Mod):
+        """
+        - This method try to resolve access race of create_new_mod in multi-
+        threading
+
+        @exception
+        - KeyError
+        """
+        if mod_name in self.mods:
+            raise KeyError(f"Mod name '{mod_name}' already exists!")
+        self.mods[mod_name] = mod
         
     def create_new_mod(self, mod_name: str):
         """
@@ -1671,6 +1683,9 @@ class ModHandler:
             
     def get_mod_names(self) -> list[str]:
         return list(self.mods.keys())
+
+    def has_mod(self, mod_name: str) -> bool:
+        return mod_name in self.mods
         
     def delete_mod(self, mod: str | Mod):
         """
