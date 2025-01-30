@@ -6,6 +6,8 @@ import shutil
 import pathlib
 import zipfile
 import xml.etree.ElementTree as etree
+import urllib.request
+import json
 
 from functools import partial
 from functools import cmp_to_key
@@ -585,12 +587,19 @@ class ArchiveSearch(ttk.Entry):
         self.bind("<Escape>", self.destroy_cmp)
         self.bind("<Up>", self.on_arrow_up)
         self.bind("<Down>", self.on_arrow_down)
+        self.language = ""
         self.winfo_toplevel().bind("<Configure>", self.sync_windows)
 
     def sync_windows(self, event=None):
         if self.cmp_root is not None and self.winfo_toplevel() is not None:
             self.cmp_root.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
             self.cmp_root.lift()
+            
+    def add_language(self, name: str, language: str):
+        if self.language == "" and language != "none":
+            return f"{name} ({language})"
+        else:
+            return name
 
     def on_key_release(self, event: tkinter.Event):
         if event.keysym in self.ignore_keys:
@@ -606,17 +615,17 @@ class ArchiveSearch(ttk.Entry):
                 return
             archives = []
             if query == "":
-                archives = [self.fmt.format(k, v) 
-                            for k, v in self.entries.items()]
+                archives = [self.fmt.format(v.archive, self.add_language(v.friendlyname, v.language)) 
+                            for v in self.entries.values()]
             else:
                 unique: set[str] = set()
-                for archive_id, tag in self.entries.items():
-                    match = archive_id.find(query) != -1 or \
-                            tag.lower().find(query) != -1
-                    if not match or archive_id in unique:
+                for entry in self.entries.values():
+                    match = entry.archive.find(query) != -1 or \
+                            entry.friendlyname.lower().find(query) != -1
+                    if not match or entry.name in unique:
                         continue
-                    archives.append(self.fmt.format(archive_id, tag))
-                    unique.add(archive_id)
+                    archives.append(self.fmt.format(entry.archive, self.add_language(entry.friendlyname, entry.language)))
+                    unique.add(entry.name)
             self.cmp_list.delete(0, tkinter.END)
             for archive in archives:
                 self.cmp_list.insert(tkinter.END, archive)
@@ -639,15 +648,17 @@ class ArchiveSearch(ttk.Entry):
 
         archives = []
         if query == "":
-            archives = [self.fmt.format(k, v) for k, v in self.entries.items()]
+            archives = [self.fmt.format(v.archive, self.add_language(v.friendlyname, v.language)) 
+                        for v in self.entries.values()]
         else:
             unique: set[str] = set()
-            for archive_id, tag in self.entries.items():
-                match = archive_id.find(query) != -1 or tag.lower().find(query) != -1
-                if not match or archive_id in unique:
+            for entry in self.entries.values():
+                match = entry.archive.find(query) != -1 or \
+                        entry.friendlyname.lower().find(query) != -1
+                if not match or entry.name in unique:
                     continue
-                archives.append(self.fmt.format(archive_id, tag))
-                unique.add(archive_id)
+                archives.append(self.fmt.format(entry.archive, self.add_language(entry.friendlyname, entry.language)))
+                unique.add(entry.name)
 
         self.cmp_root = tkinter.Toplevel(self)
         self.cmp_root.wm_overrideredirect(True) # Hide title bar
@@ -766,7 +777,7 @@ class MainWindow:
                  app_state: cfg.Config, 
                  lookup_store: db.LookupStore | None):
         self.app_state = app_state
-        self.lookup_store = lookup_store
+        self.name_lookup = lookup_store
         self.sound_handler = SoundHandler.get_instance()
         self.watched_paths = []
         self.mod_handler = ModHandler.get_instance()
@@ -1284,20 +1295,20 @@ class MainWindow:
         self.observer.start()
 
     def init_archive_search_bar(self):
-        if self.lookup_store == None:
+        if self.name_lookup == None:
             logger.critical("Audio archive database connection is None after \
                     bypassing all check.", stack_info=True)
             return
-        archives = self.lookup_store.query_helldiver_audio_archive()
-        entries: dict[str, str] = {
-                archive.audio_archive_id: archive.audio_archive_name 
-                for archive in archives}
+        soundbanks = self.name_lookup.query_soundbanks()
+        entries: dict[str, LookupResult] = {
+                bank.id: bank
+                for bank in soundbanks}
         self.archive_search = ArchiveSearch("{1} || {0}", 
                                             entries=entries,
                                             on_select_cb=self.on_archive_search_bar_return,
                                             master=self.top_bar,
                                             width=64)
-        categories = self.lookup_store.query_helldiver_audio_archive_category()
+        categories = ["English", "Spanish, Castilian", "Spanish, Latin America", "French", "Italian", "German", "Japanese", "Portuguese"]
         categories = [""] + categories
         self.category_search = ttk.Combobox(self.top_bar,
                                             state="readonly",
@@ -1319,16 +1330,16 @@ class MainWindow:
         self.load_archive(initialdir="", archive_file=archive_file)
 
     def on_category_search_bar_select(self, event):
-        if self.lookup_store == None:
+        if self.name_lookup == None:
             logger.critical("Audio archive database connection is None after \
                     bypassing all check.", stack_info=True)
             return
         category: str = self.category_search.get()
-        archives = self.lookup_store.query_helldiver_audio_archive(category)
-        entries: dict[str, str] = {
-                archive.audio_archive_id: archive.audio_archive_name 
-                for archive in archives
-        }
+        self.archive_search.language = category
+        soundbanks = self.name_lookup.query_soundbanks(language=category)
+        entries: dict[str, LookupResult] = {
+                bank.id: bank
+                for bank in soundbanks}
         self.archive_search.set_entries(entries)
         self.archive_search.focus_set()
         self.category_search.selection_clear()
@@ -1511,31 +1522,39 @@ class MainWindow:
         self.root.update()
 
     def dump_as_wem(self):
-        output_file = filedialog.asksaveasfile(mode='wb', title="Save As", initialfile=(str(file_id)+".wem"), defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
-        if not output_file:
-            return
         if len(self.treeview.selection()) == 1:
+            output_file = filedialog.asksaveasfile(mode='wb', title="Save As", initialfile=f"{self.right_click_id}.wem", defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
+            if not output_file:
+                return
             self.mod_handler.get_active_mod().dump_as_wem(self.right_click_id, output_file)
         else:
-            self.mod_handler.get_active_mod().dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()])
+            output_folder = filedialog.askdirectory(title="Save As")
+            if not output_folder:
+                return
+            self.mod_handler.get_active_mod().dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()], output_folder)
 
     def dump_as_wav(self, muted: bool = False, with_seq: int = False):
-        output_file = filedialog.asksaveasfilename(
-            title="Save As", 
-            initialfile=f"{file_id}.wav", 
-            defaultextension=".wav", 
-            filetypes=[("Wav Audio", "*.wav")]
-        )
-        if not output_file:
-            return
         if len(self.treeview.selection()) == 1:
+            output_file = filedialog.asksaveasfilename(
+                title="Save As", 
+                initialfile=f"{self.right_click_id}.wav", 
+                defaultextension=".wav", 
+                filetypes=[("Wav Audio", "*.wav")]
+            )
+            if not output_file:
+                return
             self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
             return
-        self.mod_handler.get_active_mod().dump_multiple_as_wav(
-            [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
-            muted=muted,
-            with_seq=with_seq
-        )
+        else:
+            output_folder = filedialog.askdirectory(title="Save As")
+            if not output_folder:
+                return
+            self.mod_handler.get_active_mod().dump_multiple_as_wav(
+                [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
+                muted=muted,
+                with_seq=with_seq,
+                output_folder=output_folder
+            )
 
     def create_treeview_entry(self, entry, parent_item=""): #if HircEntry, add id of parent bank to the tags
         if entry is None: return
@@ -1544,7 +1563,11 @@ class MainWindow:
         else:
             tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
         if isinstance(entry, WwiseBank):
-            name = entry.dep.data.split('/')[-1]
+            bank = self.name_lookup.lookup_soundbank(str(entry.get_id()))
+            if bank.language != "none":
+                name = f"{bank.friendlyname} ({bank.language})"
+            else:
+                name = bank.friendlyname
             entry_type = "Sound Bank"
         elif isinstance(entry, TextBank):
             name = f"{entry.get_id()}.text"
@@ -1876,25 +1899,34 @@ if __name__ == "__main__":
             showwarning(title="Wwise Error", message="Error creating Wwise project. Audio import restricted to .wem files only")
             WWISE_CLI = ""
 
-    lookup_store: db.LookupStore | None = None
+    lookup_store: db.FriendlyNameLookup | None = None
     
     if not os.path.exists(GAME_FILE_LOCATION):
         showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
             " Audio archive search is disabled.")
-    elif os.path.exists("hd_audio_db.db"):
-        sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
+    elif os.path.exists("friendlynames.db"):
         try:
-            lookup_store = db.SQLiteLookupStore(sqlite_initializer, logger)
+            lookup_store = db.FriendlyNameLookup("friendlynames.db")
         except Exception as err:
             logger.error("Failed to connect to audio archive database", 
                          stack_info=True)
             lookup_store = None
     else:
-        logger.warning("Please ensure `hd_audio_db.db` is in the same folder as " \
-                "the executable to enable built-in audio archive search.")
-        logger.warning("Built-in audio archive search is disabled. " \
-                "Please refer to the information in Google spreadsheet.")
-        showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
+        file, _ = urllib.request.urlretrieve("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
+        with open(file) as f:
+            data = json.loads(f.read())
+            download_url = data["assets"][0]["browser_download_url"]
+        urllib.request.urlretrieve(download_url, "friendlynames.db")
+        if not os.path.exists("friendlynames.db"):
+            logger.error("Failed to fetch audio database. Built-in audio archive search is disabled.")
+            showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
+        else:
+            try:
+                lookup_store = db.FriendlyNameLookup("friendlynames.db")
+            except Exception as err:
+                logger.error("Failed to connect to audio archive database", 
+                             stack_info=True)
+                lookup_store = None
         
     language = language_lookup("English (US)")
     window = MainWindow(app_state, lookup_store)

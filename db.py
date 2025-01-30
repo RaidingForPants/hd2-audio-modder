@@ -44,6 +44,58 @@ class HelldiverAudioSource:
         self.audio_source_id = audio_source_id
         self.linked_audio_archive_ids = linked_audio_archive_ids
         self.linked_audio_archive_name_ids = linked_audio_archive_name_ids
+        
+class LookupResult:
+    
+    def __init__(self,
+                 id: str,
+                 name: str,
+                 friendlyname: str,
+                 archive: str,
+                 language: str,
+                 success: bool = True
+                 ):
+        self.id = id
+        self.name = name
+        self.friendlyname = friendlyname
+        self.archive = archive
+        self.language = language
+        self.success = success
+        
+class FriendlyNameLookup:
+    
+    def __init__(self, name_db_path: str = ""):
+        self.conn = sqlite3.connect(name_db_path)
+        if self.conn != None:
+            self.cursor = self.conn.cursor()
+            
+    def lookup_soundbank(self, key: str):
+        key = str(key)
+        try:
+            t = int(key)
+            is_bank_id = True
+        except ValueError:
+            is_bank_id = False
+        if is_bank_id:
+            results = self.cursor.execute("SELECT id, name, friendlyname, archive, language FROM soundbanks WHERE id=?", (key,))
+        else:
+            results = self.cursor.execute("SELECT id, name, friendlyname, archive, language FROM soundbanks WHERE name=?", (key,))
+        result = results.fetchone()
+        if result:
+            return LookupResult(result[0], result[1], result[2], result[3], result[4])
+        else:
+            return LookupResult(key, key, key, key, key, success=False)
+            
+            
+    def query_soundbanks(self, language=""):
+        r = []
+        if language == "":
+            results = self.cursor.execute("SELECT id, name, friendlyname, archive, language FROM soundbanks")
+        else:
+            results = self.cursor.execute("SELECT id, name, friendlyname, archive, language FROM soundbanks WHERE language IN (?, ?)", (language, "none"))
+        for result in results.fetchall():
+            r.append(LookupResult(result[0], result[1], result[2], result[3], result[4]))
+        return r
 
 """
 Database Access Interface
@@ -83,13 +135,12 @@ class SQLiteLookupStore (LookupStore):
         try:
             if category == "":
                 rows = self.cursor.execute("SELECT \
-                        audio_archive_id, \
-                        helldiver_audio_archive.audio_archive_name_id, \
-                        audio_archive_name \
-                        FROM helldiver_audio_archive INNER JOIN \
-                        helldiver_audio_archive_name ON \
-                        helldiver_audio_archive.audio_archive_name_id = \
-                        helldiver_audio_archive_name.audio_archive_name_id")
+                        id, \
+                        name, \
+                        friendlyname, \
+                        archive, \
+                        language, \
+                        FROM soundbanks")
             else:
                 args = (category,)
                 rows = self.cursor.execute("SELECT \
