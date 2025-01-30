@@ -1,21 +1,16 @@
-import json
-import numpy
 import os
-import platform
-import pyaudio
 import subprocess
 import struct
 import tkinter
 import shutil
-import wave
-import sys
 import pathlib
-import locale
+import zipfile
 import xml.etree.ElementTree as etree
+import urllib.request
+import json
 
 from functools import partial
 from functools import cmp_to_key
-from itertools import takewhile
 from math import ceil
 from tkinterdnd2 import *
 from tkinter import *
@@ -26,7 +21,8 @@ from tkinter.messagebox import showwarning
 from tkinter.messagebox import showerror
 from tkinter.messagebox import askyesnocancel
 from tkinter.filedialog import askopenfilename
-from typing import Any, Literal, Callable, Union
+from typing import Any, Literal, Callable
+from typing_extensions import Self
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -34,75 +30,17 @@ import config as cfg
 import db
 import log
 import fileutil
+from util import *
+from wwise_hierarchy import *
+from core import *
+from xlocale import *
+from env import *
+from const import *
 
 from log import logger
 
-# constants
-MUSIC_TRACK = 11
-SOUND = 2
-BANK = 0
-PREFETCH_STREAM = 1
-STREAM = 2
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
-VORBIS = 0x00040001
-REV_AUDIO = 0x01A01052
-WWISE_BANK = 6006249203084351385
-WWISE_DEP = 12624162998411505776
-WWISE_STREAM = 5785811756662211598
-STRING = 979299457696010195
-SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
-LANGUAGE_MAPPING = ({
-    "English (US)" : 0x03f97b57,
-    "English (UK)" : 0x6f4515cb,
-    "Français" : 4271961631,
-    "Português 1": 1861586415,
-    "Português 2": 1244441033,
-    "Polski": 260593578,
-    "日本語": 2427891497,
-    "繁體中文": 2663028010,
-    "简体中文": 2189905090,
-    "Nederlands": 291057413,
-    "한국어": 3151476177,
-    "Español (Castellano)": 830498882,
-    "Español (LatinoAmérica)": 3854981686,
-    "Deutsch": 3124347884,
-    "Italiano": 3808107213,
-    "Русский": 3317373165
-})
-
-# constants (set once on runtime)
-DIR = os.path.dirname(__file__)
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    DIR = os.path.dirname(sys.argv[0])
-FFMPEG = ""
-VGMSTREAM = ""
-GAME_FILE_LOCATION = ""
-WWISE_CLI = ""
-WWISE_VERSION = ""
-DEFAULT_WWISE_PROJECT = os.path.join(DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj") 
-DEFAULT_CONVERSION_SETTING = "Vorbis Quality High"
-SYSTEM = ""
-CACHE = os.path.join(DIR, ".cache")
-
-# global variables
-language = 0
-num_segments = 0
-
-def language_lookup(lang_string):
-    try:
-        return LANGUAGE_MAPPING[lang_string]
-    except:
-        return int(lang_string)
-    
-def strip_patch_index(filename):
-    split = filename.split(".")
-    for n in range(len(split)):
-        if "patch_" in split[n]:
-            del split[n]
-            break
-    filename = ".".join(split)
-    return filename
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -113,7 +51,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
 
     def on_created(self, event: FileSystemEvent) -> None:
         src_ext = os.path.splitext(event.src_path)[1]
-        if ".patch" in src_ext or src_ext in [".wav", ".wem"] or event.is_directory:
+        if ".patch" in src_ext or src_ext in SUPPORTED_AUDIO_TYPES or event.is_directory:
             parent = pathlib.Path(event.src_path).parents[0]
             parent_items = self.get_items_by_path(parent)
             new_item_name = os.path.basename(event.src_path)
@@ -149,7 +87,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
         dest_ext = os.path.splitext(event.dest_path)[1]
         for item in matching_items:
             self.workspace.delete(item)
-        if ".patch" in dest_ext or dest_ext in [".wav", ".wem"] or event.is_directory: 
+        if ".patch" in dest_ext or dest_ext in SUPPORTED_AUDIO_TYPES or event.is_directory: 
             idx = 0
             for i in self.workspace.get_children(new_parent_items[0]):
                 if event.is_directory and self.workspace.item(i, option="tags")[0] != "dir":
@@ -188,2767 +126,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                 return self.get_item_by_path_recursion(item, path)
             elif str(child_path) == str(path):
                 return item
-
-def list_files_recursive(path="."):
-    files = []
-    if os.path.isfile(path):
-        return [path]
-    else:
-        for entry in os.listdir(path):
-            full_path = os.path.join(path, entry)
-            if os.path.isdir(full_path):
-                files.extend(list_files_recursive(full_path))
-            else:
-                files.append(full_path)
-        return files
-
-
-class MemoryStream:
-    '''
-    Modified from https://github.com/kboykboy2/io_scene_helldivers2 with permission from kboykboy
-    '''
-    def __init__(self, Data=b"", io_mode = "read"):
-        self.location = 0
-        self.data = bytearray(Data)
-        self.io_mode = io_mode
-        self.endian = "<"
-
-    def open(self, Data, io_mode = "read"): # Open Stream
-        self.data = bytearray(Data)
-        self.io_mode = io_mode
-
-    def set_read_mode(self):
-        self.io_mode = "read"
-
-    def set_write_mode(self):
-        self.io_mode = "write"
-
-    def is_reading(self):
-        return self.io_mode == "read"
-
-    def is_writing(self):
-        return self.io_mode == "write"
-
-    def seek(self, location): # Go To Position In Stream
-        self.location = location
-        if self.location > len(self.data):
-            missing_bytes = self.location - len(self.data)
-            self.data += bytearray(missing_bytes)
-
-    def tell(self): # Get Position In Stream
-        return self.location
-
-    def read(self, length=-1): # read Bytes From Stream
-        if length == -1:
-            length = len(self.data) - self.location
-        if self.location + length > len(self.data):
-            raise Exception("reading past end of stream")
-
-        newData = self.data[self.location:self.location+length]
-        self.location += length
-        return bytearray(newData)
         
-    def advance(self, offset):
-        self.location += offset
-        if self.location < 0:
-            self.location = 0
-        if self.location > len(self.data):
-            missing_bytes = self.location - len(self.data)
-            self.data += bytearray(missing_bytes)
-
-    def write(self, bytes): # Write Bytes To Stream
-        length = len(bytes)
-        if self.location + length > len(self.data):
-            missing_bytes = (self.location + length) - len(self.data)
-            self.data += bytearray(missing_bytes)
-        self.data[self.location:self.location+length] = bytearray(bytes)
-        self.location += length
-
-    def read_format(self, format, size):
-        format = self.endian+format
-        return struct.unpack(format, self.read(size))[0]
-        
-    def bytes(self, value, size = -1):
-        if size == -1:
-            size = len(value)
-        if len(value) != size:
-            value = bytearray(size)
-
-        if self.is_reading():
-            return bytearray(self.read(size))
-        elif self.is_writing():
-            self.write(value)
-            return bytearray(value)
-        return value
-        
-    def int8_read(self):
-        return self.read_format('b', 1)
-
-    def uint8_read(self):
-        return self.read_format('B', 1)
-
-    def int16_read(self):
-        return self.read_format('h', 2)
-
-    def uint16_read(self):
-        return self.read_format('H', 2)
-
-    def int32_read(self):
-        return self.read_format('i', 4)
-
-    def uint32_read(self):
-        return self.read_format('I', 4)
-
-    def int64_read(self):
-        return self.read_format('q', 8)
-
-    def uint64_read(self):
-        return self.read_format('Q', 8)
-        
-def pad_to_16_byte_align(data):
-    b = bytearray(data)
-    l = len(b)
-    new_len = ceil(l/16)*16
-    return b + bytearray(new_len-l)
-    
-def _16_byte_align(addr):
-    return ceil(addr/16)*16
-    
-def bytes_to_long(bytes):
-    assert len(bytes) == 8
-    return sum((b << (k * 8) for k, b in enumerate(bytes)))
-
-def murmur64_hash(data, seed = 0):
-
-    m = 0xc6a4a7935bd1e995
-    r = 47
-
-    MASK = 2 ** 64 - 1
-
-    data_as_bytes = bytearray(data)
-
-    h = seed ^ ((m * len(data_as_bytes)) & MASK)
-
-    off = int(len(data_as_bytes)/8)*8
-    for ll in range(0, off, 8):
-        k = bytes_to_long(data_as_bytes[ll:ll + 8])
-        k = (k * m) & MASK
-        k = k ^ ((k >> r) & MASK)
-        k = (k * m) & MASK
-        h = (h ^ k)
-        h = (h * m) & MASK
-
-    l = len(data_as_bytes) & 7
-
-    if l >= 7:
-        h = (h ^ (data_as_bytes[off+6] << 48))
-
-    if l >= 6:
-        h = (h ^ (data_as_bytes[off+5] << 40))
-
-    if l >= 5:
-        h = (h ^ (data_as_bytes[off+4] << 32))
-
-    if l >= 4:
-        h = (h ^ (data_as_bytes[off+3] << 24))
-
-    if l >= 3:
-        h = (h ^ (data_as_bytes[off+2] << 16))
-
-    if l >= 2:
-        h = (h ^ (data_as_bytes[off+1] << 8))
-
-    if l >= 1:
-        h = (h ^ data_as_bytes[off])
-        h = (h * m) & MASK
-
-    h = h ^ ((h >> r) & MASK)
-    h = (h * m) & MASK
-    h = h ^ ((h >> r) & MASK)
-
-    return h
-
-class Subscriber:
-    def __init__(self):
-        pass
-        
-    def update(self, content):
-        pass
-        
-    def raise_modified(self):
-        pass
-        
-    def lower_modified(self):
-        pass
-        
-class AudioSource:
-
-    def __init__(self):
-        self.data = b""
-        self.size = 0
-        self.resource_id = 0
-        self.short_id = 0
-        self.modified = False
-        self.data_OLD = b""
-        self.subscribers = set()
-        self.stream_type = 0
-        self.track_info = None
-        
-    def set_data(self, data, notify_subscribers=True, set_modified=True):
-        if not self.modified and set_modified:
-            self.data_OLD = self.data
-        self.data = data
-        self.size = len(self.data)
-        if notify_subscribers:
-            for item in self.subscribers:
-                item.update(self)
-                if not self.modified:
-                    item.raise_modified()
-        if set_modified:
-            self.modified = True
-            
-    def get_id(self):
-        if self.stream_type == BANK:
-            return self.get_short_id()
-        else:
-            return self.get_resource_id()
-            
-    def is_modified(self):
-        return self.modified
-            
-    def set_track_info(self, track_info,  notify_subscribers=True, set_modified=True):
-        if not self.modified and set_modified:
-            self.track_info_old = self.track_info
-        self.track_info = track_info
-        if notify_subscribers:
-            for item in self.subscribers:
-                item.update(self)
-                if not self.modified:
-                    item.raise_modified()
-        if set_modified:
-            self.modified = True
-            
-    def get_track_info(self):
-        return self.track_info
-        
-    def get_data(self):
-        return self.data
-        
-    def get_resource_id(self):
-        return self.resource_id
-        
-    def get_short_id(self):
-        return self.short_id
-        
-    def revert_modifications(self, notify_subscribers=True):
-        if self.track_info is not None:
-            self.track_info.revert_modifications()
-        if self.modified:
-            self.modified = False
-            if self.data_OLD != b"":
-                self.data = self.data_OLD
-                self.data_OLD = b""
-            self.size = len(self.data)
-            if notify_subscribers:
-                for item in self.subscribers:
-                    item.lower_modified()
-                    item.update(self)
-                
-class TocHeader:
-
-    def __init__(self):
-        pass
-        
-    def from_memory_stream(self, stream):
-        self.file_id             = stream.uint64_read()
-        self.type_id             = stream.uint64_read()
-        self.toc_data_offset     = stream.uint64_read()
-        self.stream_file_offset  = stream.uint64_read()
-        self.gpu_resource_offset = stream.uint64_read()
-        self.unknown1            = stream.uint64_read() #seems to contain duplicate entry index
-        self.unknown2            = stream.uint64_read()
-        self.toc_data_size       = stream.uint32_read()
-        self.stream_size         = stream.uint32_read()
-        self.gpu_resource_size   = stream.uint32_read()
-        self.unknown3            = stream.uint32_read()
-        self.unknown4            = stream.uint32_read()
-        self.entry_index         = stream.uint32_read()
-        
-    def get_data(self):
-        return (struct.pack("<QQQQQQQIIIIII",
-            self.file_id,
-            self.type_id,
-            self.toc_data_offset,
-            self.stream_file_offset,
-            self.gpu_resource_offset,
-            self.unknown1,
-            self.unknown2,
-            self.toc_data_size,
-            self.stream_size,
-            self.gpu_resource_size,
-            self.unknown3,
-            self.unknown4,
-            self.entry_index))
-                
-class WwiseDep:
-
-    def __init__(self):
-        self.data = ""
-        
-    def from_memory_stream(self, stream):
-        self.offset = stream.tell()
-        self.tag = stream.uint32_read()
-        self.data_size = stream.uint32_read()
-        self.data = stream.read(self.data_size).decode('utf-8')
-        
-    def get_data(self):
-        return (self.tag.to_bytes(4, byteorder='little')
-                + self.data_size.to_bytes(4, byteorder='little')
-                + self.data.encode('utf-8'))
-                
-class DidxEntry:
-    def __init__(self):
-        self.id = self.offset = self.size = 0
-        
-    @classmethod
-    def from_bytes(cls, bytes):
-        e = DidxEntry()
-        e.id, e.offset, e.size = struct.unpack("<III", bytes)
-        return e
-        
-    def get_data(self):
-        return struct.pack("<III", self.id, self.offset, self.size)
-        
-class MediaIndex:
-
-    def __init__(self):
-        self.entries = {}
-        self.data = {}
-        
-    def load(self, didxChunk, dataChunk):
-        for n in range(int(len(didxChunk)/12)):
-            entry = DidxEntry.from_bytes(didxChunk[12*n : 12*(n+1)])
-            self.entries[entry.id] = entry
-            self.data[entry.id] = dataChunk[entry.offset:entry.offset+entry.size]
-        
-    def get_data(self):
-        arr = [x.get_data() for x in self.entries.values()]
-        data_arr = self.data.values()
-        return b"".join(arr) + b"".join(data_arr)
-                
-class HircEntry:
-    
-    def __init__(self):
-        self.size = self.hierarchy_type = self.hierarchy_id = self.misc = 0
-        self.sources = []
-        self.track_info = []
-        self.soundbank = None
-    
-    @classmethod
-    def from_memory_stream(cls, stream):
-        entry = HircEntry()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        entry.hierarchy_id = stream.uint32_read()
-        entry.misc = stream.read(entry.size - 4)
-        return entry
-        
-    def get_id(self):
-        return self.hierarchy_id
-        
-    def raise_modified(self):
-        self.soundbank.raise_modified()
-        
-    def lower_modified(self):
-        self.soundbank.lower_modified()
-        
-    def get_data(self):
-        return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
-        
-class MusicRandomSequence(HircEntry):
-    
-    def __init__(self):
-        super().__init__()
-    
-    @classmethod
-    def from_memory_stream(cls, stream):
-        entry = MusicRandomSequence()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        entry.hierarchy_id = stream.uint32_read()
-        return entry
-        
-    def get_data(self):
-        pass
-        
-class RandomSequenceContainer(HircEntry):
-    def __init__(self):
-        super().__init__()
-        self.unused_sections = []
-        self.contents = []
-        
-    @classmethod
-    def from_memory_stream(cls, stream):
-        entry = RandomSequenceContainer()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        start_position = stream.tell()
-        entry.hierarchy_id = stream.uint32_read()
-
-        # ---------------------------------------
-        section_start = stream.tell()
-        stream.advance(1)
-        n = stream.uint8_read() #num fx
-        if n == 0:
-            stream.advance(12)
-        else:
-            stream.advance(7*n + 13)
-        stream.advance(5*stream.uint8_read()) #number of props
-        stream.advance(9*stream.uint8_read()) #number of props (again)
-        if stream.uint8_read() & 0b0000_0010: #positioning bit vector
-            if stream.uint8_read() & 0b0100_0000: # relative pathing bit vector
-                stream.advance(5)
-                stream.advance(16*stream.uint32_read())
-                stream.advance(20*stream.uint32_read())
-        if stream.uint8_read() & 0b0000_1000: #I forget what this is for
-            stream.advance(26)
-        else:
-           stream.advance(10)
-        stream.advance(3*stream.uint8_read()) #num state props
-        for _ in range(stream.uint8_read()): #num state groups
-            stream.advance(5)
-            stream.advance(8*stream.uint8_read())
-        for _ in range(stream.uint16_read()):  # num RTPC
-            stream.advance(12)
-            stream.advance(stream.uint16_read()*12)
-        section_end = stream.tell()
-        # ---------------------------------------
-
-        stream.seek(section_start)
-        entry.unused_sections.append(stream.read(section_end-section_start+24))
-
-        for _ in range(stream.uint32_read()): #number of children (tracks)
-            entry.contents.append(stream.uint32_read())
-
-        entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
-        return entry
-        
-    def get_data(self):
-        return (
-            b"".join([
-                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
-                self.unused_sections[0],
-                len(self.contents).to_bytes(4, byteorder="little"),
-                b"".join([x.to_bytes(4, byteorder="little") for x in self.contents]),
-                self.unused_sections[1]
-            ])
-        )
-    
-class MusicSegment(HircEntry):
-
-    def __init__(self):
-        super().__init__()
-        self.tracks = []
-        self.duration = 0
-        self.entry_marker = None
-        self.exit_marker = None
-        self.unused_sections = []
-        self.markers = []
-        self.modified = False
-    
-    @classmethod
-    def from_memory_stream(cls, stream):
-        entry = MusicSegment()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        entry.hierarchy_id = stream.uint32_read()
-        entry.unused_sections.append(stream.read(15))
-        n = stream.uint8_read() #number of props
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1))
-        n = stream.uint8_read() #number of props (again)
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
-        n = stream.uint32_read() #number of children (tracks)
-        for _ in range(n):
-            entry.tracks.append(stream.uint32_read())
-        entry.unused_sections.append(stream.read(23)) #meter info
-        n = stream.uint32_read() #number of stingers
-        stream.seek(stream.tell()-4)
-        entry.unused_sections.append(stream.read(24*n + 4))
-        entry.duration = struct.unpack("<d", stream.read(8))[0]
-        n = stream.uint32_read() #number of markers
-        for i in range(n):
-            id = stream.uint32_read()
-            position = struct.unpack("<d", stream.read(8))[0]
-            name = []
-            temp = b"1"
-            while temp != b"\x00":
-                temp = stream.read(1)
-                name.append(temp)
-            name = b"".join(name)
-            marker = [id, position, name]
-            entry.markers.append(marker)
-            if i == 0:
-                entry.entry_marker = marker
-            elif i == n-1:
-                entry.exit_marker = marker
-        return entry
-        
-    def set_data(self, duration=None, entry_marker=None, exit_marker=None):
-        if not self.modified:
-            self.duration_old = self.duration
-            self.entry_marker_old = self.entry_marker[1]
-            self.exit_marker_old = self.exit_marker[1]
-            self.raise_modified()
-        if duration is not None: self.duration = duration
-        if entry_marker is not None: self.entry_marker[1] = entry_marker
-        if exit_marker is not None: self.exit_marker[1] = exit_marker
-        self.modified = True
-        
-    def revert_modifications(self):
-        if self.modified:
-            self.lower_modified()
-            self.entry_marker[1] = self.entry_marker_old
-            self.exit_marker[1] = self.exit_marker_old
-            self.duration = self.duration_old
-            self.modified = False
-        
-    def get_data(self):
-        return (
-            b"".join([
-                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
-                self.unused_sections[0],
-                self.unused_sections[1],
-                self.unused_sections[2],
-                len(self.tracks).to_bytes(4, byteorder="little"),
-                b"".join([x.to_bytes(4, byteorder="little") for x in self.tracks]),
-                self.unused_sections[3],
-                self.unused_sections[4],
-                struct.pack("<d", self.duration),
-                len(self.markers).to_bytes(4, byteorder="little"),
-                b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in self.markers])
-            ])
-        )
-        
-class HircEntryFactory:
-    
-    @classmethod
-    def from_memory_stream(cls, stream):
-        hierarchy_type = stream.uint8_read()
-        stream.seek(stream.tell()-1)
-        if hierarchy_type == 2: #sound
-            return Sound.from_memory_stream(stream)
-        elif hierarchy_type == 11: #music track
-            return MusicTrack.from_memory_stream(stream)
-        elif hierarchy_type == 0x0A: #music segment
-            return MusicSegment.from_memory_stream(stream)
-        elif hierarchy_type == 0x05: #random sequence container
-            return RandomSequenceContainer.from_memory_stream(stream)
-        else:
-            return HircEntry.from_memory_stream(stream)
-        
-class HircReader:
-    
-    def __init__(self, soundbank = None):
-        self.entries = {}
-        self.soundbank = soundbank
-        
-    def load(self, hierarchy_data):
-        self.entries.clear()
-        reader = MemoryStream()
-        reader.write(hierarchy_data)
-        reader.seek(0)
-        num_items = reader.uint32_read()
-        for item in range(num_items):
-            entry = HircEntryFactory.from_memory_stream(reader)
-            entry.soundbank = self.soundbank
-            self.entries[entry.get_id()] = entry
-            
-    def get_data(self):
-        arr = [entry.get_data() for entry in self.entries.values()]
-        return len(arr).to_bytes(4, byteorder="little") + b"".join(arr)
-            
-class BankParser:
-    
-    def __init__(self):
-        self.chunks = {}
-        
-    def load(self, bank_data):
-        self.chunks.clear()
-        reader = MemoryStream()
-        reader.write(bank_data)
-        reader.seek(0)
-        while True:
-            tag = ""
-            try:
-                tag = reader.read(4).decode('utf-8')
-            except:
-                break
-            size = reader.uint32_read()
-            self.chunks[tag] = reader.read(size)
-            
-    def GetChunk(self, chunk_tag):
-        try:
-            return self.chunks[chunk_tag]
-        except:
-            return None
-            
-class BankSourceStruct:
-
-    def __init__(self):
-        self.plugin_id = 0
-        self.stream_type = self.source_id = self.mem_size = self.bit_flags = 0
-        
-    @classmethod
-    def from_bytes(cls, bytes):
-        b = BankSourceStruct()
-        b.plugin_id, b.stream_type, b.source_id, b.mem_size, b.bit_flags = struct.unpack("<IBIIB", bytes)
-        return b
-        
-    def get_data(self):
-        return struct.pack("<IBIIB", self.plugin_id, self.stream_type, self.source_id, self.mem_size, self.bit_flags)
-        
-class TrackInfoStruct:
-    
-    def __init__(self):
-        self.track_id = self.source_id = self.event_id = self.play_at = self.begin_trim_offset = self.end_trim_offset = self.source_duration = 0
-        self.play_at_old = self.begin_trim_offset_old = self.end_trim_offset_old = self.source_duration_old = 0
-        self.modified = False
-        self.soundbanks = set()
-        
-    @classmethod
-    def from_bytes(cls, bytes):
-        t = TrackInfoStruct()
-        t.track_id, t.source_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack("<IIIdddd", bytes)
-        return t
-        
-    def get_id(self):
-        if self.source_id != 0:
-            return self.source_id
-        else:
-            return self.event_id
-            
-    def is_modified(self):
-        return self.modified
-            
-    def set_data(self, play_at=None, begin_trim_offset=None, end_trim_offset=None, source_duration=None):
-        if not self.modified:
-            self.play_at_old = self.play_at
-            self.begin_trim_offset_old = self.begin_trim_offset
-            self.end_trim_offset_old = self.end_trim_offset
-            self.source_duration_old = self.source_duration
-            self.raise_modified()
-        if play_at is not None: self.play_at = play_at
-        if begin_trim_offset is not None: self.begin_trim_offset = begin_trim_offset
-        if end_trim_offset is not None: self.end_trim_offset = end_trim_offset
-        if source_duration is not None: self.source_duration = source_duration
-        self.modified = True
-        
-    def revert_modifications(self):
-        if self.modified:
-            self.lower_modified()
-            self.play_at = self.play_at_old
-            self.begin_trim_offset = self.begin_trim_offset_old
-            self.end_trim_offset = self.end_trim_offset_old
-            self.source_duration = self.source_duration_old
-            self.modified = False
-            
-    def raise_modified(self):
-        for bank in self.soundbanks:
-            bank.raise_modified()
-        
-    def lower_modified(self):
-        for bank in self.soundbanks:
-            bank.lower_modified()
-        
-    def get_data(self):
-        return struct.pack("<IIIdddd", self.track_id, self.source_id, self.event_id, self.play_at, self.begin_trim_offset, self.end_trim_offset, self.source_duration)
-            
-class MusicTrack(HircEntry):
-    
-    def __init__(self):
-        super().__init__()
-        self.bit_flags = 0
-        
-    @classmethod
-    def from_memory_stream(cls, stream):
-        entry = MusicTrack()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        start_position = stream.tell()
-        entry.hierarchy_id = stream.uint32_read()
-        entry.bit_flags = stream.uint8_read()
-        num_sources = stream.uint32_read()
-        for _ in range(num_sources):
-            source = BankSourceStruct.from_bytes(stream.read(14))
-            entry.sources.append(source)
-        num_track_info = stream.uint32_read()
-        for _ in range(num_track_info):
-            track = TrackInfoStruct.from_bytes(stream.read(44))
-            entry.track_info.append(track)
-        entry.misc = stream.read(entry.size - (stream.tell()-start_position))
-        return entry
-
-    def get_data(self):
-        b = b"".join([source.get_data() for source in self.sources])
-        t = b"".join([track.get_data() for track in self.track_info])
-        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.misc
-    
-class Sound(HircEntry):
-    
-    def __init__(self):
-        super().__init__()
-    
-    @classmethod
-    def from_memory_stream(cls, stream):
-        entry = Sound()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        entry.hierarchy_id = stream.uint32_read()
-        entry.sources.append(BankSourceStruct.from_bytes(stream.read(14)))
-        entry.misc = stream.read(entry.size - 18)
-        return entry
-
-    def get_data(self):
-        return struct.pack(f"<BII14s{len(self.misc)}s", self.hierarchy_type, self.size, self.hierarchy_id, self.sources[0].get_data(), self.misc)
-        
-class WwiseBank(Subscriber):
-    
-    def __init__(self):
-        self.data = b""
-        self.bank_header = b""
-        self.toc_data_header = b""
-        self.bank_misc_data = b""
-        self.modified = False
-        self.toc_header = None
-        self.dep = None
-        self.modified_count = 0
-        self.hierarchy = None
-        self.content = []
-        
-    def add_content(self, content):
-        content.subscribers.add(self)
-        if content.track_info is not None:
-            content.track_info.soundbanks.add(self)
-        self.content.append(content)
-        
-    def remove_content(self, content):
-        try:
-            content.subscribers.remove(self)
-        except:
-            pass
-            
-        try:
-            self.content.remove(content)
-        except:
-            pass
-            
-        try:
-            content.track_info.soundbanks.remove(self)
-        except:
-            pass
-  
-    def get_content(self):
-        return self.content
-        
-    def raise_modified(self):
-        self.modified = True
-        self.modified_count += 1
-        
-    def lower_modified(self):
-        if self.modified:
-            self.modified_count -= 1
-            if self.modified_count == 0:
-                self.modified = False
-        
-    def get_name(self):
-        return self.dep.data
-        
-    def get_id(self):
-        try:
-            return self.toc_header.file_id
-        except:
-            return 0
-            
-    def get_type_id(self):
-        try:
-            return self.toc_header.type_id
-        except:
-            return 0
-            
-    def get_data(self):
-        return self.data
-            
-    def generate(self, audio_sources, eventTrackInfo):
-        data = bytearray()
-        data += self.bank_header
-        
-        didx_section = b""
-        data_section = b""
-        offset = 0
-        
-        #regenerate soundbank from the hierarchy information
-        max_progress = 0
-        for entry in self.hierarchy.entries.values():
-            if entry.hierarchy_type == SOUND:
-                max_progress += 1
-            elif entry.hierarchy_type == MUSIC_TRACK:
-                max_progress += len(entry.sources)
-                    
-        
-        bank_generation_progress_window = ProgressWindow("Generating Soundbanks", max_progress)
-        bank_generation_progress_window.show()
-        bank_generation_progress_window.set_text(f"Generating {self.dep.data}")
-        
-        didx_array = []
-        data_array = []
-        
-        added_sources = set()
-        
-        for entry in self.hierarchy.entries.values():
-            for index, info in enumerate(entry.track_info):
-                if info.event_id != 0:
-                    entry.track_info[index] = eventTrackInfo[info.event_id]
-            for source in entry.sources:
-                bank_generation_progress_window.step()
-                if source.plugin_id == VORBIS:
-                    try:
-                        audio = audio_sources[source.source_id]
-                    except KeyError:
-                        continue
-                    try:
-                        count = 0
-                        for info in entry.track_info:
-                            if info.source_id == source.source_id:
-                                break
-                            count += 1
-                        if audio.get_track_info() is not None: #is this needed?
-                            entry.track_info[count] = audio.get_track_info()
-                    except: #exception because there may be no original track info struct
-                        pass
-                    if source.stream_type == PREFETCH_STREAM and source.source_id not in added_sources:
-                        data_array.append(audio.get_data()[:source.mem_size])
-                        didx_array.append(struct.pack("<III", source.source_id, offset, source.mem_size))
-                        offset += source.mem_size
-                        added_sources.add(source.source_id)
-                    elif source.stream_type == BANK and source.source_id not in added_sources:
-                        data_array.append(audio.get_data())
-                        didx_array.append(struct.pack("<III", source.source_id, offset, audio.size))
-                        offset += audio.size
-                        added_sources.add(source.source_id)
-                elif source.plugin_id == REV_AUDIO:
-                    try:
-                        custom_fx_entry = self.hierarchy.entries[source.source_id]
-                        fx_data = custom_fx_entry.get_data()
-                        plugin_param_size = int.from_bytes(fx_data[13:17], byteorder="little")
-                        media_index_id = int.from_bytes(fx_data[19+plugin_param_size:23+plugin_param_size], byteorder="little")
-                        audio = audio_sources[media_index_id]
-                    except KeyError:
-                        continue
-                    if source.stream_type == BANK and source.source_id not in added_sources:
-                        data_array.append(audio.get_data())
-                        didx_array.append(struct.pack("<III", media_index_id, offset, audio.size))
-                        offset += audio.size
-                        added_sources.add(media_index_id)
-        if len(didx_array) > 0:
-            data += "DIDX".encode('utf-8') + (12*len(didx_array)).to_bytes(4, byteorder="little")
-            data += b"".join(didx_array)
-            data += "DATA".encode('utf-8') + sum([len(x) for x in data_array]).to_bytes(4, byteorder="little")
-            data += b"".join(data_array)
-            
-        hierarchy_section = self.hierarchy.get_data()
-        data += "HIRC".encode('utf-8') + len(hierarchy_section).to_bytes(4, byteorder="little")
-        data += hierarchy_section
-        data += self.bank_misc_data
-        self.toc_header.toc_data_size = len(data) + len(self.toc_data_header)
-        self.toc_data_header[4:8] = len(data).to_bytes(4, byteorder="little")
-        self.data = data
-        bank_generation_progress_window.destroy()
-                     
-    def get_entry_index(self):
-        try:
-            return self.toc_header.entry_index
-        except:
-            return 0
-        
-class WwiseStream(Subscriber):
-
-    def __init__(self):
-        self.content = None
-        self.modified = False
-        self.toc_header = None
-        self.TocData = bytearray()
-        
-    def set_content(self, content):
-        try:
-            self.content.subscribers.remove(self)
-        except:
-            pass
-        self.content = content
-        content.subscribers.add(self)
-        
-    def update(self, content):
-        self.toc_header.stream_size = content.size
-        self.TocData[8:12] = content.size.to_bytes(4, byteorder='little')
-        
-    def raise_modified(self):
-        self.modified = True
-        
-    def lower_modified(self):
-        self.modified = False
-        
-    def get_id(self):
-        try:
-            return self.toc_header.file_id
-        except:
-            return 0
-        
-    def get_type_id(self):
-        try:
-            return self.toc_header.type_id
-        except:
-            return 0
-            
-    def get_entry_index(self):
-        try:
-            return self.toc_header.entry_index
-        except:
-            return 0
-            
-    def get_data(self):
-        return self.content.get_data()
-
-class StringEntry:
-
-    def __init__(self):
-        self.text = ""
-        self.text_old = ""
-        self.string_id = 0
-        self.modified = False
-        
-    def get_id(self):
-        return self.string_id
-        
-    def get_text(self):
-        return self.text
-        
-    def set_text(self, text):
-        if not self.modified:
-            self.text_old = self.text
-        self.modified = True
-        self.text = text
-        
-    def revert_modifications(self):
-        if self.modified:
-            self.text = self.text_old
-            self.modified = False
-        
-class TextBank:
-    
-    def __init__(self):
-        self.toc_header = None
-        self.data = b''
-        self.string_ids = []
-        self.language = 0
-        self.modified = False
-        
-    def set_data(self, data):
-        self.string_ids.clear()
-        num_entries = int.from_bytes(data[8:12], byteorder='little')
-        id_section_start = 16
-        offset_section_start = id_section_start + 4 * num_entries
-        data_section_start = offset_section_start + 4 * num_entries
-        ids = data[id_section_start:offset_section_start]
-        offsets = data[offset_section_start:data_section_start]
-        for n in range(num_entries):
-            string_id = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
-            self.string_ids.append(string_id)
-            
-    def update(self):
-        pass
-        
-    def get_data(self):
-        return self.data
-        
-    def GetLanguage(self):
-        return self.language
-        
-    def is_modified(self):
-        return self.modified
-        
-    def generate(self, string_entries):
-        entries = string_entries[self.language]
-        stream = MemoryStream()
-        stream.write(b'\xae\xf3\x85\x3e\x01\x00\x00\x00')
-        stream.write(len(self.string_ids).to_bytes(4, byteorder="little"))
-        stream.write(self.language.to_bytes(4, byteorder="little"))
-        offset = 16 + 8*len(self.string_ids)
-        for i in self.string_ids:
-            stream.write(entries[i].get_id().to_bytes(4, byteorder="little"))
-        for i in self.string_ids:
-            stream.write(offset.to_bytes(4, byteorder="little"))
-            initial_position = stream.tell()
-            stream.seek(offset)
-            text_bytes = entries[i].text.encode('utf-8') + b'\x00'
-            stream.write(text_bytes)
-            offset += len(text_bytes)
-            stream.seek(initial_position)
-        self.data = stream.data
-        self.toc_header.toc_data_size = len(self.data)
-        
-    def Rebuild(self, string_id, offset_difference):
-        pass
-        
-    def get_id(self):
-        try:
-            return self.toc_header.file_id
-        except:
-            return 0
-        
-    def get_type_id(self):
-        try:
-            return self.toc_header.type_id
-        except:
-            return 0
-            
-    def get_entry_index(self):
-        try:
-            return self.toc_header.entry_index
-        except:
-            return 0
-
-class FileReader:
-    
-    def __init__(self):
-        self.wwise_streams = {}
-        self.wwise_banks = {}
-        self.audio_sources = {}
-        self.text_banks = {}
-        self.music_track_events = {}
-        self.string_entries = {}
-        self.music_segments = {}
-        
-    def from_file(self, path):
-        self.name = os.path.basename(path)
-        self.path = path
-        toc_file = MemoryStream()
-        with open(path, 'r+b') as f:
-            toc_file = MemoryStream(f.read())
-
-        stream_file = MemoryStream()
-        if os.path.isfile(path+".stream"):
-            with open(path+".stream", 'r+b') as f:
-                stream_file = MemoryStream(f.read())
-        self.load(toc_file, stream_file)
-        
-    def to_file(self, path):
-        toc_file = MemoryStream()
-        stream_file = MemoryStream()
-        self.num_files = len(self.wwise_streams) + 2*len(self.wwise_banks) + len(self.text_banks)
-        self.num_types = 0
-        if len(self.wwise_streams) > 0: self.num_types += 1
-        if len(self.wwise_banks) > 0: self.num_types += 2
-        if len(self.text_banks) > 0: self.num_types += 1
-        
-        toc_file.write(self.magic.to_bytes(4, byteorder="little"))
-        
-        toc_file.write(self.num_types.to_bytes(4, byteorder="little"))
-        toc_file.write(self.num_files.to_bytes(4, byteorder="little"))
-        toc_file.write(self.unknown.to_bytes(4, byteorder="little"))
-        toc_file.write(self.unk4Data)
-        
-        if len(self.wwise_streams) > 0:
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = WWISE_STREAM
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.wwise_streams)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            
-        if len(self.wwise_banks) > 0:
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = WWISE_BANK
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.wwise_banks)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            
-            #deps
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = WWISE_DEP
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.wwise_banks)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            
-        if len(self.text_banks) > 0:
-            unk = 0
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = STRING
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = len(self.text_banks)
-            toc_file.write(unk.to_bytes(8, byteorder='little'))
-            unk = 16
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-            unk = 64
-            toc_file.write(unk.to_bytes(4, byteorder='little'))
-        
-        file_position = toc_file.tell()
-        for key in self.wwise_streams.keys():
-            toc_file.seek(file_position)
-            file_position += 80
-            stream = self.wwise_streams[key]
-            toc_file.write(stream.toc_header.get_data())
-            toc_file.seek(stream.toc_header.toc_data_offset)
-            toc_file.write(pad_to_16_byte_align(stream.TocData))
-            stream_file.seek(stream.toc_header.stream_file_offset)
-            stream_file.write(pad_to_16_byte_align(stream.content.get_data()))
-            
-        for key in self.wwise_banks.keys():
-            toc_file.seek(file_position)
-            file_position += 80
-            bank = self.wwise_banks[key]
-            toc_file.write(bank.toc_header.get_data())
-            toc_file.seek(bank.toc_header.toc_data_offset)
-            toc_file.write(pad_to_16_byte_align(bank.toc_data_header + bank.get_data()))
-            
-        for key in self.wwise_banks.keys():
-            toc_file.seek(file_position)
-            file_position += 80
-            bank = self.wwise_banks[key]
-            toc_file.write(bank.dep.toc_header.get_data())
-            toc_file.seek(bank.dep.toc_header.toc_data_offset)
-            toc_file.write(pad_to_16_byte_align(bank.dep.get_data()))
-            
-        for key in self.text_banks.keys():
-            toc_file.seek(file_position)
-            file_position += 80
-            entry = self.text_banks[key]
-            toc_file.write(entry.toc_header.get_data())
-            toc_file.seek(entry.toc_header.toc_data_offset)
-            toc_file.write(pad_to_16_byte_align(entry.get_data()))
-            
-        with open(os.path.join(path, self.name), 'w+b') as f:
-            f.write(toc_file.data)
-            
-        if len(stream_file.data) > 0:
-            with open(os.path.join(path, self.name+".stream"), 'w+b') as f:
-                f.write(stream_file.data)
-
-    def rebuild_headers(self):
-        self.num_types = 0
-        if len(self.wwise_streams) > 0: self.num_types += 1
-        if len(self.wwise_banks) > 0: self.num_types += 2
-        if len(self.text_banks) > 0: self.num_types += 1
-        self.num_files = len(self.wwise_streams) + 2*len(self.wwise_banks) + len(self.text_banks)
-        stream_file_offset = 0
-        toc_file_offset = 80 + self.num_types * 32 + 80 * self.num_files
-        for key, value in self.wwise_streams.items():
-            value.toc_header.stream_file_offset = stream_file_offset
-            value.toc_header.toc_data_offset = toc_file_offset
-            stream_file_offset += _16_byte_align(value.toc_header.stream_size)
-            toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
-        
-        for key, value in self.wwise_banks.items():
-            value.generate(self.audio_sources, self.music_track_events)
-            
-            value.toc_header.toc_data_offset = toc_file_offset
-            toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
-            
-        for key, value in self.wwise_banks.items():
-            value.dep.toc_header.toc_data_offset = toc_file_offset
-            toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
-            
-        for key, value in self.text_banks.items():
-            value.generate(string_entries=self.string_entries)
-            value.toc_header.toc_data_offset = toc_file_offset
-            toc_file_offset += _16_byte_align(value.toc_header.toc_data_size)
-        
-    def load(self, toc_file, stream_file):
-        self.wwise_streams.clear()
-        self.wwise_banks.clear()
-        self.audio_sources.clear()
-        self.text_banks.clear()
-        self.music_track_events.clear()
-        self.string_entries.clear()
-        self.music_segments.clear()
-        
-        media_index = MediaIndex()
-        
-        self.magic      = toc_file.uint32_read()
-        if self.magic != 4026531857: return False
-
-        self.num_types   = toc_file.uint32_read()
-        self.num_files   = toc_file.uint32_read()
-        self.unknown    = toc_file.uint32_read()
-        self.unk4Data   = toc_file.read(56)
-        toc_file.seek(toc_file.tell() + 32 * self.num_types)
-        toc_start = toc_file.tell()
-        for n in range(self.num_files):
-            toc_file.seek(toc_start + n*80)
-            toc_header = TocHeader()
-            toc_header.from_memory_stream(toc_file)
-            entry = None
-            if toc_header.type_id == WWISE_STREAM:
-                audio = AudioSource()
-                audio.stream_type = STREAM
-                entry = WwiseStream()
-                entry.toc_header = toc_header
-                toc_file.seek(toc_header.toc_data_offset)
-                entry.TocData = toc_file.read(toc_header.toc_data_size)
-                stream_file.seek(toc_header.stream_file_offset)
-                audio.set_data(stream_file.read(toc_header.stream_size), notify_subscribers=False, set_modified=False)
-                audio.resource_id = toc_header.file_id
-                entry.set_content(audio)
-                self.wwise_streams[entry.get_id()] = entry
-            elif toc_header.type_id == WWISE_BANK:
-                entry = WwiseBank()
-                entry.toc_header = toc_header
-                toc_data_offset = toc_header.toc_data_offset
-                toc_data_size = toc_header.toc_data_size
-                toc_file.seek(toc_data_offset)
-                entry.toc_data_header = toc_file.read(16)
-                bank = BankParser()
-                bank.load(toc_file.read(toc_header.toc_data_size-16))
-                entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
-                
-                hirc = HircReader(soundbank=entry)
-                try:
-                    hirc.load(bank.chunks['HIRC'])
-                except KeyError:
-                    pass
-                entry.hierarchy = hirc
-                #Add all bank sources to the source list
-                if "DIDX" in bank.chunks.keys():
-                    bank_id = entry.toc_header.file_id
-                    media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
-                
-                entry.bank_misc_data = b''
-                for chunk in bank.chunks.keys():
-                    if chunk not in ["BKHD", "DATA", "DIDX", "HIRC"]:
-                        entry.bank_misc_data = entry.bank_misc_data + chunk.encode('utf-8') + len(bank.chunks[chunk]).to_bytes(4, byteorder='little') + bank.chunks[chunk]
-                        
-                self.wwise_banks[entry.get_id()] = entry
-            elif toc_header.type_id == WWISE_DEP: #wwise dep
-                dep = WwiseDep()
-                dep.toc_header = toc_header
-                toc_file.seek(toc_header.toc_data_offset)
-                dep.from_memory_stream(toc_file)
-                try:
-                    self.wwise_banks[toc_header.file_id].dep = dep
-                except KeyError:
-                    pass
-            elif toc_header.type_id == STRING: #string_entry
-                toc_file.seek(toc_header.toc_data_offset)
-                data = toc_file.read(toc_header.toc_data_size)
-                num_entries = int.from_bytes(data[8:12], byteorder='little')
-                language = int.from_bytes(data[12:16], byteorder='little')
-                if language not in self.string_entries:
-                    self.string_entries[language] = {}
-                id_section_start = 16
-                offset_section_start = id_section_start + 4 * num_entries
-                data_section_start = offset_section_start + 4 * num_entries
-                ids = data[id_section_start:offset_section_start]
-                offsets = data[offset_section_start:data_section_start]
-                text_bank = TextBank()
-                text_bank.toc_header = toc_header
-                text_bank.language = language
-                for n in range(num_entries):
-                    entry = StringEntry()
-                    string_id = int.from_bytes(ids[4*n:+4*(n+1)], byteorder="little")
-                    text_bank.string_ids.append(string_id)
-                    string_offset = int.from_bytes(offsets[4*n:4*(n+1)], byteorder="little")
-                    entry.string_id = string_id
-                    stopIndex = string_offset + 1
-                    while data[stopIndex] != 0:
-                        stopIndex += 1
-                    entry.text = data[string_offset:stopIndex].decode('utf-8')
-                    self.string_entries[language][string_id] = entry
-                self.text_banks[text_bank.get_id()] = text_bank
-        
-        # ---------- Backwards compatibility checks ----------
-        for bank in self.wwise_banks.values():
-            if bank.dep == None: #can be None because older versions didn't save the dep along with the bank
-                if not self.load_deps():
-                    print("Failed to load")
-                    self.wwise_streams.clear()
-                    self.wwise_banks.clear()
-                    self.text_banks.clear()
-                    self.audio_sources.clear()
-                    return
-                break
-        
-        if len(self.wwise_banks) == 0 and len(self.wwise_streams) > 0: #0 if patch was only for streams
-            if not self.load_banks():
-                print("Failed to load")
-                self.wwise_streams.clear()
-                self.wwise_banks.clear()
-                self.text_banks.clear()
-                self.audio_sources.clear()
-                return
-        # ---------- End backwards compatibility checks ----------
-        
-        # Create all AudioSource objects
-        for bank in self.wwise_banks.values():
-            for entry in bank.hierarchy.entries.values():
-                for source in entry.sources:
-                    if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
-                        try:
-                            audio = AudioSource()
-                            audio.stream_type = BANK
-                            audio.short_id = source.source_id
-                            audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
-                            self.audio_sources[source.source_id] = audio
-                        except KeyError:
-                            pass
-                    elif source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
-                        try:
-                            stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
-                            audio = self.wwise_streams[stream_resource_id].content
-                            audio.short_id = source.source_id
-                            self.audio_sources[source.source_id] = audio
-                        except KeyError:
-                            pass
-                    elif source.plugin_id == REV_AUDIO and source.stream_type == BANK and source.source_id not in self.audio_sources:
-                        try:
-                            custom_fx = bank.hierarchy.entries[source.source_id]
-                            data = custom_fx.get_data()
-                            plugin_param_size = int.from_bytes(data[13:17], byteorder="little")
-                            media_index_id = int.from_bytes(data[19+plugin_param_size:23+plugin_param_size], byteorder="little")
-                            audio = AudioSource()
-                            audio.stream_type = BANK
-                            audio.short_id = media_index_id
-                            audio.set_data(media_index.data[media_index_id], set_modified=False, notify_subscribers=False)
-                            self.audio_sources[media_index_id] = audio
-                        except KeyError:
-                            pass
-                for info in entry.track_info:
-                    if info.event_id != 0:
-                        self.music_track_events[info.event_id] = info
-                if isinstance(entry, MusicSegment):
-                    self.music_segments[entry.get_id()] = entry
-
-        #construct list of audio sources in each bank
-        #add track_info to audio sources?
-        for bank in self.wwise_banks.values():
-            for entry in bank.hierarchy.entries.values():
-                for info in entry.track_info:
-                    try:
-                        if info.source_id != 0:
-                            self.audio_sources[info.source_id].set_track_info(info, notify_subscribers=False, set_modified=False)
-                    except:
-                        continue
-                for source in entry.sources:
-                    try:
-                        if source.plugin_id == VORBIS and self.audio_sources[source.source_id] not in bank.get_content(): #may be missing streamed audio if the patch didn't change it
-                            bank.add_content(self.audio_sources[source.source_id])
-                    except:
-                        continue
-                
-        
-    def load_deps(self):
-        archive_file = ""
-        if os.path.exists(GAME_FILE_LOCATION):
-            archive_file = os.path.join(GAME_FILE_LOCATION, strip_patch_index(self.name))
-        if not os.path.exists(archive_file):
-            warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
-            warning.show()
-            warning.root.wait_window(warning.root)
-            archive_file = askopenfilename(title="Select archive")
-            if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
-                archive_file = os.path.splitext(archive_file)[0]
-        if not os.path.exists(archive_file):
-            return False
-        toc_file = MemoryStream()
-        with open(archive_file, 'r+b') as f:
-            toc_file = MemoryStream(f.read())
-
-        self.magic      = toc_file.uint32_read()
-        if self.magic != 4026531857: return False
-
-        self.num_types   = toc_file.uint32_read()
-        self.num_files   = toc_file.uint32_read()
-        self.unknown    = toc_file.uint32_read()
-        self.unk4Data   = toc_file.read(56)
-        toc_file.seek(toc_file.tell() + 32 * self.num_types)
-        toc_start = toc_file.tell()
-        for n in range(self.num_files):
-            toc_file.seek(toc_start + n*80)
-            toc_header = TocHeader()
-            toc_header.from_memory_stream(toc_file)
-            if toc_header.type_id == WWISE_DEP: #wwise dep
-                dep = WwiseDep()
-                dep.toc_header = toc_header
-                toc_file.seek(toc_header.toc_data_offset)
-                dep.from_memory_stream(toc_file)
-                try:
-                    self.wwise_banks[toc_header.file_id].dep = dep
-                except KeyError:
-                    pass
-        return True
-        
-    def load_banks(self):
-        archive_file = ""
-        if os.path.exists(GAME_FILE_LOCATION):
-            archive_file = os.path.join(GAME_FILE_LOCATION, strip_patch_index(self.name))
-        if not os.path.exists(archive_file):
-            warning = PopupWindow(message = "This patch may have been created using an older version of the audio modding tool and is missing required data. Please select the original game file to load required data.")
-            warning.show()
-            warning.root.wait_window(warning.root)
-            archive_file = askopenfilename(title="Select archive")
-            if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
-                archive_file = os.path.splitext(archive_file)[0]
-        if not os.path.exists(archive_file):
-            return False
-        toc_file = MemoryStream()
-        with open(archive_file, 'r+b') as f:
-            toc_file = MemoryStream(f.read())
-
-        self.magic      = toc_file.uint32_read()
-        if self.magic != 4026531857: return False
-
-        self.num_types   = toc_file.uint32_read()
-        self.num_files   = toc_file.uint32_read()
-        self.unknown    = toc_file.uint32_read()
-        self.unk4Data   = toc_file.read(56)
-        toc_file.seek(toc_file.tell() + 32 * self.num_types)
-        toc_start = toc_file.tell()
-        for n in range(self.num_files):
-            toc_file.seek(toc_start + n*80)
-            toc_header = TocHeader()
-            toc_header.from_memory_stream(toc_file)
-            entry = None
-            if toc_header.type_id == WWISE_BANK:
-                entry = WwiseBank()
-                entry.toc_header = toc_header
-                toc_data_offset = toc_header.toc_data_offset
-                toc_data_size = toc_header.toc_data_size
-                toc_file.seek(toc_data_offset)
-                entry.toc_data_header = toc_file.read(16)
-                #-------------------------------------
-                bank = BankParser()
-                bank.load(toc_file.read(toc_header.toc_data_size-16))
-                entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
-                
-                hirc = HircReader(soundbank=entry)
-                try:
-                    hirc.load(bank.chunks['HIRC'])
-                except KeyError:
-                    continue
-                entry.hierarchy = hirc
-                #-------------------------------------
-                entry.bank_misc_data = b''
-                for chunk in bank.chunks.keys():
-                    if chunk not in ["BKHD", "DATA", "DIDX", "HIRC"]:
-                        entry.bank_misc_data = entry.bank_misc_data + chunk.encode('utf-8') + len(bank.chunks[chunk]).to_bytes(4, byteorder='little') + bank.chunks[chunk]
-                        
-                self.wwise_banks[entry.get_id()] = entry
-            elif toc_header.type_id == WWISE_DEP: #wwise dep
-                dep = WwiseDep()
-                dep.toc_header = toc_header
-                toc_file.seek(toc_header.toc_data_offset)
-                dep.from_memory_stream(toc_file)
-                try:
-                    self.wwise_banks[toc_header.file_id].dep = dep
-                except KeyError:
-                    pass
-        
-        #only include banks that contain at least 1 of the streams
-        temp_banks = {}
-        for key, bank in self.wwise_banks.items():
-            include_bank = False
-            for hierarchy_entry in bank.hierarchy.entries.values():
-                for source in hierarchy_entry.sources:
-                    if source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM]:
-                        stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
-                        for stream in self.wwise_streams.values():
-                            if stream.get_id() == stream_resource_id:
-                                include_bank = True
-                                temp_banks[key] = bank
-                                break
-                    if include_bank:
-                        break
-                if include_bank:
-                    break
-        self.wwise_banks = temp_banks
-        
-        return True
-        
-class SoundHandler:
-    
-    def __init__(self):
-        self.audio_process = None
-        self.wave_object = None
-        self.audio_id = -1
-        self.audio = pyaudio.PyAudio()
-        
-    def kill_sound(self):
-        if self.audio_process is not None:
-            if self.callback is not None:
-                self.callback()
-                self.callback = None
-            self.audio_process.close()
-            self.wave_file.close()
-            try:
-                os.remove(self.audio_file)
-            except:
-                pass
-            self.audio_process = None
-        
-    def play_audio(self, sound_id, sound_data, callback=None):
-        if not os.path.exists(VGMSTREAM):
-            return
-        self.kill_sound()
-        self.callback = callback
-        if self.audio_id == sound_id:
-            self.audio_id = -1
-            return
-        filename = f"temp{sound_id}"
-        if not os.path.isfile(f"{filename}.wav"):
-            with open(f'{os.path.join(CACHE, filename)}.wem', 'wb') as f:
-                f.write(sound_data)
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, filename)}.wav", f"{os.path.join(CACHE, filename)}.wem"], stdout=subprocess.DEVNULL)
-            os.remove(f"{os.path.join(CACHE, filename)}.wem")
-            if process.returncode != 0:
-                logger.error(f"Encountered error when converting {sound_id}.wem for playback")
-                self.callback = None
-                return
-            
-        self.audio_id = sound_id
-        self.wave_file = wave.open(f"{os.path.join(CACHE, filename)}.wav")
-        self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
-        self.frame_count = 0
-        self.max_frames = self.wave_file.getnframes()
-        
-        def read_stream(input_data, frame_count, time_info, status):
-            self.frame_count += frame_count
-            if self.frame_count > self.max_frames:
-                if self.callback is not None:
-                    self.callback()
-                    self.callback = None
-                self.audio_id = -1
-                self.wave_file.close()
-                try:
-                    os.remove(self.audio_file)
-                except:
-                    pass
-                return (None, pyaudio.paComplete)
-            data = self.wave_file.readframes(frame_count)
-            if self.wave_file.getnchannels() > 2:
-                data = self.downmix_to_stereo(data, self.wave_file.getnchannels(), self.wave_file.getsampwidth(), frame_count)
-            return (data, pyaudio.paContinue)
-
-        self.audio_process = self.audio.open(format=self.audio.get_format_from_width(self.wave_file.getsampwidth()),
-                channels = min(self.wave_file.getnchannels(), 2),
-                rate=self.wave_file.getframerate(),
-                output=True,
-                stream_callback=read_stream)
-        self.audio_file = f"{os.path.join(CACHE, filename)}.wav"
-        
-    def downmix_to_stereo(self, data, channels, channel_width, frame_count):
-        if channel_width == 2:
-            arr = numpy.frombuffer(data, dtype=numpy.int16)
-            stereo_array = numpy.zeros(shape=(frame_count, 2), dtype=numpy.int16)
-        elif channel_width == 1:
-            arr = numpy.frombuffer(data, dtype=numpy.int8)
-            stereo_array = numpy.zeros(shape=(frame_count, 2), dtype=numpy.int8)
-        elif channel_width == 4:
-            arr = numpy.frombuffer(data, dtype=numpy.int32)
-            stereo_array = numpy.zeros(shape=(frame_count, 2), dtype=numpy.int32)
-        arr = arr.reshape((frame_count, channels))
-        
-        if channels == 4:
-            for index, frame in enumerate(arr):
-                stereo_array[index][0] = int(0.42265 * frame[0] + 0.366025 * frame[2] + 0.211325 * frame[3])
-                stereo_array[index][1] = int(0.42265 * frame[1] + 0.366025 * frame[3] + 0.211325 * frame[2])
-        
-            return stereo_array.tobytes()
-                
-        if channels == 6:
-            for index, frame in enumerate(arr):
-                stereo_array[index][0] = int(0.374107*frame[1] + 0.529067*frame[0] + 0.458186*frame[3] + 0.264534*frame[4] + 0.374107*frame[5])
-                stereo_array[index][1] = int(0.374107*frame[1] + 0.529067*frame[2] + 0.458186*frame[4] + 0.264534*frame[3] + 0.374107*frame[5])
-        
-            return stereo_array.tobytes()
-        
-        #if not 4 or 6 channel, default to taking the L and R channels rather than mixing
-        for index, frame in enumerate(arr):
-            stereo_array[index][0] = frame[0]
-            stereo_array[index][1] = frame[1]
-        
-        return stereo_array.tobytes()
-     
-class FileHandler:
-
-    def __init__(self):
-        self.file_reader = FileReader()
-        
-    def revert_all(self):
-        for audio in self.file_reader.audio_sources.values():
-            audio.revert_modifications()
-        for language in self.file_reader.string_entries.values():
-            for string in language.values():
-                string.revert_modifications()
-        for track_info in self.file_reader.music_track_events.values():
-            track_info.revert_modifications()
-        for music_segment in self.file_reader.music_segments.values():
-            music_segment.revert_modifications()
-        
-    def revert_audio(self, file_id):
-        audio = self.get_audio_by_id(file_id)
-        audio.revert_modifications()
-        
-    def dump_as_wem(self, file_id):
-        output_file = filedialog.asksaveasfile(mode='wb', title="Save As", initialfile=(str(file_id)+".wem"), defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
-        if output_file is None: return
-        output_file.write(self.get_audio_by_id(file_id).get_data())
-        
-    def dump_as_wav(self, file_id, muted: bool = False):
-        output_file = filedialog.asksaveasfilename(
-            title="Save As", 
-            initialfile=f"{file_id}.wav", 
-            defaultextension=".wav", 
-            filetypes=[("Wav Audio", "*.wav")]
-        )
-
-        if output_file == "":
-            return
-
-        save_path = os.path.splitext(output_file)[0]
-
-        if muted:
-            subprocess.run([
-                FFMPEG, 
-                "-f", "lavfi", 
-                "-i", "anullsrc=r=48000:cl=stereo",
-                "-t", "1", # TO-DO, this should match up with actual duration
-                "-c:a", "pcm_s16le",
-                f"{save_path}.wav"],
-                stdout=subprocess.DEVNULL
-            )
-            return
-
-        with open(f"{save_path}.wem", 'wb') as f:
-            f.write(self.get_audio_by_id(file_id).get_data())
-
-        process = subprocess.run(
-            [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], 
-            stdout=subprocess.DEVNULL
-        )
-        
-        if process.returncode != 0:
-            logger.error(f"Encountered error when converting {file_id}.wem into .wav format")
-
-        os.remove(f"{save_path}.wem")
-        
-    def dump_multiple_as_wem(self, file_ids):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
-        
-        progress_window = ProgressWindow(title="Dumping Files", max_progress=len(file_ids))
-        progress_window.show()
-        
-        if os.path.exists(folder):
-            for file_id in file_ids:
-                audio = self.get_audio_by_id(file_id)
-                if audio is not None:
-                    save_path = os.path.join(folder, f"{audio.get_id()}")
-                    progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wem")
-                    with open(save_path+".wem", "wb") as f:
-                        f.write(audio.get_data())
-                progress_window.step()
-        else:
-            print("Invalid folder selected, aborting dump")
-            
-        progress_window.destroy()
-        
-    def dump_multiple_as_wav(self, file_ids: list[str], muted: bool = False,
-                             with_seq: bool = False):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
-        
-        if not os.path.exists(folder):
-            logger.warning("Invalid folder selected, aborting dump")
-            return
-
-        progress_window = ProgressWindow(title="Dumping Files", 
-                                         max_progress=len(file_ids))
-        progress_window.show()
-
-
-        for i, file_id in enumerate(file_ids, start=0):
-            audio: int | None = self.get_audio_by_id(int(file_id))
-            if audio is None:
-                continue
-            basename = str(audio.get_id())
-            if with_seq:
-                basename = f"{i:02d}" + "_" + basename
-            save_path = os.path.join(folder, basename)
-            progress_window.set_text(
-                "Dumping " + os.path.basename(save_path) + ".wem"
-            )
-            if muted:
-                subprocess.run([
-                    FFMPEG, 
-                    "-f", "lavfi", 
-                    "-i", "anullsrc=r=48000:cl=stereo",
-                    "-t", "1", # TO-DO, this should match up with actual duration
-                    "-c:a", "pcm_s16le",
-                    f"{save_path}.wav"],
-                    stdout=subprocess.DEVNULL
-                )
-            else:
-                with open(save_path + ".wem", "wb") as f:
-                    f.write(audio.get_data())
-                process = subprocess.run(
-                    [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"],
-                    stdout=subprocess.DEVNULL,
-                )
-                if process.returncode != 0:
-                    logger.error(f"Encountered error when converting {basename}.wem to .wav")
-                os.remove(f"{save_path}.wem")
-            progress_window.step()
-
-        progress_window.destroy()
-
-    def dump_all_as_wem(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
-        
-        progress_window = ProgressWindow(title="Dumping Files", max_progress=len(self.file_reader.audio_sources))
-        progress_window.show()
-        
-        if os.path.exists(folder):
-            for bank in self.file_reader.wwise_banks.values():
-                subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
-                if not os.path.exists(subfolder):
-                    os.mkdir(subfolder)
-                for audio in bank.get_content():
-                    save_path = os.path.join(subfolder, f"{audio.get_id()}")
-                    progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wem")
-                    with open(save_path+".wem", "wb") as f:
-                        f.write(audio.get_data())
-                    progress_window.step()
-        else:
-            print("Invalid folder selected, aborting dump")
-            
-        progress_window.destroy()
-    
-    def dump_all_as_wav(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
-
-        progress_window = ProgressWindow(title="Dumping Files", max_progress=len(self.file_reader.audio_sources))
-        progress_window.show()
-        
-        if os.path.exists(folder):
-            for bank in self.file_reader.wwise_banks.values():
-                subfolder = os.path.join(folder, os.path.basename(bank.dep.data.replace('\x00', '')))
-                if not os.path.exists(subfolder):
-                    os.mkdir(subfolder)
-                for audio in bank.get_content():
-                    save_path = os.path.join(subfolder, f"{audio.get_id()}")
-                    progress_window.set_text("Dumping " + os.path.basename(save_path) + ".wav")
-                    with open(save_path+".wem", "wb") as f:
-                        f.write(audio.get_data())
-                    process = subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
-                    if process.returncode != 0:
-                        logger.error(f"Encountered error when converting {os.path.basename(save_path)}.wem to .wav")
-                    os.remove(f"{save_path}.wem")
-                    progress_window.step()
-        else:
-            print("Invalid folder selected, aborting dump")
-            
-        progress_window.destroy()
-        
-    def get_number_prefix(self, n):
-        number = ''.join(takewhile(str.isdigit, n or ""))
-        try:
-            return int(number)
-        except:
-            log.logger.warning(f"File name must begin with a number: {n}")
-        
-    def save_archive_file(self):
-        folder = filedialog.askdirectory(title="Select folder to save files to")
-        if os.path.exists(folder):
-            self.file_reader.rebuild_headers()
-            self.file_reader.to_file(folder)
-        else:
-            print("Invalid folder selected, aborting save")
-            
-    def get_audio_by_id(self, file_id):
-        try:
-            return self.file_reader.audio_sources[file_id] #short_id
-        except KeyError:
-            pass
-        for source in self.file_reader.audio_sources.values(): #resource_id
-            if source.resource_id == file_id:
-                return source
-                
-    def get_event_by_id(self, event_id):
-        try:
-            return self.file_reader.music_track_events[event_id]
-        except:
-            pass
-            
-    def get_string_by_id(self, string_id):
-        try:
-            return self.file_reader.string_entries[language][string_id]
-        except:
-            pass
-        
-    def get_music_segment_by_id(self, segment_id):
-        try:
-            return self.file_reader.music_segments[segment_id]
-        except:
-            pass
-        
-    def get_wwise_streams(self):
-        return self.file_reader.wwise_streams
-        
-    def get_wwise_banks(self):
-        return self.file_reader.wwise_banks
-        
-    def get_audio(self):
-        return self.file_reader.audio_sources
-        
-    def get_strings(self):
-        return self.file_reader.string_entries
-        
-    def load_archive_file(self, initialdir: str | None = '', archive_file: str | None = None):
-        if archive_file == None:
-            archive_file = askopenfilename(initialdir=initialdir, 
-                                           title="Select archive")
-        if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
-            archive_file = os.path.splitext(archive_file)[0]
-        if os.path.exists(archive_file):
-            try:
-                self.file_reader.from_file(archive_file)
-            except Exception as e:
-                logger.error(f"Error occured when loading {archive_file}: {e}.")
-                logger.warning("Aborting load")
-                return False
-        else:
-            print("Invalid file selected, aborting load")
-            return False
-        return True
-            
-            
-    def load_patch(self, patch_file: str | None = None): #TO-DO: only import if DIFFERENT from original audio; makes it possible to import different mods that change the same soundbank
-        patch_file_reader = FileReader()
-        if patch_file == None:
-            patch_file = filedialog.askopenfilename(title="Choose patch file to import")
-        if os.path.splitext(patch_file)[1] in (".stream", ".gpu_resources"):
-            patch_file = os.path.splitext(patch_file)[0]
-        if os.path.exists(patch_file):
-            try:
-                patch_file_reader.from_file(patch_file)
-            except Exception as e:
-                logger.error(f"Error occured when loading {patch_file}: {e}.")
-                logger.warning("Aborting load")
-                return False
-        else:
-            print("Invalid file selected, aborting load")
-            return False
-            
-        progress_window = ProgressWindow(title="Loading Files", max_progress=len(patch_file_reader.audio_sources))
-        progress_window.show()
-        
-        for bank in patch_file_reader.wwise_banks.values(): #something is a bit wrong here
-            #load audio content from the patch
-            for new_audio in bank.get_content():
-                progress_window.set_text(f"Loading {new_audio.get_id()}")
-                old_audio = self.get_audio_by_id(new_audio.get_short_id())
-                if old_audio is not None:
-                    if (not old_audio.modified and new_audio.get_data() != old_audio.get_data()
-                        or old_audio.modified and new_audio.get_data() != old_audio.data_OLD):
-                        old_audio.set_data(new_audio.get_data())
-                progress_window.step()
-
-        for key, music_segment in patch_file_reader.music_segments.items():
-            try:
-                old_music_segment = self.file_reader.music_segments[key]
-            except:
-                continue
-            if (
-                (
-                    not old_music_segment.modified
-                    and (
-                        music_segment.entry_marker[1] != old_music_segment.entry_marker[1]
-                        or music_segment.exit_marker[1] != old_music_segment.exit_marker[1]
-                        or music_segment.duration != old_music_segment.duration
-                    )
-                )
-                or
-                (
-                    old_music_segment.modified
-                    and (
-                        music_segment.entry_marker[1] != old_music_segment.entry_marker_old
-                        or music_segment.exit_marker[1] != old_music_segment.exit_marker_old
-                        or music_segment.duration != old_music_segment.duration_old
-                    )
-                )
-            ):
-                old_music_segment.set_data(duration=music_segment.duration, entry_marker=music_segment.entry_marker[1], exit_marker=music_segment.exit_marker[1])
-            for track_id in music_segment.tracks:
-                new_track = music_segment.soundbank.hierarchy.entries[track_id]
-                old_track = old_music_segment.soundbank.hierarchy.entries[track_id]
-                for idx, new_info in enumerate(new_track.track_info):
-                    for i in old_track.track_info:
-                        if (
-                            (
-                                new_info.source_id != 0 and new_info.source_id == i.source_id
-                            )
-                            or
-                            (
-                                new_info.event_id != 0 and new_info.event_id == i.event_id
-                            )
-                        ):
-                            old_info = i
-                            break
-                    if (
-                        (
-                            not old_info.modified
-                            and (
-                                old_info.play_at != new_info.play_at
-                                or old_info.begin_trim_offset != new_info.begin_trim_offset
-                                or old_info.end_trim_offset != new_info.end_trim_offset
-                                or old_info.source_duration != new_info.source_duration
-                            )
-                        )
-                        or
-                        (
-                            old_info.modified
-                            and (
-                                old_info.play_at_old != new_info.play_at
-                                or old_info.begin_trim_offset_old != new_info.begin_trim_offset
-                                or old_info.end_trim_offset_old != new_info.end_trim_offset
-                                or old_info.source_duration_old != new_info.source_duration
-                            )
-                        )
-                    ):
-                        old_info.set_data(play_at=new_info.play_at, begin_trim_offset=new_info.begin_trim_offset, end_trim_offset=new_info.end_trim_offset, source_duration=new_info.source_duration)
-
-        for text_data in patch_file_reader.text_banks.values():
-            for string_id in text_data.string_ids:
-                new_text_data = patch_file_reader.string_entries[language][string_id]
-                try:
-                    old_text_data = self.file_reader.string_entries[language][string_id]
-                except:
-                    continue
-                if (
-                    (not old_text_data.modified and new_text_data.get_text() != old_text_data.get_text())
-                    or (old_text_data.modified and new_text_data.get_text() != old_text_data.text_old)
-                ):
-                    old_text_data.set_text(new_text_data.get_text())
-        
-        progress_window.destroy()
-        return True
-
-    def write_patch(self, folder=None):
-        if folder == None:
-            folder = filedialog.askdirectory(title="Select folder to save files to")
-        if os.path.exists(folder):
-            patch_file_reader = FileReader()
-            patch_file_reader.name = self.file_reader.name + ".patch_0"
-            patch_file_reader.magic = self.file_reader.magic
-            patch_file_reader.num_types = 0
-            patch_file_reader.num_files = 0
-            patch_file_reader.unknown = self.file_reader.unknown
-            patch_file_reader.unk4Data = self.file_reader.unk4Data
-            patch_file_reader.audio_sources = self.file_reader.audio_sources
-            patch_file_reader.string_entries = self.file_reader.string_entries
-            patch_file_reader.music_track_events = self.file_reader.music_track_events
-            patch_file_reader.music_segments = self.file_reader.music_segments
-            patch_file_reader.wwise_banks = {}
-            patch_file_reader.wwise_streams = {}
-            patch_file_reader.text_banks = {}
-            
-            for key, value in self.file_reader.wwise_streams.items():
-                if value.content.modified:
-                    patch_file_reader.wwise_streams[key] = value
-                    
-            for key, value in self.file_reader.wwise_banks.items():
-                if value.modified:
-                    patch_file_reader.wwise_banks[key] = value
-                    
-            for key, value in self.file_reader.text_banks.items():
-                for string_id in value.string_ids:
-                    if self.file_reader.string_entries[value.language][string_id].modified:
-                        patch_file_reader.text_banks[key] = value
-                        break
-     
-            patch_file_reader.rebuild_headers()
-            patch_file_reader.to_file(folder)
-        else:
-            print("Invalid folder selected, aborting save")
-            return False
-        return True
-
-    def load_wems(self, wems: Union[tuple[str, ...], Literal[""], None] = None, set_duration=True): 
-        if wems == None:
-            wems = filedialog.askopenfilenames(title="Choose .wem files to import", filetypes=[("Wwise Vorbis", "*.wem")])
-        if wems == "":
-            return
-        progress_window = ProgressWindow(title="Loading Files", 
-                                         max_progress=len(wems))
-        progress_window.show()
-        for wem in wems:
-            basename = os.path.basename(wem)
-            splits: list[str] = basename.split("_", 1)
-            try:
-                match splits:
-                    case [prefix, name] if int(prefix) < 10000:
-                        basename = name
-            except:
-                pass
-            progress_window.set_text("Loading " + basename)
-            file_id: int | None = self.get_number_prefix(basename)
-            if file_id == None:
-                continue
-            audio: str | None = self.get_audio_by_id(file_id)
-            if audio == None:
-                continue
-            with open(wem, 'rb') as f:
-                audio.set_data(f.read())
-            if set_duration:
-                try:
-                    process = subprocess.run([VGMSTREAM, "-m", wem], capture_output=True)
-                    process.check_returncode()
-                except:
-                    logger.warning(f"Failed to get duration info for {wem}")
-                    continue
-                for line in process.stdout.decode(locale.getpreferredencoding()).split("\n"):
-                    if "sample rate" in line:
-                        sample_rate = float(line[13:line.index("Hz")-1])
-                    if "stream total samples" in line:
-                        total_samples = int(line[22:line.index("(")-1])
-                len_ms = total_samples * 1000 / sample_rate
-                if audio.get_track_info() is not None:
-                    audio.get_track_info().set_data(play_at=0, begin_trim_offset=0, end_trim_offset=0, source_duration=len_ms)
-                # find music segment for Audio Source
-                stop = False
-                for segment in self.file_reader.music_segments.values():
-                    for track_id in segment.tracks:
-                        track = segment.soundbank.hierarchy.entries[track_id]
-                        for source in track.sources:
-                            if source.source_id == audio.get_short_id():
-                                segment.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
-                                stop = True
-                                break
-                        if stop:
-                            break
-                    if stop:
-                        break
-            progress_window.step()
-        progress_window.destroy()
-        
-    def create_external_sources_list(self, sources: list[str]):
-        root = etree.Element("ExternalSourcesList", attrib={
-            "SchemaVersion": "1",
-            "Root": __file__
-        })
-        file = etree.ElementTree(root)
-        for source in sources:
-            etree.SubElement(root, "Source", attrib={
-                "Path": source,
-                "Conversion": DEFAULT_CONVERSION_SETTING,
-                "Destination": os.path.basename(source)
-            })
-        file.write(os.path.join(CACHE, "external_sources.wsources"))
-        
-        return os.path.join(CACHE, "external_sources.wsources")
-        
-        
-    def load_wavs(self, wavs: list[str] | None = None):
-        if wavs == None:
-            wavs = filedialog.askopenfilenames(title="Choose .wav files to import", filetypes=[("WAV audio", "*.wav")])
-        if wavs == "":
-            return
-            
-        source_list = self.create_external_sources_list(wavs)
-        
-        try:
-            if SYSTEM in ["Windows", "Darwin"]:
-                subprocess.run([
-                    WWISE_CLI,
-                    "migrate",
-                    DEFAULT_WWISE_PROJECT,
-                    "--quiet",
-                ]).check_returncode()
-            else:
-                showerror(title="Operation Failed",
-                    message="The current operating system does not support this feature yet")
-        except Exception as e:
-            logger.error(e)
-            showerror(title="Error", message="Error occurred during project migration. Please check log.txt.")
-        
-        convert_dest = os.path.join(CACHE, SYSTEM)
-        try:
-            if SYSTEM == "Darwin":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    DEFAULT_WWISE_PROJECT,
-                    "--platform", "Windows",
-                    "--source-file",
-                    source_list,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            elif SYSTEM == "Windows":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    DEFAULT_WWISE_PROJECT,
-                    "--platform", "Windows",
-                    "--source-file",
-                    source_list,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            else:
-                showerror(title="Operation Failed",
-                    message="The current operating system does not support this feature yet")
-        except Exception as e:
-            logger.error(e)
-            showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
-            
-        wems = [os.path.join(convert_dest, x) for x in os.listdir(convert_dest)]
-        
-        self.load_wems(wems)
-        
-        for wem in wems:
-            try:
-                os.remove(wem)
-            except:
-                pass
-                
-        try:
-            os.remove(source_list)
-        except:
-            pass
-
-    def load_wav_by_mapping(self,
-                 project: str,
-                 wems: list[tuple[str, AudioSource, int]],
-                 schema: etree.Element) -> bool:
-        if len(wems) == 0:
-            return True
-        tree = etree.ElementTree(schema)
-        schema_path = os.path.join(CACHE, "schema.xml")
-        tree.write(schema_path, encoding="utf-8", xml_declaration=True)
-        convert_ok = True
-        convert_dest = os.path.join(CACHE, SYSTEM)
-        try:
-            if SYSTEM == "Darwin":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    project,
-                    "--platform", "Windows",
-                    "--source-file",
-                    schema_path,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            elif SYSTEM == "Windows":
-                subprocess.run([
-                    WWISE_CLI,
-                    "convert-external-source",
-                    project,
-                    "--platform", "Windows",
-                    "--source-file",
-                    schema_path,
-                    "--output",
-                    CACHE,
-                ]).check_returncode()
-            else:
-                convert_ok = False
-                showerror(title="Operation Failed",
-                    message="The current operating system does not support this feature yet")
-        except Exception as e:
-            convert_ok = False
-            logger.error(e)
-            showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
-
-        if not convert_ok:
-            return False
-
-        for wem in wems:
-            try:
-                dest_path = os.path.join(convert_dest, wem[0])
-                assert(os.path.exists(dest_path))
-                with open(dest_path, "rb") as f:
-                    wem[1].set_data(f.read())
-            except Exception as e:
-                logger.error(e)
-
-        try:
-            os.remove(schema_path)
-            shutil.rmtree(convert_dest)
-        except Exception as e:
-            logger.error(e)
-
-        return True
-
-    def load_convert_spec(self):
-        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
-                                          filetypes=[("json", "")])
-        if spec_path == "":
-            logger.warning("Import operation cancelled")
-            return
-        if not os.path.exists(spec_path):
-            showerror(title="Operation Failed", message=f"{spec_path} does not exist.")
-            logger.warning(f"{spec_path} does not exist. Import operation " \
-                    "cancelled")
-            return
-
-        root_spec: Any = None
-        try:
-            with open(spec_path, mode="r") as f:
-                root_spec = json.load(f)
-        except json.JSONDecodeError as err:
-            logger.warning(err)
-            root_spec = None
-
-        if root_spec == None:
-            return
-
-        if not isinstance(root_spec, dict):
-            showerror(title="Operation Failed",
-                      message="Invalid data format in the given spec file.") 
-            logger.warning("Invalid data format in the given spec file. Import "
-                           "operation cancelled")
-            return
-
-        # Validate version number #
-        if "v" not in root_spec:
-            showerror(title="Operation Failed", 
-                      message="The given spec file is missing field `v`") 
-            logger.warning("The given spec file is missing field `v`. Import "
-                           "operation cancelled.")
-            return
-        v = root_spec["v"]
-        if v != 2:
-            showerror(title="Operation Failed", 
-                      message="The given spec file contain invalid version " 
-                      f'number {v}.')
-            logger.warning("The given spec file contain invalid version "
-                           f'number {v}. Import operation cancelled')
-            return
-
-        # Validate `specs` field #
-        if "specs" not in root_spec:
-            showerror(title="Operation Failed", 
-                      message="The given spec file is missing field `specs`.")
-            logger.warning("The given spec file is missing field `specs`."
-                            " Import operation cancelled.")
-            return
-        if not isinstance(root_spec["specs"], list):
-            showerror(title="Operation Failed",
-                      message="Field `specs` is not an array.")
-            logger.warning("Field `specs` is not an array. Import operation "
-                           "cancelled.")
-            return
-
-        # Validate `project` path #
-        project = DEFAULT_WWISE_PROJECT
-        if "project" not in root_spec:
-            logger.warning("Missing field `project`. Using default Wwise project")
-        else:
-            if not isinstance(root_spec["project"], str):
-                logger.warning("Field `project` is not a string. Using default"
-                               " Wwise project")
-            elif not os.path.exists(root_spec["project"]):
-                logger.warning("The given Wwise project does not exist. Using "
-                               "default Wwise project")
-            else:
-                project = root_spec["project"]
-        if not os.path.exists(project):
-            showerror(title="Operation Failed",
-                      message="The default Wwise Project does not exist.")
-            logger.warning("The default Wwise Project does not exist. Import "
-                           "operation cancelled.")
-            return
-        # Validate project `conversion` setting #
-        conversion = DEFAULT_CONVERSION_SETTING
-        if project != DEFAULT_WWISE_PROJECT:
-            if "conversion" not in root_spec:
-                showerror(title="Operation Failed",
-                          message="Missing field `conversion`.")
-                logger.warning("Missing field `conversion`. Import operation"
-                               " cancelled.")
-                return
-            if not isinstance(root_spec["conversion"], str):
-                showerror(title="Operation Failed",
-                          message="Field `conversion` is not a string.")
-                logger.warning("Field `conversion` is not a string. Import "
-                               "operation cancelled.")
-                return
-            conversion = root_spec["conversion"]
-
-        spec_dir = os.path.dirname(spec_path)
-        root = etree.Element("ExternalSourcesList", attrib={
-            "SchemaVersion": "1",
-            "Root": spec_dir
-        })
-        wems: list[tuple[str, AudioSource, int]] = []
-        for sub_spec in root_spec["specs"]:
-            # Validate spec format #
-            if not isinstance(sub_spec, dict):
-                logger.warning("Current entry is not an object. Skipping "
-                               "current entry.")
-                continue
-
-            # Validate work space #
-            workspace = ""
-            if "workspace" not in sub_spec:
-                logger.warning("The given spec file is missing field "
-                               "`workspace`. Use the current directory of the "
-                               "given spec file is in instead.")
-                workspace = spec_dir 
-            else:
-                workspace = sub_spec["workspace"]
-                # Relative path
-                if not os.path.exists(workspace): 
-                    workspace = os.path.join(spec_dir, workspace) 
-            if not os.path.exists(workspace):
-                showwarning(title="Operation Skipped",
-                            message=f"{workspace} does not exist.")
-                logger.warning(f"{workspace} does not exist. Skipping current "
-                               "entry.")
-                continue
-
-            # Validate `mapping` format #
-            mapping: dict[str, list[str] | str] | None
-            if "mapping" not in sub_spec:
-                showwarning(title="Operation Skipped", 
-                            message=f"The given spec file is missing field " 
-                            "`mapping`")
-                logger.warning("The given spec file is missing field `mapping`. "
-                        "Skipping current entry.")
-                continue
-            mapping = sub_spec["mapping"]
-            if mapping == None or not isinstance(mapping, dict):
-                showwarning(title="Operation Skipped", 
-                            message="field `mapping` has an invalid data type")
-                logger.warning("field `mapping` has an invalid data type. Skipping "
-                        "current entry.")
-                continue
-
-            suffix: str = ""
-            if "suffix" in sub_spec:
-                if not isinstance(sub_spec["suffix"], str):
-                    logger.warning("`suffix` is not a str. Disable "
-                            "substring filtering")
-                else:
-                    suffix = sub_spec["suffix"]
-            prefix: str = ""
-            if "prefix" in sub_spec:
-                if not isinstance(sub_spec["prefix"], str):
-                    logger.warning("`prefix` is not a str. Disable "
-                            "substring filtering")
-                else:
-                    prefix = sub_spec["prefix"]
-
-            for src, dest in mapping.items():
-                src = prefix + src + suffix
-
-                abs_src = os.path.join(workspace, src)
-                if not abs_src.endswith(".wav"):
-                    logger.info("Require import file missing .wav extension. "
-                            "Adding extension.")
-                    abs_src += ".wav"
-                if not os.path.exists(abs_src):
-                    logger.warning(f"Required import file does not exist "
-                            "Skipping the current entry.")
-                    continue
-
-                if isinstance(dest, str):
-                    file_id: int | None = self.get_number_prefix(dest)
-                    if file_id == None:
-                        logger.warning(f"{dest} does not contain a valid game "
-                                       "asset file id. Skipping the current "
-                                       "entry.")
-                        continue
-                    audio = self.get_audio_by_id(file_id)
-                    convert_dest = f"{file_id}.wem"
-                    if audio == None:
-                        logger.warning(f"No audio source is associated with "
-                                       f"game asset file id {file_id}. Skipping "
-                                       "the current entry.")
-                        continue
-                    etree.SubElement(root, "Source", attrib={
-                        "Path": abs_src,
-                        "Conversion": conversion,
-                        "Destination": convert_dest 
-                    })
-                    wems.append((convert_dest, audio, file_id))
-                elif isinstance(dest, list):
-                    for d in dest:
-                        if not isinstance(d, str):
-                            logger.warning(f"{d} is not a string. Skipping the "
-                                    "current entry.")
-                        file_id: int | None = self.get_number_prefix(d)
-                        if file_id == None:
-                            logger.warning(f"{d} does not contain a valid game "
-                                           "asset file id. Skipping the current "
-                                           "entry.")
-                            continue
-                        audio = self.get_audio_by_id(file_id)
-                        if audio == None:
-                            logger.warning(f"No audio source is associated with "
-                                           f"game asset file id {file_id}. "
-                                           "Skipping the current entry.")
-                            continue
-                        convert_dest = f"{file_id}.wem"
-                        etree.SubElement(root, "Source", attrib={
-                            "Path": abs_src,
-                            "Conversion": conversion,
-                            "Destination": convert_dest
-                        })
-                        wems.append((convert_dest, audio, file_id))
-                else:
-                    logger.warning(f"{dest} is not a string or list of string. "
-                            "Skipping the current entry.")
-            out: str | None = None
-            if "write_patch_to" not in sub_spec:
-                continue
-            out = sub_spec["write_patch_to"]
-            if not isinstance(out, str):
-                showwarning(title="Operation Skipped", 
-                            message="field `write_patch_to` has an invalid data "
-                            "type. Write patch operation cancelled.")
-                logger.warning("field `write_patch_to` has an invalid data "
-                               "type. Write patch operation cancelled.")
-                continue
-            if not os.path.exists(out):
-                # Relative patch write #
-                out = os.path.join(spec_dir, out)
-                if not os.path.exists(out):
-                    showwarning(title="Operation Skipped",
-                                message=f"{out} does not exist. Write patch "
-                                "operation cancelled.")
-                    logger.warning(f"{out} does not exist. Write patch operation "
-                                   "cancelled.")
-                    continue
-            if not self.load_wav_by_mapping(project, wems, root):
-                continue
-            if not self.write_patch(folder=out):
-                showerror(title="Operation Failed", message="Write patch operation failed. Check "
-                            "log.txt for detailed.")
-            root = etree.Element("ExternalSourcesList", attrib={
-                "SchemaVersion": "1",
-                "Root": spec_dir 
-            })
-            is_revert = "revert" in sub_spec and \
-                    isinstance(sub_spec["revert"], bool) and \
-                    sub_spec["revert"]
-            is_revert_all = "revert_all" in sub_spec and \
-                    isinstance(sub_spec["revert_all"], bool) and \
-                    sub_spec["revert_all"]
-            if is_revert_all:
-                self.revert_all()
-                continue
-            if is_revert:
-                for wem in wems:
-                    self.revert_audio(wem[2])
-            wems.clear()
-
-        self.load_wav_by_mapping(project, wems, root)
-        out: str | None = None
-        if "write_patch_to" not in root_spec:
-            return
-        out = root_spec["write_patch_to"]
-        if not isinstance(out, str):
-            showerror(title="Operation Failed", 
-                      message="field `write_patch_to` has an invalid data "
-                      "type. Write patch operation cancelled.")
-            logger.warning("field `write_patch_to` has an invalid data "
-                           "type. Write patch operation cancelled.")
-            return
-        if not os.path.exists(out):
-            # Relative path patch writing #
-            out = os.path.join(spec_dir, out)
-            if not os.path.exists(out):
-                showerror(title="Operation Failed",
-                          message=f"{out} does not exist. Write patch "
-                          "operation cancelled.")
-                logger.warning(f"{out} does not exist. Write patch operation "
-                              "cancelled.")
-                return
-        if not self.write_patch(folder=out):
-            showerror(title="Operation Failed",
-                      message="Write patch operation failed. Check "
-                      "log.txt for detailed.")
-
-        is_revert = "revert" in root_spec and \
-                isinstance(root_spec["revert"], bool) and \
-                root_spec["revert"]
-        if is_revert:
-            for wem in wems:
-                self.revert_audio(wem[2])
-
-    def load_wems_spec(self):
-        spec_path = filedialog.askopenfilename(title="Choose .spec file to import", 
-                                          filetypes=[("json", "")])
-        if spec_path == "":
-            logger.warning("Import operation cancelled")
-            return
-        if not os.path.exists(spec_path):
-            showerror(title="Operation Failed", 
-                      message=f"{spec_path} does not exist.")
-            logger.warning(f"{spec_path} does not exist. Import operation "
-                           "cancelled")
-            return
-
-        root_spec: Any = None
-        try:
-            with open(spec_path, mode="r") as f:
-                root_spec = json.load(f)
-        except json.JSONDecodeError as err:
-            logger.warning(err)
-            root_spec = None
-
-        if root_spec == None:
-            return
-
-        if not isinstance(root_spec, dict):
-            showerror(title="Operation Failed",
-                      message="Invalid data format in the given spec file.") 
-            logger.warning("Invalid data format in the given spec file. Import "
-                    "operation cancelled")
-            return
-
-        # Validate version number # 
-        if "v" not in root_spec:
-            showerror(title="Operation Failed",
-                      message="The given spec file is missing field `v`") 
-            logger.warning("The given spec file is missing field `v`. Import "
-                    "operation cancelled.")
-            return
-        if root_spec["v"] != 2:
-            showerror(title="Operation Failed",
-                      message="The given spec file contain invalid version " + 
-                        f'number {root_spec["v"]}.')
-            logger.warning("The given spec file contain invalid version "
-                    f'number {root_spec["v"]}. Import operation cancelled')
-            return
-
-        # Validate `specs` format #
-        if "specs" not in root_spec:
-            showerror(title="Operation Failed",
-                      message="The given spec file is missing field `specs`.")
-            logger.warning("The given spec file is missing field `specs`."
-                            " Import operation cancelled.")
-            return
-        if not isinstance(root_spec["specs"], list):
-            showerror(title="Operation Failed",
-                      message="Field `specs` is not an array.")
-            logger.warning("Field `specs` is not an array. Import operation "
-                           "cancelled.")
-            return
-
-        spec_dir = os.path.dirname(spec_path)
-        patched_ids: list[int] = []
-        for sub_spec in root_spec["specs"]:
-            if not isinstance(sub_spec, dict):
-                logger.warning("Current entry is not an object. Skipping "
-                               "current entry.")
-                continue
-
-            workspace = ""
-            # Validate work space # 
-            if "workspace" not in sub_spec:
-                logger.warning("The given spec file is missing field "
-                               "`workspace`. Use the current directory of the "
-                               "given spec file is in instead.")
-                workspace = spec_dir
-            else:
-                workspace = sub_spec["workspace"]
-                # Relative path
-                if not os.path.exists(workspace): 
-                    workspace = os.path.join(spec_dir, workspace) 
-            if not os.path.exists(workspace):
-                showwarning(title="Operation Skipped",
-                            message=f"{workspace} does not exist.")
-                logger.warning(f"{workspace} does not exist. Skipping current"
-                        " entry")
-                continue
-
-            # Validate `mapping` format # 
-            mapping: dict[str, list[str] | str] | None
-            if "mapping" not in sub_spec:
-                showwarning(title="Operation Skipped",
-                            message=f"The given spec file is missing field "
-                            "`mapping`")
-                logger.warning("The given spec file is missing field `mapping`. "
-                        "Skipping current entry")
-                continue
-            mapping = sub_spec["mapping"]
-            if mapping == None or not isinstance(mapping, dict):
-                showwarning(title="Operation Skipped",
-                            message="field `mapping` has an invalid data type")
-                logger.warning("field `mapping` has an invalid data type. "
-                        "Skipping current entry")
-                continue
-
-            suffix: str = ""
-            if "suffix" in sub_spec:
-                if not isinstance(sub_spec["suffix"], str):
-                    logger.warning("`suffix` is not a str. Disable "
-                            "substring filtering")
-                else:
-                    suffix = sub_spec["suffix"]
-            prefix: str = ""
-            if "prefix" in sub_spec:
-                if not isinstance(sub_spec["prefix"], str):
-                    logger.warning("`prefix` is not a str. Disable "
-                            "substring filtering")
-                else:
-                    prefix = sub_spec["prefix"]
-
-            progress_window = ProgressWindow(title="Loading Files",
-                                             max_progress=len(sub_spec.items()))
-            progress_window.show()
-
-            for src, dest in mapping.items():
-                logger.info(f"Loading {src} into {dest}")
-                progress_window.set_text(f"Loading {src} into {dest}")
-
-                src = prefix + src + suffix
-
-                abs_src = os.path.join(workspace, src)
-                if not abs_src.endswith(".wem"):
-                    logger.info("Require import file missing .wem extension. "
-                            "Adding extension.")
-                    abs_src += ".wem"
-                if not os.path.exists(abs_src):
-                    logger.warning(f"Required import file does not exist "
-                            "Skipping the current entry.")
-                    continue
-
-                if isinstance(dest, str):
-                    file_id: int | None = self.get_number_prefix(dest)
-                    if file_id == None:
-                        logger.warning(f"{dest} does not contain a valid game "
-                                       "asset file id. Skipping the current "
-                                       "entry.")
-                        continue
-                    audio: str | None = self.get_audio_by_id(file_id)
-                    if audio == None:
-                        logger.warning(f"No audio source is associated with "
-                                       "game asset file id {file_id}. Skipping "
-                                       "the current entry.")
-                        continue
-                    with open(abs_src, "rb") as f:
-                        audio.set_data(f.read())
-                    progress_window.step()
-
-                    patched_ids.append(file_id)
-                elif isinstance(dest, list):
-                    for d in dest:
-                        if not isinstance(d, str):
-                            logger.warning(f"{d} is not a string. Skipping the "
-                                    "current entry.")
-                        file_id: int | None = self.get_number_prefix(d)
-                        if file_id == None:
-                            logger.warning(f"{d} does not contain a valid game "
-                                           "asset file id. Skipping the current "
-                                           "entry.")
-                            continue
-                        audio: str | None = self.get_audio_by_id(file_id)
-                        if audio == None:
-                            logger.warning(f"No audio source is associated with "
-                                    "game asset file id {file_id}. Skipping the "
-                                    "current entry.")
-                            continue
-                        with open(abs_src, "rb") as f:
-                            audio.set_data(f.read())
-                        progress_window.step()
-
-                        patched_ids.append(file_id)
-                else:
-                    logger.warning(f"{dest} is not a string or list of string. "
-                            "Skipping the current entry.")
-
-            progress_window.destroy()
-
-            out: str | None = None
-            if "write_patch_to" not in sub_spec:
-                return
-            out = sub_spec["write_patch_to"]
-            if not isinstance(out, str):
-                showwarning(title="Operation Skipped",
-                            message="field `write_patch_to` has an invalid data "
-                            "type. Write patch operation cancelled.")
-                logger.warning("field `write_patch_to` has an invalid data "
-                               "type. Write patch operation cancelled.")
-                continue
-            if not os.path.exists(out):
-                # Relative path
-                out = os.path.join(spec_dir, out)
-                if not os.path.exists(out):
-                    showwarning(title="Operation Skipped", 
-                                message=f"{out} does not exist. Write patch "
-                                "operation cancelled.")
-                    logger.warning(f"{out} does not exist. Write patch operation "
-                                   "cancelled.")
-                    continue
-            if not self.write_patch(folder=out):
-                showerror(title="Operation Failed",
-                          message="Write patch operation failed. Check "
-                          "log.txt for detailed.")
-            is_revert = "revert" in sub_spec and \
-                    isinstance(sub_spec["revert"], bool) and \
-                    sub_spec["revert"]
-            if is_revert:
-                for patched_id in patched_ids:
-                    self.revert_audio(patched_id)
-            patched_ids.clear()
-            
-        out: str | None = None
-        if "write_patch_to" not in root_spec:
-            return
-        out = root_spec["write_patch_to"]
-        if not isinstance(out, str):
-            showerror(title="Operation Failed", message="field `write_patch_to` has an invalid data "
-                        "type. Write patch operation cancelled.")
-            logger.warning("field `write_patch_to` has an invalid data "
-                           "type. Write patch operation cancelled.")
-            return
-        if not os.path.exists(out):
-            # Relative path
-            out = os.path.join(spec_dir, out)
-            if not os.path.exists(out):
-                showerror(title="Operation Failed", message=f"{out} does not exist. Write patch "
-                            "operation cancelled.")
-                logger.warning(f"{out} does not exist. Write patch operation "
-                               "cancelled.")
-                return
-        if not self.write_patch(folder=out):
-            showerror(title="Operation Failed", message="Write patch operation failed. Check "
-                            "log.txt for detailed.")
-
-        is_revert = "revert" in root_spec and \
-                isinstance(root_spec["revert"], bool) and \
-                root_spec["revert"]
-        if is_revert:
-            for patched_id in patched_ids:
-                self.revert_audio(patched_id)
-        patched_ids.clear()
-
-
 class ProgressWindow:
     def __init__(self, title, max_progress):
         self.title = title
@@ -3034,6 +212,103 @@ class StringEntryWindow:
             self.text_box.delete("1.0", END)
             self.text_box.insert(END, self.string_entry.get_text())
             self.update_modified()
+            
+class MusicTrackWindow:
+    
+    def __init__(self, parent, update_modified):
+        self.frame = Frame(parent)
+        self.selected_track = 0
+        self.update_modified = update_modified
+        self.fake_image = tkinter.PhotoImage(width=1, height=1)
+        self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), width=50, anchor="center")
+        self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
+        self.play_at_text_var = tkinter.StringVar(self.frame)
+        self.duration_text_var = tkinter.StringVar(self.frame)
+        self.start_offset_text_var = tkinter.StringVar(self.frame)
+        self.end_offset_text_var = tkinter.StringVar(self.frame)
+        self.source_selection_listbox = tkinter.Listbox(self.frame)
+        self.source_selection_listbox.bind("<Double-Button-1>", self.set_track_info)
+        
+        self.play_at_label = ttk.Label(self.frame,
+                                   text="Play At (ms)",
+                                   font=('Segoe UI', 12),
+                                   anchor="center")
+        self.play_at_text = ttk.Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=54)
+        
+        
+        self.duration_label = ttk.Label(self.frame,
+                                    text="Duration (ms)",
+                                    font=('Segoe UI', 12),
+                                    anchor="center")
+        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=54)
+        
+        
+        self.start_offset_label = ttk.Label(self.frame,
+                                        text="Start Trim (ms)",
+                                        font=('Segoe UI', 12),
+                                        anchor="center")
+        self.start_offset_text = ttk.Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=54)
+        
+        
+        self.end_offset_label = ttk.Label(self.frame,
+                                      text="End Trim (ms)",
+                                      font=('Segoe UI', 12),
+                                      anchor="center")
+        self.end_offset_text = ttk.Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=54)
+
+        self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
+        
+        self.title_label.pack(pady=5)
+        
+    def set_track_info(self, event=None, selection=0):
+        if not selection:
+            selection = self.source_selection_listbox.get(self.source_selection_listbox.curselection()[0])
+        for t in self.track.track_info:
+            if t.source_id == selection or t.event_id == selection:
+                track_info_struct = t
+                break
+                
+        self.selected_track = track_info_struct
+                
+        self.duration_text.delete(0, 'end')
+        self.duration_text.insert(END, str(track_info_struct.source_duration))
+        self.start_offset_text.delete(0, 'end')
+        self.start_offset_text.insert(END, str(track_info_struct.begin_trim_offset))
+        self.end_offset_text.delete(0, 'end')
+        self.end_offset_text.insert(END, str(track_info_struct.end_trim_offset))
+        self.play_at_text.delete(0, 'end')
+        self.play_at_text.insert(END, str(track_info_struct.play_at))
+        
+        self.play_at_label.pack()
+        self.play_at_text.pack()
+        self.duration_label.pack()
+        self.duration_text.pack()
+        self.start_offset_label.pack()
+        self.start_offset_text.pack()
+        self.end_offset_label.pack()
+        self.end_offset_text.pack()
+        
+        self.revert_button.pack(side="left")
+        
+    def set_track(self, track):
+        self.track = track
+        self.source_selection_listbox.delete(0, 'end')
+        for track_info_struct in self.track.track_info:
+            if track_info_struct.source_id != 0:
+                self.source_selection_listbox.insert(END, track_info_struct.source_id)
+            else:
+                self.source_selection_listbox.insert(END, track_info_struct.event_id)
+        
+        if len(track.track_info) > 0:
+            self.source_selection_listbox.pack()
+            self.set_track_info(selection=track.track_info[0].source_id if track.track_info[0].source_id != 0 else track.track_info[0].event_id)
+    def revert(self):
+        self.track.revert_modifications()
+        self.set_track(self.track)
+        
+    def apply_changes(self):
+        pass
+        
         
 class AudioSourceWindow:
     
@@ -3042,6 +317,8 @@ class AudioSourceWindow:
         self.update_modified = update_modified
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.play = play
+        self.track_info = None
+        self.audio = None
         self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), width=50, anchor="center")
         self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
         self.play_button = ttk.Button(self.frame, text= '\u23f5', image=self.fake_image, compound='c', width=2)
@@ -3082,11 +359,9 @@ class AudioSourceWindow:
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack(pady=5)
-       
         
     def set_audio(self, audio):
         self.audio = audio
-        self.track_info = audio.get_track_info()
         self.title_label.configure(text=f"Info for {audio.get_id()}.wem")
         self.play_button.configure(text= '\u23f5')
         self.revert_button.pack_forget()
@@ -3106,43 +381,16 @@ class AudioSourceWindow:
             else:
                 button.configure(text= '\u23f9')
             temp = self.audio.data
-            self.audio.data = self.audio.data_OLD
+            self.audio.data = self.audio.data_old
             self.play(file_id, callback)
             self.audio.data = temp
         self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
         self.play_original_button.configure(command=partial(play_original_audio, self.play_original_button, audio.get_short_id(), partial(reset_button_icon, self.play_original_button)))
-        if self.track_info is not None:
-            self.play_at_text.delete(0, 'end')
-            self.duration_text.delete(0, 'end')
-            self.start_offset_text.delete(0, 'end')
-            self.end_offset_text.delete(0, 'end')
-            self.play_at_text.insert(END, f"{self.track_info.play_at}")
-            self.duration_text.insert(END, f"{self.track_info.source_duration}")
-            self.start_offset_text.insert(END, f"{self.track_info.begin_trim_offset}")
-            self.end_offset_text.insert(END, f"{self.track_info.end_trim_offset}")
-            self.play_at_label.pack()
-            self.play_at_text.pack()
-            self.duration_label.pack()
-            self.duration_text.pack()
-            self.start_offset_label.pack()
-            self.start_offset_text.pack()
-            self.end_offset_label.pack()
-            self.end_offset_text.pack()
+        
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left")
-        if self.track_info is not None:
-            self.apply_button.pack(side="left")
-        else:
-            self.play_at_label.forget()
-            self.play_at_text.forget()
-            self.duration_label.forget()
-            self.duration_text.forget()
-            self.start_offset_label.forget()
-            self.start_offset_text.forget()
-            self.end_offset_label.forget()
-            self.end_offset_text.forget()
-            self.apply_button.forget()
-        if self.audio.modified and self.audio.data_OLD != b"":
+        
+        if self.audio.modified and self.audio.data_old != b"":
             self.play_original_label.pack(side="right")
             self.play_original_button.pack(side="right")
         else:
@@ -3339,12 +587,19 @@ class ArchiveSearch(ttk.Entry):
         self.bind("<Escape>", self.destroy_cmp)
         self.bind("<Up>", self.on_arrow_up)
         self.bind("<Down>", self.on_arrow_down)
+        self.language = ""
         self.winfo_toplevel().bind("<Configure>", self.sync_windows)
 
     def sync_windows(self, event=None):
         if self.cmp_root is not None and self.winfo_toplevel() is not None:
             self.cmp_root.geometry(f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}")
             self.cmp_root.lift()
+            
+    def add_language(self, name: str, language: str):
+        if self.language == "" and language != "none":
+            return f"{name} ({language})"
+        else:
+            return name
 
     def on_key_release(self, event: tkinter.Event):
         if event.keysym in self.ignore_keys:
@@ -3360,17 +615,17 @@ class ArchiveSearch(ttk.Entry):
                 return
             archives = []
             if query == "":
-                archives = [self.fmt.format(k, v) 
-                            for k, v in self.entries.items()]
+                archives = [self.fmt.format(v.archive, self.add_language(v.friendlyname, v.language)) 
+                            for v in self.entries.values()]
             else:
                 unique: set[str] = set()
-                for archive_id, tag in self.entries.items():
-                    match = archive_id.find(query) != -1 or \
-                            tag.lower().find(query) != -1
-                    if not match or archive_id in unique:
+                for entry in self.entries.values():
+                    match = entry.archive.find(query) != -1 or \
+                            entry.friendlyname.lower().find(query) != -1
+                    if not match or entry.name in unique:
                         continue
-                    archives.append(self.fmt.format(archive_id, tag))
-                    unique.add(archive_id)
+                    archives.append(self.fmt.format(entry.archive, self.add_language(entry.friendlyname, entry.language)))
+                    unique.add(entry.name)
             self.cmp_list.delete(0, tkinter.END)
             for archive in archives:
                 self.cmp_list.insert(tkinter.END, archive)
@@ -3393,15 +648,17 @@ class ArchiveSearch(ttk.Entry):
 
         archives = []
         if query == "":
-            archives = [self.fmt.format(k, v) for k, v in self.entries.items()]
+            archives = [self.fmt.format(v.archive, self.add_language(v.friendlyname, v.language)) 
+                        for v in self.entries.values()]
         else:
             unique: set[str] = set()
-            for archive_id, tag in self.entries.items():
-                match = archive_id.find(query) != -1 or tag.lower().find(query) != -1
-                if not match or archive_id in unique:
+            for entry in self.entries.values():
+                match = entry.archive.find(query) != -1 or \
+                        entry.friendlyname.lower().find(query) != -1
+                if not match or entry.name in unique:
                     continue
-                archives.append(self.fmt.format(archive_id, tag))
-                unique.add(archive_id)
+                archives.append(self.fmt.format(entry.archive, self.add_language(entry.friendlyname, entry.language)))
+                unique.add(entry.name)
 
         self.cmp_root = tkinter.Toplevel(self)
         self.cmp_root.wm_overrideredirect(True) # Hide title bar
@@ -3518,14 +775,13 @@ class MainWindow:
 
     def __init__(self, 
                  app_state: cfg.Config, 
-                 lookup_store: db.LookupStore | None,
-                 file_handler, 
-                 sound_handler):
+                 lookup_store: db.LookupStore | None):
         self.app_state = app_state
-        self.lookup_store = lookup_store
-        self.file_handler = file_handler
-        self.sound_handler = sound_handler
+        self.name_lookup = lookup_store
+        self.sound_handler = SoundHandler.get_instance()
         self.watched_paths = []
+        self.mod_handler = ModHandler.get_instance()
+        self.mod_handler.create_new_mod("default")
         
         self.root = TkinterDnD.Tk()
         if os.path.exists("icon.ico"):
@@ -3611,6 +867,8 @@ class MainWindow:
         self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
                                                      self.check_modified)
                                                      
+        self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified)
+                                                     
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
         
@@ -3666,23 +924,12 @@ class MainWindow:
         self.import_menu = Menu(self.menu, tearoff=0)
         self.import_menu.add_command(
             label="Import Patch File",
-            command=self.load_patch
+            command=self.import_patch
         )
         self.import_menu.add_command(
             label="Import Audio Files",
             command=self.import_audio_files
         )
-        self.import_menu.add_command(
-            label="Import using spec.json (.wem)",
-            command=lambda: self.file_handler.load_wems_spec() or 
-                self.check_modified()
-        )
-        if os.path.exists(WWISE_CLI):
-            self.import_menu.add_command(
-                label="Import using spec.json (.wav)",
-                command=lambda: self.file_handler.load_convert_spec() or 
-                    self.check_modified()
-            )
             
         self.file_menu.add_cascade(
             menu=self.load_archive_menu, 
@@ -3697,7 +944,9 @@ class MainWindow:
             label="Import"
         )
         
-        self.file_menu.add_command(label="Save", command=self.save_archive)
+        self.file_menu.add_command(label="Combine Music Mods", command=self.combine_music_mods)
+        
+        self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         
         self.file_menu.add_command(label="Add a Folder to Workspace",
@@ -3749,50 +998,84 @@ class MainWindow:
 
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
+        
+    def combine_music_mods(self):
+        self.sound_handler.kill_sound()
+        if not self.app_state.game_data_path or not os.path.exists(self.app_state.game_data_path):
+            showwarning(title="Error", message="Unable to locate Helldivers 2 game files. Cannot automatically merge mods.")
+        mod_files = filedialog.askopenfilenames(title="Choose mod files to combine", filetypes=[("Zip Archive", "*.zip")])
+        if mod_files:
+            combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
+            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "046d4441a6dae0a9"))
+            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "89de9c3d26d2adc1"))
+            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "fdf011daecf24312"))
+            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "2e24ba9dd702da5c"))
+            extracted_mods = []
+            for mod in mod_files:
+                zip = zipfile.ZipFile(mod)
+                zip.extractall(path=CACHE)
+                for patch_file in [os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]]:
+                    combined_mod.import_patch(patch_file)
+                for file in os.listdir(CACHE):
+                    file = os.path.join(CACHE, file)
+                    try:
+                        if os.path.isfile(file):
+                            os.remove(file)
+                        elif os.path.isdir(file):
+                            shutil.rmtree(file)
+                    except:
+                        pass
+            output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
+            if output_file:
+                combined_mod.write_patch(CACHE)
+                zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
+                with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"), 'rb') as patch_file:
+                    zip.writestr("9ba626afa44a3aa3.patch_0", patch_file.read())
+                if os.path.exists(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream")):
+                    with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"), 'rb') as stream_file:
+                        zip.writestr("9ba626afa44a3aa3.patch_0.stream", stream_file.read())
+                zip.close()
+                try:
+                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"))
+                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"))
+                except:
+                    pass
+            self.mod_handler.delete_mod("combined_mods_temp")
 
     def drop_import(self, event):
         self.drag_source_widget = None
         renamed = False
         old_name = ""
         if event.data:
-            try:
-                import_files = []
-                dropped_files = event.widget.tk.splitlist(event.data)
-                for file in dropped_files:
-                    import_files.extend(list_files_recursive(file))
-                if os.path.exists(WWISE_CLI):
-                    import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
-                else:
-                    import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
-                print(import_files)
-                if (
-                    len(import_files) == 1 
-                    and os.path.splitext(import_files[0])[1] in [".mp3", ".wav", ".ogg", ".m4a", ".wem"]
-                    and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
-                ):
-                    audio_id = self.file_handler.get_number_prefix(os.path.basename(import_files[0]))
-                    if self.file_handler.get_audio_by_id(audio_id) is not None:
-                        answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
-                        if answer is None:
-                            return
-                        if not answer:
-                            new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                            shutil.copyfile(import_files[0], new_name)
-                            old_name = import_files[0]
-                            import_files[0] = new_name
-                            renamed = True
+            import_files = []
+            dropped_files = event.widget.tk.splitlist(event.data)
+            for file in dropped_files:
+                import_files.extend(list_files_recursive(file))
+            if os.path.exists(WWISE_CLI):
+                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES or ".patch_" in os.path.basename(file)]
+            else:
+                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem" or ".patch_" in os.path.basename(file)]
+            if (
+                len(import_files) == 1 
+                and os.path.splitext(import_files[0])[1] in SUPPORTED_AUDIO_TYPES
+                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
+                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
+            ):
+                audio_id = get_number_prefix(os.path.basename(import_files[0]))
+                if audio_id != 0 and self.mod_handler.get_active_mod().get_audio_source(audio_id) is not None:
+                    answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
+                    if answer is None:
+                        return
+                    if not answer:
+                        targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                     else:
-                        new_name = f"{os.path.join(CACHE, self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])}{os.path.splitext(import_files[0])[1]}"
-                        shutil.copyfile(import_files[0], new_name)
-                        old_name = import_files[0]
-                        import_files[0] = new_name
-                        renamed = True
-                print(import_files)
-                self.import_files(import_files)
-                if renamed:
-                    os.remove(new_name)
-            except:
-                pass
+                        targets = [audio_id]
+                else:
+                    targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
+                file_dict = {import_files[0]: targets}
+            else:
+                file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
+            self.import_files(file_dict)
 
     def drop_add_to_workspace(self, event):
         if self.drag_source_widget is not self.workspace and event.data:
@@ -3967,27 +1250,10 @@ class MainWindow:
                 return
             elif tags[0] == "dir":
                 return
-            elif tags[0] == "file":
-                values = self.workspace.item(select, option="values")
-                assert(values != '' and len(values) == 1)
-                if "patch" in os.path.splitext(values[0])[1] and os.path.exists(values[0]):
-                    self.workspace_popup_menu.add_command(
-                        label="Open",
-                        command=lambda: self.load_archive(archive_file=values[0]),
-                    )
-        wems = []
-        for i in selects:
-            tags = self.workspace.item(i, option="tags")
-            assert(tags != '' and len(tags) == 1)
-            if tags[0] != "file":
-                continue
-            values = self.workspace.item(i, option="values")
-            assert(values != '' and len(values) == 1)
-            if os.path.exists(values[0]):
-                wems.append(values[0])
+        file_dict = {self.workspace.item(i, option="values")[0]: [get_number_prefix(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
         self.workspace_popup_menu.add_command(
             label="Import", 
-            command=lambda: self.import_files(files=wems)
+            command=lambda: self.import_files(file_dict)
         )
         self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
         self.workspace_popup_menu.grab_release()
@@ -3999,41 +1265,15 @@ class MainWindow:
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
-        self.import_files(files)
+        if not files:
+            return
+        file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in files}
+        self.import_files(file_dict)
         
-    def import_files(self, files):
-        patches = [file for file in files if "patch" in os.path.splitext(file)[1]]
-        wems = [file for file in files if os.path.splitext(file)[1] == ".wem"]
-        wavs = [file for file in files if os.path.splitext(file)[1] == ".wav"]
-        
-        # check other file extensions and call vgmstream to convert to wav, then add to wavs list
-        filetypes = list(SUPPORTED_AUDIO_TYPES)
-        filetypes.remove(".wav")
-        filetypes.remove(".wem")
-        others = [file for file in files if os.path.splitext(file)[1] in filetypes]
-        temp_files = []
-        for file in others:
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL)
-            if process.returncode != 0:
-                logger.error(f"Encountered error when importing {os.path.basename(file)}")
-            else:
-                wavs.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
-                temp_files.append(f"{os.path.join(CACHE, os.path.splitext(os.path.basename(file))[0])}.wav")
-        
-        for patch in patches:
-            self.file_handler.load_patch(patch_file=patch)
-        if len(wems) > 0:
-            self.load_wems(wems=wems)
-        if len(wavs) > 0:
-            self.load_wavs(wavs=wavs)
-        if len(wems) == 0 and len(wavs) == 0:
-            self.check_modified()
+    def import_files(self, file_dict):
+        self.mod_handler.get_active_mod().import_files(file_dict)
+        self.check_modified()
         self.show_info_window()
-        for file in temp_files:
-            try:
-                os.remove(file)
-            except:
-                pass
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
@@ -4055,20 +1295,20 @@ class MainWindow:
         self.observer.start()
 
     def init_archive_search_bar(self):
-        if self.lookup_store == None:
+        if self.name_lookup == None:
             logger.critical("Audio archive database connection is None after \
                     bypassing all check.", stack_info=True)
             return
-        archives = self.lookup_store.query_helldiver_audio_archive()
-        entries: dict[str, str] = {
-                archive.audio_archive_id: archive.audio_archive_name 
-                for archive in archives}
+        soundbanks = self.name_lookup.query_soundbanks()
+        entries: dict[str, LookupResult] = {
+                bank.id: bank
+                for bank in soundbanks}
         self.archive_search = ArchiveSearch("{1} || {0}", 
                                             entries=entries,
                                             on_select_cb=self.on_archive_search_bar_return,
                                             master=self.top_bar,
                                             width=64)
-        categories = self.lookup_store.query_helldiver_audio_archive_category()
+        categories = ["English", "Spanish, Castilian", "Spanish, Latin America", "French", "Italian", "German", "Japanese", "Portuguese"]
         categories = [""] + categories
         self.category_search = ttk.Combobox(self.top_bar,
                                             state="readonly",
@@ -4090,16 +1330,16 @@ class MainWindow:
         self.load_archive(initialdir="", archive_file=archive_file)
 
     def on_category_search_bar_select(self, event):
-        if self.lookup_store == None:
+        if self.name_lookup == None:
             logger.critical("Audio archive database connection is None after \
                     bypassing all check.", stack_info=True)
             return
         category: str = self.category_search.get()
-        archives = self.lookup_store.query_helldiver_audio_archive(category)
-        entries: dict[str, str] = {
-                archive.audio_archive_id: archive.audio_archive_name 
-                for archive in archives
-        }
+        self.archive_search.language = category
+        soundbanks = self.name_lookup.query_soundbanks(language=category)
+        entries: dict[str, LookupResult] = {
+                bank.id: bank
+                for bank in soundbanks}
         self.archive_search.set_entries(entries)
         self.archive_search.focus_set()
         self.category_search.selection_clear()
@@ -4110,84 +1350,17 @@ class MainWindow:
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
         filename = askopenfilename(title="Select audio file to import", filetypes=available_filetypes)
-        temp_file = False
         if not filename or not os.path.exists(filename):
             return
-        if os.path.splitext(filename)[1] in [".mp3", ".ogg", ".m4a"]:
-            process = subprocess.run([VGMSTREAM, "-o", f"{os.path.join(CACHE, os.path.splitext(os.path.basename(filename))[0])}.wav", filename], stdout=subprocess.DEVNULL)
-            if process.returncode != 0:
-                logger.error(f"Encountered error when importing {os.path.basename(filename)}")
-            else:
-                filename = f"{os.path.join(CACHE, os.path.splitext(os.path.basename(filename))[0])}.wav"
-                temp_file = True
-        if os.path.splitext(filename)[1] == ".wav":
-            source_list = self.file_handler.create_external_sources_list([filename])
+        file_dict = {filename: targets}
+        self.import_files(file_dict)
         
-            try:
-                if SYSTEM in ["Windows", "Darwin"]:
-                    subprocess.run([
-                        WWISE_CLI,
-                        "migrate",
-                        DEFAULT_WWISE_PROJECT,
-                        "--quiet",
-                    ]).check_returncode()
-                else:
-                    showerror(title="Operation Failed",
-                        message="The current operating system does not support this feature yet")
-            except Exception as e:
-                logger.error(e)
-                showerror(title="Error", message="Error occurred during project migration. Please check log.txt.")
-            
-            convert_dest = os.path.join(CACHE, SYSTEM)
-            try:
-                if SYSTEM == "Darwin":
-                    subprocess.run([
-                        WWISE_CLI,
-                        "convert-external-source",
-                        DEFAULT_WWISE_PROJECT,
-                        "--platform", "Windows",
-                        "--source-file",
-                        source_list,
-                        "--output",
-                        CACHE,
-                    ]).check_returncode()
-                elif SYSTEM == "Windows":
-                    subprocess.run([
-                        WWISE_CLI,
-                        "convert-external-source",
-                        DEFAULT_WWISE_PROJECT,
-                        "--platform", "Windows",
-                        "--source-file",
-                        source_list,
-                        "--output",
-                        CACHE,
-                    ]).check_returncode()
-                else:
-                    showerror(title="Operation Failed",
-                        message="The current operating system does not support this feature yet")
-            except Exception as e:
-                logger.error(e)
-                showerror(title="Error", message="Error occurred during conversion. Please check log.txt.")
-        
-            if temp_file:
-                try:
-                    os.remove(filename)
-                except:
-                    pass
-                    
-            temp_file = True
-        
-            filename = os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filename))[0]}.wem")
-        
-        old_name = filename
-        for target in targets:
-            new_name = f"{os.path.join(CACHE, str(target))}{os.path.splitext(filename)[1]}"
-            shutil.copyfile(filename, new_name)
-            self.import_files([new_name])
-            try:
-                os.remove(new_name)
-            except:
-                pass
+    def remove_game_archive(self, archive_name):
+        self.mod_handler.get_active_mod().remove_game_archive(archive_name)
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
         
 
     def treeview_on_right_click(self, event):
@@ -4209,11 +1382,16 @@ class MainWindow:
                 label=("Copy File ID" if is_single else "Copy File IDs"),
                 command=self.copy_id
             )
+            if is_single and self.treeview.item(self.treeview.selection()[0], option="values")[0] == "Archive File":
+                self.right_click_menu.add_command(
+                    label="Remove Archive",
+                    command=lambda: self.remove_game_archive(self.treeview.item(self.treeview.selection()[0], option="tags")[0])
+                )
 
             if all_audio:
                 self.right_click_menu.add_command(
                     label="Import audio",
-                    command=lambda: self.targeted_import(targets=[self.treeview.item(select, option="tags")[0] for select in selects])
+                    command=lambda: self.targeted_import(targets=[int(self.treeview.item(select, option="tags")[0]) for select in selects])
                 )
 
                 tags = self.treeview.item(selects[-1], option="tags")
@@ -4271,7 +1449,7 @@ class MainWindow:
             values = self.workspace.item(select, option="values")
             tags = self.workspace.item(select, option="tags")
             assert(len(values) == 1 and len(tags) == 1)
-            if tags[0] == "file" and os.path.splitext(values[0])[1] == ".wem" and os.path.exists(values[0]):
+            if tags[0] == "file" and os.path.splitext(values[0])[1] in SUPPORTED_AUDIO_TYPES and os.path.exists(values[0]):
                 audio_data = None
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
@@ -4309,21 +1487,30 @@ class MainWindow:
         if len(self.treeview.selection()) != 1:
             return
         selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
+        if selection_type == "Archive File":
+            return
         selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[0])
+        item = self.treeview.selection()[0]
+        while self.treeview.parent(self.treeview.parent(item)):
+            item = self.treeview.parent(item)
+        bank_id = int(self.treeview.item(item, option="tags")[0])
         for child in self.entry_info_panel.winfo_children():
             child.forget()
         if selection_type == "String":
-            self.string_info_panel.set_string_entry(self.file_handler.get_string_by_id(selection_id))
+            self.string_info_panel.set_string_entry(self.mod_handler.get_active_mod().get_string_entry(bank_id, selection_id))
             self.string_info_panel.frame.pack()
         elif selection_type == "Audio Source":
-            self.audio_info_panel.set_audio(self.file_handler.get_audio_by_id(selection_id))
+            self.audio_info_panel.set_audio(self.mod_handler.get_active_mod().get_audio_source(selection_id))
             self.audio_info_panel.frame.pack()
         elif selection_type == "Event":
-            self.event_info_panel.set_track_info(self.file_handler.get_event_by_id(selection_id))
+            self.event_info_panel.set_track_info(self.mod_handler.get_active_mod().get_hierarchy_entry(bank_id, selection_id))
             self.event_info_panel.frame.pack()
         elif selection_type == "Music Segment":
-            self.segment_info_panel.set_segment_info(self.file_handler.get_music_segment_by_id(selection_id))
+            self.segment_info_panel.set_segment_info(self.mod_handler.get_active_mod().get_hierarchy_entry(bank_id, selection_id))
             self.segment_info_panel.frame.pack()
+        elif selection_type == "Music Track":
+            self.track_info_panel.set_track(self.mod_handler.get_active_mod().get_hierarchy_entry(bank_id, selection_id))
+            self.track_info_panel.frame.pack()
         elif selection_type == "Sound Bank":
             pass
         elif selection_type == "Text Bank":
@@ -4336,25 +1523,51 @@ class MainWindow:
 
     def dump_as_wem(self):
         if len(self.treeview.selection()) == 1:
-            self.file_handler.dump_as_wem(self.right_click_id)
+            output_file = filedialog.asksaveasfile(mode='wb', title="Save As", initialfile=f"{self.right_click_id}.wem", defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
+            if not output_file:
+                return
+            self.mod_handler.get_active_mod().dump_as_wem(self.right_click_id, output_file)
         else:
-            self.file_handler.dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()])
+            output_folder = filedialog.askdirectory(title="Save As")
+            if not output_folder:
+                return
+            self.mod_handler.get_active_mod().dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()], output_folder)
 
     def dump_as_wav(self, muted: bool = False, with_seq: int = False):
         if len(self.treeview.selection()) == 1:
-            self.file_handler.dump_as_wav(self.right_click_id, muted=muted)
+            output_file = filedialog.asksaveasfilename(
+                title="Save As", 
+                initialfile=f"{self.right_click_id}.wav", 
+                defaultextension=".wav", 
+                filetypes=[("Wav Audio", "*.wav")]
+            )
+            if not output_file:
+                return
+            self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
             return
-        self.file_handler.dump_multiple_as_wav(
-            [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
-            muted=muted,
-            with_seq=with_seq
-        )
+        else:
+            output_folder = filedialog.askdirectory(title="Save As")
+            if not output_folder:
+                return
+            self.mod_handler.get_active_mod().dump_multiple_as_wav(
+                [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
+                muted=muted,
+                with_seq=with_seq,
+                output_folder=output_folder
+            )
 
-    def create_treeview_entry(self, entry, parentItem=""):
+    def create_treeview_entry(self, entry, parent_item=""): #if HircEntry, add id of parent bank to the tags
         if entry is None: return
-        tree_entry = self.treeview.insert(parentItem, END, tag=entry.get_id())
+        if isinstance(entry, GameArchive):
+            tree_entry = self.treeview.insert(parent_item, END, tag=entry.name)
+        else:
+            tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
         if isinstance(entry, WwiseBank):
-            name = entry.dep.data.split('/')[-1]
+            bank = self.name_lookup.lookup_soundbank(str(entry.get_id()))
+            if bank.language != "none":
+                name = f"{bank.friendlyname} ({bank.language})"
+            else:
+                name = bank.friendlyname
             entry_type = "Sound Bank"
         elif isinstance(entry, TextBank):
             name = f"{entry.get_id()}.text"
@@ -4377,6 +1590,10 @@ class MainWindow:
         elif isinstance(entry, RandomSequenceContainer):
             entry_type = "Random Sequence"
             name = f"Sequence {entry.get_id()}"
+        elif isinstance(entry, GameArchive):
+            name = entry.name
+            entry_type = "Archive File"
+            self.treeview.item(tree_entry, open=True)
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -4390,63 +1607,80 @@ class MainWindow:
     def create_hierarchy_view(self):
         self.clear_search()
         self.treeview.delete(*self.treeview.get_children())
-        bank_dict = self.file_handler.get_wwise_banks()
+        bank_dict = self.mod_handler.get_active_mod().get_wwise_banks()
+        game_archives = self.mod_handler.get_active_mod().get_game_archives()
         sequence_sources = set()
-        for bank in bank_dict.values():
-            bank_entry = self.create_treeview_entry(bank)
-            for hierarchy_entry in bank.hierarchy.entries.values():
-                if isinstance(hierarchy_entry, MusicSegment):
-                    segment_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
-                    for track_id in hierarchy_entry.tracks:
-                        track = bank.hierarchy.entries[track_id]
-                        track_entry = self.create_treeview_entry(track, segment_entry)
-                        for source in track.sources:
-                            if source.plugin_id == VORBIS:
-                                self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), track_entry)
-                        for info in track.track_info:
-                            if info.event_id != 0:
-                                self.create_treeview_entry(info, track_entry)
-                elif isinstance(hierarchy_entry, RandomSequenceContainer):
-                    container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
-                    for s_id in hierarchy_entry.contents:
-                        sound = bank.hierarchy.entries[s_id]
-                        if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
-                            sequence_sources.add(sound)
-                            self.create_treeview_entry(self.file_handler.get_audio_by_id(sound.sources[0].source_id), container_entry)
-            for hierarchy_entry in bank.hierarchy.entries.values():
-                if isinstance(hierarchy_entry, Sound) and hierarchy_entry not in sequence_sources:
-                    if hierarchy_entry.sources[0].plugin_id == VORBIS:
-                        self.create_treeview_entry(self.file_handler.get_audio_by_id(hierarchy_entry.sources[0].source_id), bank_entry)
-        for entry in self.file_handler.file_reader.text_banks.values():
-            if entry.language == language:
-                e = self.create_treeview_entry(entry)
-                for string_id in entry.string_ids:
-                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+        for archive in game_archives.values():
+            archive_entry = self.create_treeview_entry(archive)
+            for bank in archive.wwise_banks.values():
+                bank_entry = self.create_treeview_entry(bank, archive_entry)
+                for hierarchy_entry in bank.hierarchy.entries.values():
+                    if isinstance(hierarchy_entry, MusicSegment):
+                        segment_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
+                        for track_id in hierarchy_entry.tracks:
+                            track = bank.hierarchy.entries[track_id]
+                            track_entry = self.create_treeview_entry(track, segment_entry)
+                            for source in track.sources:
+                                if source.plugin_id == VORBIS:
+                                    try:
+                                        self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
+                                    except:
+                                        pass
+                            for info in track.track_info:
+                                if info.event_id != 0:
+                                    self.create_treeview_entry(info, track_entry)
+                    elif isinstance(hierarchy_entry, RandomSequenceContainer):
+                        container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
+                        for s_id in hierarchy_entry.contents:
+                            sound = bank.hierarchy.entries[s_id]
+                            if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
+                                sequence_sources.add(sound)
+                                try:
+                                    self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(sound.sources[0].source_id), container_entry)
+                                except:
+                                    pass
+                for hierarchy_entry in bank.hierarchy.entries.values():
+                    if isinstance(hierarchy_entry, Sound) and hierarchy_entry not in sequence_sources:
+                        if hierarchy_entry.sources[0].plugin_id == VORBIS:
+                            try:
+                                self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(hierarchy_entry.sources[0].source_id), bank_entry)
+                            except:
+                                pass
+            for text_bank in archive.text_banks.values():
+                if text_bank.language == language:
+                    bank_entry = self.create_treeview_entry(text_bank, archive_entry)
+                    for string_entry in text_bank.entries.values():
+                        self.create_treeview_entry(string_entry, bank_entry)
         self.check_modified()
                 
     def create_source_view(self):
         self.clear_search()
         existing_sources = set()
         self.treeview.delete(*self.treeview.get_children())
-        bank_dict = self.file_handler.get_wwise_banks()
-        for bank in bank_dict.values():
-            existing_sources.clear()
-            bank_entry = self.create_treeview_entry(bank)
-            for hierarchy_entry in bank.hierarchy.entries.values():
-                for source in hierarchy_entry.sources:
-                    if source.plugin_id == VORBIS and source.source_id not in existing_sources:
-                        existing_sources.add(source.source_id)
-                        self.create_treeview_entry(self.file_handler.get_audio_by_id(source.source_id), bank_entry)
-        for entry in self.file_handler.file_reader.text_banks.values():
-            if entry.language == language:
-                e = self.create_treeview_entry(entry)
-                for string_id in entry.string_ids:
-                    self.create_treeview_entry(self.file_handler.file_reader.string_entries[language][string_id], e)
+        game_archives = self.mod_handler.get_active_mod().get_game_archives()
+        for archive in game_archives.values():
+            archive_entry = self.create_treeview_entry(archive)
+            for bank in archive.wwise_banks.values():
+                existing_sources.clear()
+                bank_entry = self.create_treeview_entry(bank, archive_entry)
+                for hierarchy_entry in bank.hierarchy.entries.values():
+                    for source in hierarchy_entry.sources:
+                        if source.plugin_id == VORBIS and source.source_id not in existing_sources:
+                            existing_sources.add(source.source_id)
+                            try:
+                                self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), bank_entry)
+                            except:
+                                pass
+            for text_bank in archive.text_banks.values():
+                if text_bank.language == language:
+                    bank_entry = self.create_treeview_entry(text_bank, archive_entry)
+                    for string_entry in text_bank.entries.values():
+                        self.create_treeview_entry(string_entry, bank_entry)
         self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":
-            string_entry = self.file_handler.get_string_by_id(int(self.treeview.item(item, option="tags")[0]))
+            string_entry = self.mod_handler.get_active_mod().get_string_entry(int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
             s = self.treeview.item(item, option="text")
@@ -4491,22 +1725,31 @@ class MainWindow:
 
     def update_language_menu(self):
         self.options_menu.delete(1, "end") #change to delete only the language select menu
-        if len(self.file_handler.get_strings()) > 0:
+        if len(self.mod_handler.get_active_mod().text_banks) > 0:
             self.language_menu.delete(0, "end")
             first = ""
             self.options_menu.add_cascade(label="Game text language", menu=self.language_menu)
             for name, lang_id in LANGUAGE_MAPPING.items():
                 if first == "": first = name
-                if lang_id in self.file_handler.get_strings():
-                    self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
+                for text_bank in self.mod_handler.get_active_mod().text_banks.values():
+                    if lang_id == text_bank.language:
+                        self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
+                        break
             self.selected_language.set(first)
 
-    def load_archive(self, initialdir: str | None = '', archive_file: str | None = None):
+    def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
+        if not archive_file:
+            archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
+        if not archive_file:
+            return
+        if ".patch" in archive_file:
+            showwarning(title="Invalid archive", message="Cannot open patch files. Use Import Patch to apply a patch file's changes to the loaded archive(s)")
+            return
         self.sound_handler.kill_sound()
-        if self.file_handler.load_archive_file(initialdir=initialdir, archive_file=archive_file):
+        if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
             self.clear_search()
             self.update_language_menu()
-            self.update_recent_files(filepath=self.file_handler.file_reader.path)
+            self.update_recent_files(filepath=archive_file)
             if self.selected_view.get() == "SourceView":
                 self.create_source_view()
             else:
@@ -4517,9 +1760,11 @@ class MainWindow:
             for child in self.treeview.get_children():
                 self.treeview.delete(child)
 
-    def save_archive(self):
-        self.sound_handler.kill_sound()
-        self.file_handler.save_archive_file()
+    def save_mod(self):
+        output_folder = filedialog.askdirectory(title="Select location to save combined mod")
+        if output_folder and os.path.exists(output_folder):
+            self.sound_handler.kill_sound()
+            self.mod_handler.get_active_mod().save(output_folder)
 
     def clear_treeview_background(self, item):
         bg_color, fg_color = self.get_colors()
@@ -4539,122 +1784,80 @@ class MainWindow:
             self.clear_treeview_background(child)
         bg: Any
         fg: Any
-        
-        for segment in self.file_handler.file_reader.music_segments.values():
-            bg, fg = self.get_colors(modified=segment.modified)
-            self.treeview.tag_configure(segment.get_id(),
+        for bank in self.mod_handler.get_active_mod().wwise_banks.values():
+            bg, fg = self.get_colors(modified=bank.modified)
+            self.treeview.tag_configure(bank.get_id(),
                                         background=bg,
                                         foreground=fg)
-            if not segment.modified:
-                continue
-
-            items = self.treeview.tag_has(segment.get_id())
-            for item in items:
-                parent = self.treeview.parent(item)
-                while parent != "":
-                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
-                                                background=bg,
-                                                foreground=fg)
-                    parent = self.treeview.parent(parent)
-        
-        for audio in self.file_handler.get_audio().values():
-            is_modified = audio.modified or audio.get_track_info() is not None \
-                    and audio.get_track_info().modified
+            for entry in bank.hierarchy.get_entries():
+                is_modified = entry.modified or entry.has_modified_children()
+                bg, fg = self.get_colors(modified=is_modified)
+                self.treeview.tag_configure(entry.get_id(),
+                                        background=bg,
+                                        foreground=fg)
+        for audio in self.mod_handler.get_active_mod().get_audio_sources().values():
+            is_modified = audio.modified
             bg, fg = self.get_colors(modified=is_modified)
             self.treeview.tag_configure(audio.get_id(),
                                         background=bg,
                                         foreground=fg)
-            if not is_modified:
-                continue
-
-            items = self.treeview.tag_has(audio.get_id())
-            for item in items:
-                parent = self.treeview.parent(item)
-                while parent != "":
-                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
-                                                background=bg, 
-                                                foreground=fg)
-                    parent = self.treeview.parent(parent)
-
-        for event in self.file_handler.file_reader.music_track_events.values():
-            bg, fg = self.get_colors(modified=event.modified)
-            self.treeview.tag_configure(event.get_id(),
-                                        background=bg,
-                                        foreground=fg)
-            if not event.modified:
-                continue
-
-            items = self.treeview.tag_has(event.get_id())
-            for item in items:
-                parent = self.treeview.parent(item)
-                while parent != "":
-                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0], 
-                                                background=bg,
-                                                foreground=fg)
-                    parent = self.treeview.parent(parent)
                     
-        try:
-            for string in self.file_handler.get_strings()[language].values():
-                bg, fg = self.get_colors(modified=string.modified)
-                self.treeview.tag_configure(string.get_id(), 
+        for text_bank in self.mod_handler.get_active_mod().text_banks.values():
+            bg, fg = self.get_colors(modified=text_bank.modified)
+            self.treeview.tag_configure(text_bank.get_id(), 
                                             background=bg,
                                             foreground=fg)
-                if not string.modified:
-                    continue
-                item = self.treeview.tag_has(string.get_id())
-                parent = self.treeview.parent(item)
-                while parent != "":
-                    self.treeview.tag_configure(self.treeview.item(parent)['tags'][0],
-                                                background=bg,
-                                                foreground=fg)
-                    parent = self.treeview.parent(parent)
-        except KeyError:
-            pass
-
-    def load_wems(self, wems: list[str] | None = None):
-        self.sound_handler.kill_sound()
-        self.file_handler.load_wems(wems=wems)
-        self.check_modified()
-        self.show_info_window()
-        
-    def load_wavs(self, wavs: list[str] | None = None):
-        self.sound_handler.kill_sound()
-        self.file_handler.load_wavs(wavs=wavs)
-        self.check_modified()
-        self.show_info_window()
+            for entry in text_bank.entries.values():
+                bg, fg = self.get_colors(modified=entry.modified)
+                self.treeview.tag_configure(entry.get_id(),
+                                        background=bg,
+                                        foreground=fg)
         
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
-        self.file_handler.dump_all_as_wem()
+        output_folder = filedialog.askdirectory(title="Select folder to save files to")
+        if not output_folder:
+            return
+        self.mod_handler.get_active_mod().dump_all_as_wem(output_folder)
         
     def dump_all_as_wav(self):
         self.sound_handler.kill_sound()
-        self.file_handler.dump_all_as_wav()
+        output_folder = filedialog.askdirectory(title="Select folder to save files to")
+        if not output_folder:
+            return
+        self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
         
     def play_audio(self, file_id: int, callback=None):
-        audio = self.file_handler.get_audio_by_id(file_id)
+        audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
         self.sound_handler.play_audio(audio.get_short_id(), audio.get_data(), callback)
         
     def revert_audio(self, file_id):
-        self.file_handler.revert_audio(file_id)
+        self.mod_handler.get_active_mod().revert_audio(file_id)
         
     def revert_all(self):
         self.sound_handler.kill_sound()
-        self.file_handler.revert_all()
+        self.mod_handler.get_active_mod().revert_all()
         self.check_modified()
         self.show_info_window()
         
     def write_patch(self):
         self.sound_handler.kill_sound()
-        self.file_handler.write_patch()
+        output_folder = filedialog.askdirectory(title="Select folder to save files to")
+        if not output_folder:
+            return
+        self.mod_handler.get_active_mod().write_patch(output_folder)
         
-    def load_patch(self):
+    def import_patch(self):
         self.sound_handler.kill_sound()
-        if self.file_handler.load_patch():
+        archive_file = askopenfilename(title="Select patch file")
+        if not archive_file:
+            return
+        if self.mod_handler.get_active_mod().import_patch(archive_file):
             self.check_modified()
             self.show_info_window()
 
 if __name__ == "__main__":
+    random.seed()
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)
@@ -4664,42 +1867,12 @@ if __name__ == "__main__":
     try:
         if not os.path.exists(CACHE):
             os.mkdir(CACHE, mode=0o777)
+        if not os.path.exists(TMP):
+            os.mkdir(TMP, mode=0o777)
     except Exception as e:
         showerror("Error when initiating application", 
                     "Failed to create application caching space")
         exit(1)
-
-    SYSTEM = platform.system()
-    if SYSTEM == "Windows":
-        VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
-        FFMPEG = "ffmpeg.exe"
-        try:
-            WWISE_CLI = os.path.join(os.environ["WWISEROOT"],
-                             "Authoring\\x64\\Release\\bin\\WwiseConsole.exe")
-        except:
-            pass
-    elif SYSTEM == "Linux":
-        VGMSTREAM = "vgmstream-linux/vgmstream-cli"
-        FFMPEG = "ffmpeg"
-        WWISE_CLI = ""
-        showwarning(title="Unsupported", message="Wwise integration is not " \
-            "supported for Linux. WAV file import is disabled")
-    elif SYSTEM == "Darwin":
-        VGMSTREAM = "vgmstream-macos/vgmstream-cli"
-        FFMPEG = "ffmpeg"
-        try:
-            p = next(pathlib.Path("/Applications/Audiokinetic").glob("Wwise*"))
-            WWISE_CLI = os.path.join(p, "Wwise.app/Contents/Tools/WwiseConsole.sh")
-        except:
-            pass
-    
-    if os.path.exists(WWISE_CLI):
-        if "Wwise2024" in WWISE_CLI:
-            WWISE_VERSION = "2024"
-        elif "Wwise2023" in WWISE_CLI:
-            WWISE_VERSION = "2023"
-    else:
-        WWISE_VERSION = ""
         
     if not os.path.exists(VGMSTREAM):
         logger.error("Cannot find vgmstream distribution! " \
@@ -4726,32 +1899,43 @@ if __name__ == "__main__":
             showwarning(title="Wwise Error", message="Error creating Wwise project. Audio import restricted to .wem files only")
             WWISE_CLI = ""
 
-    lookup_store: db.LookupStore | None = None
+    lookup_store: db.FriendlyNameLookup | None = None
     
     if not os.path.exists(GAME_FILE_LOCATION):
         showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
             " Audio archive search is disabled.")
-    elif os.path.exists("hd_audio_db.db"):
-        sqlite_initializer = db.config_sqlite_conn("hd_audio_db.db")
+    elif os.path.exists("friendlynames.db"):
         try:
-            lookup_store = db.SQLiteLookupStore(sqlite_initializer, logger)
+            lookup_store = db.FriendlyNameLookup("friendlynames.db")
         except Exception as err:
             logger.error("Failed to connect to audio archive database", 
                          stack_info=True)
             lookup_store = None
     else:
-        logger.warning("Please ensure `hd_audio_db.db` is in the same folder as " \
-                "the executable to enable built-in audio archive search.")
-        logger.warning("Built-in audio archive search is disabled. " \
-                "Please refer to the information in Google spreadsheet.")
-        showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
+        file, _ = urllib.request.urlretrieve("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
+        with open(file) as f:
+            data = json.loads(f.read())
+            download_url = data["assets"][0]["browser_download_url"]
+        urllib.request.urlretrieve(download_url, "friendlynames.db")
+        if not os.path.exists("friendlynames.db"):
+            logger.error("Failed to fetch audio database. Built-in audio archive search is disabled.")
+            showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
+        else:
+            try:
+                lookup_store = db.FriendlyNameLookup("friendlynames.db")
+            except Exception as err:
+                logger.error("Failed to connect to audio archive database", 
+                             stack_info=True)
+                lookup_store = None
         
     language = language_lookup("English (US)")
-    sound_handler = SoundHandler()
-    file_handler = FileHandler()
-    window = MainWindow(app_state, lookup_store, file_handler, sound_handler)
+    window = MainWindow(app_state, lookup_store)
     
+    SoundHandler.get_instance().kill_sound()
     app_state.save_config()
 
     if os.path.exists(CACHE):
         shutil.rmtree(CACHE)
+        
+    if os.path.exists(TMP):
+        shutil.rmtree(TMP)

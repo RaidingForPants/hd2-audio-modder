@@ -1,7 +1,21 @@
-python3 -m venv .venv
+Setup() {
+    python3 -m venv .venv
+    
+    source .venv/activate.ps1
 
-source ./.venv/activate
+    wget "https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-linux-cli.tar.gz"
 
-pip install -r requirements.txt
+    tar -zxvf vgmstream-linux-cli.tar.gz
 
-deactivate
+    rm vgmstream-linux-cli.tar.gz
+    
+    pip install -r requirements.txt
+    
+    deactivate
+}
+
+Build() {
+    source .venv/activate.ps1
+
+    python3 setup.py build
+}
