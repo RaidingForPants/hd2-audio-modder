@@ -119,7 +119,7 @@ class MemoryStream:
     def int64_read(self):
         return self.read_format('q', 8)
 
-    def uint64_read(self):
+    def uint64_read(self) -> int:
         return self.read_format('Q', 8)
         
 def pad_to_16_byte_align(data):
