@@ -8,5 +8,5 @@ __pycache__/
 **/*.pickle
 **/log.txt
 **/.venv
-AudioConversionTemplate/
+AudioConversionProject/
 .vscode
