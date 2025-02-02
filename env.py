@@ -17,7 +17,8 @@ CACHE = posixpath.join(DIR, ".cache")
 TMP = posixpath.join(DIR, ".tmp")
 
 DEFAULT_WWISE_PROJECT = posixpath.join(
-    DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj")
+    DIR, "AudioConversionProject/AudioConversionProject.wproj"
+)
 
 SYSTEM = platform.system()
 
