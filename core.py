@@ -1,24 +1,41 @@
+import asyncio
+import aiofiles
+import copy
+import functools
 import numpy
+import locale
 import os
+import posixpath as xpath
 import pyaudio
+import random
+import threading
 import subprocess
 import struct
 import wave
-import copy
-import locale
-import random
-import xml.etree.ElementTree as etree
 
-from typing import Callable, Literal, Union
+from collections import deque
+from concurrent import futures
+from typing import Callable, Literal, Union, Coroutine
+
+import mediautil
 
 from const import *
 from env import *
+from fileutil import to_posix
 from xlocale import *
 from util import *
 from wwise_hierarchy import *
 
 from log import logger
-    
+
+
+MAGIC = 0xF0000011
+UNK4DATA = bytes.fromhex("CE09F5F4000000000C729F9E8872B8BD00A06B02000000000079510000000000000000000000000000000000000000000000000000000000")
+STREAM_DATA_MARK = bytes.fromhex("D82F767800000000")
+BANK_DATA_MARK = bytes.fromhex("D82F7678")
+
+MAX_NUM_THREAD = 8
+
 
 class AudioSource:
 
@@ -449,6 +466,7 @@ class TextBank:
                 self.modified = False
 
 class GameArchive:
+
     
     def __init__(self):
         self.magic: int = -1
@@ -461,7 +479,7 @@ class GameArchive:
         self.wwise_streams: dict[int, WwiseStream] = {}
         self.wwise_banks: dict[int, WwiseBank] = {}
         self.audio_sources: dict[int, AudioSource] = {}
-        self.text_banks = {}
+        self.text_banks: dict[int, TextBank] = {}
     
     @classmethod
     def from_file(cls, path: str) -> 'GameArchive': 
@@ -536,7 +554,6 @@ class GameArchive:
             entry_index += 1
             stream_file_offset += len(s_data)
             toc_data_offset += 16
-            
         
         for bank in self.wwise_banks.values():
             bank_data = bank.generate(self.audio_sources)
@@ -548,9 +565,13 @@ class GameArchive:
             toc_entry.toc_data_size = len(bank_data) + 16
             toc_entry.entry_index = entry_index
             toc_entries.append(toc_entry)
-            bank_data = b"".join([bytes.fromhex("D82F7678"), len(bank_data).to_bytes(4, byteorder="little"), bank.get_id().to_bytes(8, byteorder="little"), pad_to_16_byte_align(bank_data)])
+            bank_data = b"".join([
+                bytes.fromhex("D82F7678"),
+                len(bank_data).to_bytes(4, byteorder="little"),
+                bank.get_id().to_bytes(8, byteorder="little"),
+                pad_to_16_byte_align(bank_data)
+            ])
             toc_data.append(bank_data)
-            
             toc_data_offset += len(bank_data)
             entry_index += 1
             
@@ -603,6 +624,180 @@ class GameArchive:
         if len(stream_file.data) > 0:
             with open(os.path.join(path, self.name+".stream"), 'w+b') as f:
                 f.write(stream_file.data)
+
+    @staticmethod
+    def stream_task(stream: WwiseStream):
+        s_data = pad_to_16_byte_align(stream.get_data())
+        t_data = STREAM_DATA_MARK + struct.pack("<Q", len(stream.get_data()))
+        toc_entry = TocHeader()
+        toc_entry.file_id = stream.get_id()
+        toc_entry.type_id = WWISE_STREAM
+        toc_entry.toc_data_size = 0x0C
+        toc_entry.stream_size = len(stream.get_data())
+        return toc_entry, s_data, t_data
+
+    def sound_bank_task(self, bank: WwiseBank):
+        bank_data = bank.generate(self.audio_sources)
+        toc_entry = TocHeader()
+        toc_entry.file_id = bank.get_id()
+        toc_entry.type_id = WWISE_BANK
+        toc_entry.toc_data_size = len(bank_data) + 16
+        bank_data = b"".join([
+            BANK_DATA_MARK,
+            len(bank_data).to_bytes(4, byteorder="little"),
+            bank.get_id().to_bytes(8, byteorder="little"),
+            pad_to_16_byte_align(bank_data)
+        ])
+        return toc_entry, None, bank_data
+
+    @staticmethod
+    def text_bank_task(bank: TextBank):
+        text_data = bank.generate()
+        toc_entry = TocHeader()
+        toc_entry.file_id = bank.get_id()
+        toc_entry.type_id = TEXT_BANK
+        toc_entry.toc_data_size = len(text_data)
+        text_data = pad_to_16_byte_align(text_data)
+        return toc_entry, None, text_data
+
+    @staticmethod
+    def wwise_dep_task(bank: WwiseBank):
+        if bank.dep == None:
+            raise AssertionError(
+                f"WwiseBank {bank.file_id} does not has a WwsieDep."
+            )
+        dep_data = bank.dep.get_data()
+        toc_entry = TocHeader()
+        toc_entry.file_id = bank.get_id()
+        toc_entry.type_id = WWISE_DEP
+        toc_entry.toc_data_size = len(dep_data)
+        dep_data = pad_to_16_byte_align(dep_data)
+        return toc_entry, None, dep_data
+
+    async def write_toc_file(self, path: str, toc_file: MemoryStream):
+        async with aiofiles.open(xpath.join(path, self.name), 'w+b') as f:
+            await f.write(toc_file.data)
+
+
+    async def write_stream_file(self, path: str, stream_file: MemoryStream):
+        async with aiofiles.open(xpath.join(path, self.name + ".stream"), 'w+b') as f:
+            await f.write(stream_file.data)
+
+    async def to_file_async(self, path: str):
+        toc_file = MemoryStream()
+        stream_file = MemoryStream()
+        self.num_files = len(self.wwise_streams) + \
+                         2 * len(self.wwise_banks) + \
+                         len(self.text_banks)
+        self.num_types = (1 if self.wwise_streams else 0) + \
+                         (1 if self.text_banks else 0) + \
+                         (2 if self.wwise_banks else 0)
+        
+        # write header
+        toc_file.write(struct.pack(
+            "<IIII56s", 
+            self.magic, # u32
+            self.num_types, # u32
+            self.num_files, # u32
+            self.unknown, # u32
+            self.unk4Data # 56 bytes
+        ))
+        
+        self.write_type_header(toc_file, WWISE_STREAM, len(self.wwise_streams))
+        self.write_type_header(toc_file, WWISE_BANK, len(self.wwise_banks))
+        self.write_type_header(toc_file, WWISE_DEP, len(self.wwise_banks))
+        self.write_type_header(toc_file, TEXT_BANK, len(self.text_banks))
+        
+        toc_data_offset = toc_file.tell() + 80 * self.num_files + 8
+        stream_file_offset = 0
+        
+        # generate data and toc entries
+        toc_entries: list[TocHeader] = []
+        toc_data: list[bytes | bytearray] = []
+        stream_data: list[bytes | bytearray] = []
+        entry_index = 0
+
+        with futures.ThreadPoolExecutor(max_workers = MAX_NUM_THREAD) as p:
+            tasks: deque[futures.Future[
+                    tuple[
+                        TocHeader, 
+                        bytes | bytearray | None, # s_data
+                        bytes | bytearray # t_data
+                    ]
+                ]
+            ] = deque()
+            for stream in self.wwise_streams.values():
+                binding = functools.partial(GameArchive.stream_task, stream)
+                tasks.append(p.submit(binding))
+            for bank in self.wwise_banks.values():
+                binding = functools.partial(self.sound_bank_task, bank)
+                tasks.append(p.submit(binding))
+            for bank in self.text_banks.values():
+                binding = functools.partial(GameArchive.text_bank_task, bank)
+                tasks.append(p.submit(binding))
+            for bank in self.wwise_banks.values():
+                binding = functools.partial(GameArchive.wwise_dep_task, bank)
+                tasks.append(p.submit(binding))
+
+            while len(tasks) > 0:
+                task = tasks.popleft()
+                err = task.exception()
+                if err != None:
+                    raise err
+                toc_entry, s_data, t_data = task.result()
+                if toc_entry.type_id == WWISE_STREAM:
+                    toc_entry.toc_data_offset = toc_data_offset
+                    toc_entry.stream_file_offset = stream_file_offset
+                    toc_entry.entry_index = entry_index
+                    if s_data == None:
+                        raise AssertionError(
+                            "Wwise stream {toc_entry.file_id} does not have "
+                            "stream data."
+                        )
+                    stream_data.append(s_data)
+                    toc_data.append(t_data)
+                    toc_entries.append(toc_entry)
+                    entry_index += 1
+                    stream_file_offset += len(s_data)
+                    toc_data_offset += 16
+                elif toc_entry.type_id == WWISE_BANK:
+                    toc_entry.toc_data_offset = toc_data_offset
+                    toc_entry.stream_file_offset = stream_file_offset
+                    toc_entry.entry_index = entry_index
+                    toc_entries.append(toc_entry)
+                    toc_data.append(t_data)
+                    toc_data_offset += len(t_data)
+                    entry_index += 1
+                elif toc_entry.type_id == TEXT_BANK:
+                    toc_entry.toc_data_offset = toc_data_offset
+                    toc_entry.stream_file_offset = stream_file_offset
+                    toc_entry.entry_index = entry_index
+                    toc_entries.append(toc_entry)
+                    toc_data.append(t_data)
+                    toc_data_offset += len(t_data)
+                    entry_index += 1
+                elif toc_entry.type_id == WWISE_DEP:
+                    toc_entry.toc_data_offset = toc_data_offset
+                    toc_entry.stream_file_offset = stream_file_offset
+                    toc_entry.entry_index = entry_index
+                    toc_entries.append(toc_entry)
+                    toc_data.append(t_data)
+                    toc_data_offset += len(t_data)
+                    entry_index += 1
+
+
+        toc_file.write(b"".join([entry.get_data() for entry in toc_entries]))
+        toc_file.advance(8)
+        toc_file.write(b"".join(toc_data))
+        stream_file.write(b"".join(stream_data))
+
+        io_tasks = [self.write_toc_file(path, toc_file)]
+
+        if len(stream_file.data) > 0:
+            io_tasks.append(self.write_stream_file(path, stream_file))
+
+        await asyncio.gather(*io_tasks)
+            
 
     def load(self, toc_file: MemoryStream, stream_file: MemoryStream):
         self.wwise_streams.clear()
@@ -1429,7 +1624,7 @@ class Mod:
         
         return True
 
-    def write_patch(self, output_folder: str = ""):
+    def write_patch(self, output_folder: str = "", overwrite: bool = False):
         """
         @exception
         - OSError
@@ -1437,8 +1632,22 @@ class Mod:
         """
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise OSError(f"Invalid output folder '{output_folder}'")
+
         patch_game_archive = GameArchive()
-        patch_game_archive.name = "9ba626afa44a3aa3.patch_0"
+
+        output_folder = to_posix(output_folder)
+
+        if overwrite:
+            patch_game_archive.name = "9ba626afa44a3aa3.patch_0"
+        else:
+            counter = 0
+            patch_game_archive.name = "9ba626afa44a3aa3.patch_"
+            idx = len(patch_game_archive.name)
+            patch_game_archive.name += str(counter)
+            while os.path.exists(xpath.join(output_folder, patch_game_archive.name)):
+                counter += 1
+                patch_game_archive.name = patch_game_archive.name[:idx] + str(counter)
+            
         patch_game_archive.magic = 0xF0000011
         patch_game_archive.num_types = 0
         patch_game_archive.num_files = 0
@@ -1462,6 +1671,108 @@ class Mod:
                 patch_game_archive.text_banks[key] = value
  
         patch_game_archive.to_file(output_folder)
+
+    def write_patch_transfer_stream(self, patch_game_archive: GameArchive):
+        """
+        @notes
+        - Worst case scneario - This become a sequential write if every single 
+        stream is modified.
+        """
+        with futures.ThreadPoolExecutor(max_workers = MAX_NUM_THREAD) as p:
+            def task(
+                input_streams: list[tuple[int, WwiseStream]],
+                output_streams: dict[int, WwiseStream],
+                lock: threading.Lock, 
+                start: int, 
+                end: int
+            ):
+                for i in range(start, end):
+                    key, value = input_streams[i]
+                    if value.modified:
+                        lock.acquire()
+                        output_streams[key] = value
+                        lock.release()
+
+            streams = self.get_wwise_streams().items()
+            lock = threading.Lock()
+            tasks_per_thread = len(streams) // MAX_NUM_THREAD
+            remainder = len(streams) % MAX_NUM_THREAD
+            end = 0
+
+            fs: list[futures.Future] = []
+            for i in range(MAX_NUM_THREAD):
+               tasks_assigned = tasks_per_thread + 1 if i < remainder \
+                                                     else tasks_per_thread
+               start = end
+               end = start + tasks_assigned
+               binding = functools.partial(
+                    task, list(streams), 
+                    patch_game_archive.wwise_streams,
+                    lock,
+                    start,
+                    end
+               )
+               fs.append(p.submit(binding))
+
+            finished = 0
+            while finished < len(fs):
+                for f in fs:
+                    if not f.done():
+                        continue
+                    finished += 1
+                    err = f.exception()
+                    if err != None:
+                        raise err
+
+    async def write_patch_async(
+        self, output_folder: str = "", overwrite: bool = False
+    ):
+        """
+        @exception
+        - OSError
+            - output folder path does not exists
+        """
+        if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
+            raise OSError(f"Invalid output folder '{output_folder}'")
+
+        patch_game_archive = GameArchive()
+
+        output_folder = to_posix(output_folder)
+
+        if overwrite:
+            patch_game_archive.name = "9ba626afa44a3aa3.patch_0"
+        else:
+            counter = 0
+            patch_game_archive.name = "9ba626afa44a3aa3.patch_"
+            idx = len(patch_game_archive.name)
+            patch_game_archive.name += str(counter)
+            while os.path.exists(xpath.join(output_folder, patch_game_archive.name)):
+                counter += 1
+                patch_game_archive.name = patch_game_archive.name[:idx] + str(counter)
+            
+        patch_game_archive.magic = MAGIC 
+        patch_game_archive.num_types = 0
+        patch_game_archive.num_files = 0
+        patch_game_archive.unknown = 0
+        patch_game_archive.unk4Data = UNK4DATA 
+        patch_game_archive.audio_sources = self.audio_sources
+        patch_game_archive.wwise_banks = {}
+        patch_game_archive.wwise_streams = {}
+        patch_game_archive.text_banks = {}
+
+        self.write_patch_transfer_stream(patch_game_archive)
+
+        # Size is small, skip threading
+        for key, value in self.get_wwise_banks().items():
+            if value.modified:
+                patch_game_archive.wwise_banks[key] = value
+                
+        # Size is small, skip threading
+        for key, value in self.get_text_banks().items():
+            if value.modified:
+                patch_game_archive.text_banks[key] = value
+ 
+        await patch_game_archive.to_file_async(output_folder)
 
     def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
         """
@@ -1518,22 +1829,6 @@ class Mod:
         if length_import_failed:
             raise RuntimeError("Failed to set track duration for some audio sources")
     
-    def create_external_sources_list(self, sources: list[str], conversion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
-        root = etree.Element("ExternalSourcesList", attrib={
-            "SchemaVersion": "1",
-            "Root": __file__
-        })
-        file = etree.ElementTree(root)
-        for source in sources:
-            etree.SubElement(root, "Source", attrib={
-                "Path": source,
-                "Conversion": conversion_setting,
-                "Destination": os.path.basename(source)
-            })
-        file.write(os.path.join(TMP, "external_sources.wsources"))
-        
-        return os.path.join(TMP, "external_sources.wsources")
-        
     def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
         """
         @exception
@@ -1549,13 +1844,13 @@ class Mod:
 
         if len(wavs) <= 0:
             return
-            
-        source_list = self.create_external_sources_list(list(wavs.keys()))
 
         if SYSTEM not in WWISE_SUPPORTED_SYSTEMS:
             raise NotImplementedError(
                 "The current operating system does not support this feature"
-            )
+                )
+        
+        source_list = mediautil.create_external_sources_list(wavs.keys())
         
         subprocess.run([
             WWISE_CLI,
@@ -1617,6 +1912,205 @@ class Mod:
                 os.remove(file)
             except OSError as err:
                 logger.error(err)
+
+    async def import_files_async(
+        self, 
+        file_dict: dict[str, list[int]],
+        wwise_project: str = DEFAULT_WWISE_PROJECT,
+        conversion_setting: str = DEFAULT_CONVERSION_SETTING
+    ):
+        """
+        @todo
+        - Can be threaded
+        """
+        patches: list[str] = []
+        wems: dict[str, list[int]] = {}
+        wavs: dict[str, list[int]] = {}
+        others: dict[str, list[int]] = {}
+        for file, targets in file_dict.items():
+            file = to_posix(file)
+            _, ext = os.path.splitext(file)
+            match ext:
+                case ".patch":
+                    patches.append(file)
+                case ".wav":
+                    wavs[file] = targets
+                case ".wem":
+                    wems[file] = targets
+                case _:
+                    if ext not in SUPPORTED_AUDIO_TYPES:
+                        logger.warning(f"File {file} is not a supported format.")
+                        continue
+                    others[file] = targets
+
+        results = await mediautil.to_wave_batch(others.keys())
+        for result in results:
+            if result[2] != 0:
+                logger.error(
+                    f"Failed to convert {result[0]} to wave format. Return code"
+                    f": {result[2]}"
+                )
+                continue
+            wavs[result[1]] = others[result[0]]
+
+        # TODO: async. / threaded
+        for patch in patches:
+            self.import_patch(patch_file=patch)
+
+        import_tasks: list[Coroutine] = []
+        if len(wems) > 0:
+            import_tasks.append(self.import_wems_async(wems))
+        if len(wavs) > 0 and SYSTEM in WWISE_SUPPORTED_SYSTEMS:
+            import_tasks.append(self.import_wavs_async(wavs, wwise_project, conversion_setting))
+
+        await asyncio.gather(*import_tasks)
+
+        with futures.ThreadPoolExecutor() as p:
+            fs: list[futures.Future[None]] = []
+            for result in results:
+                binding = functools.partial(os.remove, result[1])
+                fs.append(p.submit(binding))
+            finished = 0
+            while finished < len(fs):
+                for f in fs:
+                    if not f.done():
+                        continue
+                    finished += 1
+                    err = f.exception()
+                    if err != None:
+                        logger.error(err)
+
+
+    async def import_wems_async(
+        self, 
+        wems: dict[str, list[int]] | None = None,
+        set_duration: bool = True
+    ):
+        """
+        - OSError
+        - ValueError
+            - wems is None
+        """
+        if wems == None:
+            raise ValueError("wems is None.")
+        if len(wems) <= 0:
+            return
+
+        for file_path, targets in wems.items():
+            if not os.path.exists(file_path) or not os.path.isfile(file_path):
+                logger.warning(f"wem file {file_path} does not exists.")
+
+            try:
+                async with aiofiles.open(file_path, "rb") as f:
+                    audio_data = await f.read()
+            except BaseException as err:
+                logger.error(f"Failed to read audio data of wem file {file_path}")
+                continue
+
+            with_length = True
+            len_ms = -1
+            if set_duration:
+                try:
+                    len_ms = await mediautil.get_wem_length(file_path)
+                except (
+                    subprocess.CalledProcessError, 
+                    OSError, 
+                    RuntimeError
+                ) as err :
+                    logger.error(f"Failed to obtain length for wem file {file_path}")
+                    with_length = False
+
+            for target in targets:
+                try:
+                    audio: AudioSource = self.get_audio_source(target)
+                    audio.set_data(bytearray(audio_data))
+                    if not with_length:
+                        continue
+                    for item in audio.parents:
+                        self.set_music_track_duration(item, audio, len_ms)
+                except KeyError as err:
+                    logger.error(err)
+
+    async def import_wavs_async(
+        self, 
+        wavs: dict[str, list[int]] | None = None,
+        wwise_project: str = DEFAULT_WWISE_PROJECT,
+        conversion_setting: str = DEFAULT_CONVERSION_SETTING
+    ):
+        """
+        @exception
+        - ValueError
+            - wavs is None
+        - CalledProcessError
+            - subprocess.run
+        - NotImplementedError
+            - Platform is on Linux
+        """
+        if wavs == None:
+            raise ValueError("wavs is None")
+
+        if len(wavs) <= 0:
+            return
+
+        if SYSTEM not in WWISE_SUPPORTED_SYSTEMS:
+            raise NotImplementedError(
+                "The current operating system does not support this feature"
+                )
+
+        convert_dest = await mediautil.convert_wav_to_wem(
+            list(wavs.keys()),
+            wwise_project,
+            conversion_setting
+        )
+
+        if convert_dest == None:
+            raise AssertionError(
+                "Bypassing validation: none zero wave files should return a "
+                "destination"
+            )
+
+        wems = {
+            os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"): targets for filepath, targets in wavs.items()}
+
+        await self.import_wems_async(wems)
+
+        with futures.ThreadPoolExecutor() as p:
+            fs: list[futures.Future[None]] = []
+            for wem in wems.keys():
+                binding = functools.partial(os.remove, wem)
+                fs.append(p.submit(binding))
+            finished = 0
+            while finished < len(fs):
+                for f in fs:
+                    if not f.done():
+                        continue
+                    finished += 1
+                    err = f.exception()
+                    if err != None:
+                        logger.error(err)
+                
+    @staticmethod
+    def set_music_track_duration(
+        item: HircEntry | WwiseStream, audio: AudioSource, len_ms: float
+    ):
+        if not isinstance(item, MusicTrack):
+            return
+
+        item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+        tracks = copy.deepcopy(item.track_info)
+
+        for t in tracks:
+            if t.source_id != audio.get_short_id():
+                continue
+
+            t.begin_trim_offset = 0
+            t.end_trim_offset = 0
+            t.source_duration = len_ms
+            t.play_at = 0
+            break
+
+        item.set_data(track_info=tracks)
+
         
 class ModHandler:
     
