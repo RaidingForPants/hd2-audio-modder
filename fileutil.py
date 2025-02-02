@@ -47,5 +47,8 @@ def traverse(node):
                 stack.append(node)
 
 
-def to_posix(path: str):
+def to_posix(path: str, abs: bool = False):
+    if abs:
+        path = os.path.abspath(path)
     return pathlib.PurePath(path).as_posix()
+    
