@@ -21,6 +21,7 @@ REV_AUDIO = 0x01A01052
 
 # [Conversion]
 DEFAULT_CONVERSION_SETTING = "Vorbis Quality High"
+CONVERSION_SETTING_MAX = "Vorbis Quality Max"
 
 SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
 WWISE_SUPPORTED_SYSTEMS = ["Windows", "Darwin"]

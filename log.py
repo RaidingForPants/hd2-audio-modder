@@ -8,7 +8,7 @@ def get_logger():
         if logger != None:
             return logger
         logger = logging.getLogger()
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.INFO)
         
         file_handler = logging.FileHandler("log.txt")
         stderr_handler = logging.StreamHandler()
