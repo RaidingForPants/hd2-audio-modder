@@ -1033,7 +1033,7 @@ class SoundHandler:
                 return (None, pyaudio.paComplete)
             data = self.wave_file.readframes(frame_count)
             if self.wave_file.getnchannels() > 2:
-                data = self.downmix_to_stereo(data, self.wave_file.getnchannels(), self.wave_file.getsampwidth(), frame_count)
+                data = SoundHandler.downmix_to_stereo(data, self.wave_file.getnchannels(), self.wave_file.getsampwidth(), frame_count)
             return (data, pyaudio.paContinue)
 
         self.audio_process = self.audio.open(format=self.audio.get_format_from_width(self.wave_file.getsampwidth()),
@@ -1042,8 +1042,89 @@ class SoundHandler:
                 output=True,
                 stream_callback=read_stream)
         self.audio_file = f"{os.path.join(TMP, filename)}.wav"
+
+    async def play_audio_async(
+        self,
+        sound_id: int,
+        sound_data: bytearray,
+        callback: Callable | None = None
+    ):
+        if not os.path.exists(VGMSTREAM):
+            return
+
+        self.kill_sound()
+        self.callback = callback
+
+        if self.audio_id == sound_id:
+            self.audio_id = -1
+            return
+
+        wem = f"{xpath.join(TMP, f"temp{sound_id}")}.wem"
+
+        async with aiofiles.open(wem, 'wb') as f:
+            await f.write(sound_data)
+
+        _, wav, rcode = await mediautil.to_wav(wem)
+
+        fire_forget_thread = threading.Thread(target = lambda: os.remove(wem))
+        fire_forget_thread.run()
+
+        if rcode != 0:
+            logger.error(f"Failed to convert {sound_id}.wem for playback.")
+            self.callback = None
+            return
+
+        self.audio_id = sound_id
+        self.wave_file = wave.open(wav)
+        self.audio_file = wav
+        self.frame_count = 0
+        self.max_frames = self.wave_file.getnframes()
+
+        def read_stream(
+            _, 
+            frame_count, 
+            __, 
+            ___
+        ):
+            self.frame_count += frame_count
+
+            if self.frame_count > self.max_frames:
+                if self.callback is not None:
+                    self.callback()
+                    self.callback = None
+
+                self.audio_id = -1
+                self.wave_file.close()
+
+                try:
+                    os.remove(self.audio_file)
+                except OSError as err:
+                    logger.error(
+                        f"Failed to remove {self.audio_file} after playback: {err}"
+                    )
+
+                return (None, pyaudio.paComplete)
+
+            data = self.wave_file.readframes(frame_count)
+
+            if self.wave_file.getnchannels() > 2:
+                data = SoundHandler.downmix_to_stereo(
+                    data, self.wave_file.getnchannels(),
+                    self.wave_file.getsampwidth(),
+                    frame_count
+                )
+
+            return (data, pyaudio.paContinue)
+
+        self.audio_process = self.audio.open(format=self.audio.get_format_from_width(self.wave_file.getsampwidth()),
+                channels = min(self.wave_file.getnchannels(), 2),
+                rate=self.wave_file.getframerate(),
+                output=True,
+                stream_callback=read_stream)
+        self.audio_file = wav 
         
-    def downmix_to_stereo(self, data: bytearray, channels: int, channel_width: int, frame_count: int) -> bytes:
+    @staticmethod
+    def downmix_to_stereo(data: bytearray, channels: int, channel_width: int, frame_count: int) -> bytes:
         if channel_width == 2:
             arr = numpy.frombuffer(data, dtype=numpy.int16)
             stereo_array = numpy.zeros(shape=(frame_count, 2), dtype=numpy.int16)
