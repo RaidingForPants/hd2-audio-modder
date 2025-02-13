@@ -105,6 +105,9 @@ class MemoryStream:
 
     def uint64_read(self):
         return self.read_format('Q', 8)
+
+    def float_read(self) -> float:
+        return self.read_format('f', 4)
         
 def pad_to_16_byte_align(data):
     b = bytearray(data)

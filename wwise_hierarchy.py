@@ -1,7 +1,16 @@
 from util import *
 import struct
 
+
 class HircEntry:
+    """
+    Must Have:
+    hierarchy_type - U8
+    size - U32
+    hierarchy_id - tid
+    -------------------
+    1 + 4 + 4 = 9 bytes
+    """
     
     import_values = ["misc", "parent_id"]
     
@@ -9,7 +18,7 @@ class HircEntry:
         self.size: int = 0
         self.hierarchy_type: int = 0
         self.hierarchy_id: int = 0
-        self.sources = []
+        self.sources: list[BankSourceStruct] = []
         self.track_info = []
         self.soundbank = None # WwiseBank
         self.misc: bytearray = bytearray()
@@ -307,10 +316,31 @@ class MusicSegment(HircEntry):
         
             
 class BankSourceStruct:
+    """
+    plugin_id - U32
+        - one unsigned 16 bits is codec type / plugin id
+        - one 12 bits is company name
+        - one 4 bits is plugin type
+    stream_type - U8x
+    source_id - tid
+    mem_size - U32
+    bits_flag - U8x
+        - bIsLanguageSpecific, bit 0
+        - bPrefetch, bit 1
+        - bNonCachable, bit 3
+        - bHasSource, bit 7
+    plugin_size - U32
+    plugin_contents - plugin_size
+    """
 
     def __init__(self):
-        self.plugin_id = 0
-        self.stream_type = self.source_id = self.mem_size = self.bit_flags = 0
+        self.plugin_id: int = 0
+        self.stream_type: int = 0
+        self.source_id: int = 0
+        self.mem_size: int = 0
+        self.bit_flags: int = 0
+        self.plugin_size: int = 0
+        self.plugin_contents: bytearray = bytearray()
         
     @classmethod
     def from_bytes(cls, bytes: bytes | bytearray):
@@ -392,11 +422,39 @@ class MusicTrack(HircEntry):
 
     
 class Sound(HircEntry):
+    """
+    bIsOverriderParentFx - U8x
+    uNumFx - u8i 
+    bitsFxBypass - U8x
+    fxChunks - uNumFx * 7 bytes
+    bIsOverrideParentMetadata - U8x
+    uNumFxMetadata - u8i
+    fxChunksMetadata - uNumFxMetadata * FxChunkMetadata
+    bOverrideAttachmentParams - U8x
+    OverrideBusId - tid
+    DirectParentId - tid
+    byBitVectorA - U8x
+    cProps - u8i
+    """
     
     import_values = ["misc", "sources", "parent_id"]
     
     def __init__(self):
         super().__init__()
+
+        self.bIsOverrideParentFx: int = 0
+        self.uNumFx: int = 0
+        self.bitsFxBypass: int = 0
+        self.fxChunks: list[FxChunk] = []
+        self.bIsOverrideParentMetadata: int = 0
+        self.uNumFxMetadata: int = 0
+        self.fxChunksMetadata: list[FxChunkMetadata] = []
+        self.bOverrideAttachmentParams: int = 0
+        self.OverrideBusId: int = 0
+        self.DirectParentId: int = 0
+        self.byBitVectorA: int = 0
+        self.PropBundles: PropBundle = PropBundle(0, [], [])
+        self.RangePropBundles: RangedPropBundles = RangedPropBundles(0, [], [])
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -419,7 +477,10 @@ class HircEntryFactory:
         hierarchy_type = stream.uint8_read()
         stream.seek(stream.tell()-1)
         if hierarchy_type == 2: #sound
-            return Sound.from_memory_stream(stream)
+            if os.environ["TEST_FLAG"] == "True":
+                return new_sound(stream)
+            else:
+                return Sound.from_memory_stream(stream)
         elif hierarchy_type == 11: #music track
             return MusicTrack.from_memory_stream(stream)
         elif hierarchy_type == 0x0A: #music segment
@@ -536,3 +597,253 @@ class WwiseHierarchy:
     def get_data(self):
         arr = [entry.get_data() for entry in self.entries.values()]
         return len(arr).to_bytes(4, byteorder="little") + b"".join(arr)
+
+
+"""
+## NodeElement, NodeObject 
+- 
+
+## Parser Implementation Reference (Wwiser)
+
+- Sound bank chunk parser entry point (header, media index, data index, hierarchy) 
+    - https://github.com/bnnm/wwiser/blob/b99fc48d0861349c396a4f7cebbf199dd0339ccf/wwiser/parser/wparser.py#L3785
+- Hierarchy chunk parser entry point (`CAkBankMgr__ProcessHircChunk`)
+    - https://github.com/bnnm/wwiser/blob/b99fc48d0861349c396a4f7cebbf199dd0339ccf/wwiser/parser/wparser.py#L3148 
+
+## How to Read Hierarchy Parser Reference Implementation
+
+1. At hierarchy chunk parser entry point, it will obtain the available hierachy 
+entry parsers available based on the given sound bank version first.
+2. Obtain # of releasable hierarchy item -> (# of hierarchy entry)
+3. Obtain the type of hierarchy entry
+    - When wwiser parser encounter an hierarchy entry, it will dispatch a 
+    hierarchy entry parser based on the type of a hierarchy entry. 
+    - The parser for each of hierarchy entry parser is obtained through 
+    `get_hirc_dispatch` function 
+    (https://github.com/bnnm/wwiser/blob/master/wwiser/parser/wparser.py#L3095)
+4. Obtain the type of hierarchy entry parser based on the type of hierarchy entry
+5. Dispatch the hierarchy entry parser
+
+AH bank version 141
+"""
+
+
+class FxChunk:
+    """
+    uFxIndex - U8i
+    fxId - tid
+    bIsShareSet - U8x
+    bIsRendered - U8x
+    1 + 4 + 1 + 1 = 7 bytes
+    """
+
+    def __init__(self, uFxIndex: int, fxId: int, bIsShareSet: int, bIsRendered: int):
+        self.uFxIndex: int = uFxIndex # U8i
+        self.fxId: int = fxId # tid
+        self.bIsShareSet: int = bIsShareSet # U8x
+        self.bIsRendered: int = bIsRendered # U8x
+
+    def to_bytes(self):
+        return struct.pack(
+            "<BIBB", self.uFxIndex, self.fxId, self.bIsShareSet, self.bIsRendered
+        )
+
+
+class FxChunkMetadata:
+    """
+    uFxIndex - u8i
+    fxId - tid
+    bIsShareSet - U8x
+    1 + 4 + 1 = 6 bytes
+    """
+
+    def __init__(self, uFxIndex: int, fxId: int, bIsShareSet: int):
+        self.uFxIndex = uFxIndex
+        self.fxId = fxId
+        self.bIsShareSet = bIsShareSet
+
+    def to_bytes(self):
+        return struct.pack("<BIB", self.uFxIndex, self.fxId, self.bIsShareSet)
+
+
+class PropBundle:
+    """
+    cProps - u8i
+    pIDs[cProps] - cProps * u8i
+    pValues[cProps] - cProps * tid / uni (4 bytes)
+    """
+
+    def __init__(self, cProps: int, pIDs: list[int], pValues: list[bytearray]):
+        self.cProps = cProps
+        self.pIDs = pIDs
+        self.pValues = pValues
+
+    def to_bytes(self):
+        b = struct.pack("<B", self.cProps)
+        for pID in self.pIDs:
+            b += struct.pack("<B", pID)
+        for pValue in self.pValues:
+            b += struct.pack("<4s", pValue)
+        return b
+
+
+class RangedPropBundles:
+    """
+    cProps - u8i
+    pIDs[cProps] - cProps * u8i
+    rangedValues[cProps] - cProps * (uni [4 bytes] + uni [4 bytes])
+    """
+
+    def __init__(
+        self,
+        cProps: int,
+        pIDs: list[int],
+        rangedValues: list[tuple[float, float]]
+    ):
+        self.cProps = cProps
+        self.pIDs = pIDs
+        self.rangedValues = rangedValues
+
+    def to_bytes(self):
+        b = struct.pack("<B", self.cProps)
+        for pID in self.pIDs:
+            b += struct.pack("<B", pID)
+        for rangeValue in self.rangedValues:
+            b += struct.pack("<ff", rangeValue[0], rangeValue[1])
+        return b
+
+
+def new_sound(stream: MemoryStream):
+    """
+    CAkSound Parser Implementation Reference: https://github.com/bnnm/wwiser/blob/b99fc48d0861349c396a4f7cebbf199dd0339ccf/wwiser/parser/wparser.py#L1068
+    """
+
+    entry = Sound()
+    entry.hierarchy_type = stream.uint8_read()
+    entry.size = stream.uint32_read() # exclude hierarchy type and size
+
+    head = stream.tell()
+
+    entry.hierarchy_id = stream.uint32_read()
+
+    # CAkBankMgr__LoadSource
+    # https://github.com/bnnm/wwiser/blob/b99fc48d0861349c396a4f7cebbf199dd0339ccf/wwiser/parser/wparser.py#L175
+    b = BankSourceStruct.from_bytes(stream.read(14))
+
+    # [Parsing Plugin Content - Read off the size and skip]
+    # https://github.com/bnnm/wwiser/blob/b99fc48d0861349c396a4f7cebbf199dd0339ccf/wwiser/parser/wparser.py#L38
+    if (b.plugin_id & 0X0F) == 2:
+        if b.plugin_id:
+            b.plugin_size = stream.uint32_read()
+            if b.plugin_size > 0:
+                b.plugin_contents = stream.read(b.plugin_size)
+
+    entry.sources.append(b)
+
+    # [Parsing FX]
+    entry.bIsOverrideParentFx = stream.uint8_read()
+    entry.uNumFx = stream.uint8_read()
+    if entry.uNumFx > 0:
+        entry.bitsFxBypass = stream.uint8_read()
+        entry.fxChunks = [
+            FxChunk(
+                stream.uint8_read(), 
+                stream.uint32_read(),
+                stream.uint8_read(),
+                stream.uint8_read()
+            )
+            for _ in range(entry.uNumFx)
+        ]
+
+    # [Parsing Metadata]
+    entry.bIsOverrideParentMetadata = stream.uint8_read()
+    entry.uNumFxMetadata = stream.uint8_read()
+    entry.fxChunksMetadata = [
+        FxChunkMetadata(
+            stream.uint8_read(),
+            stream.uint32_read(),
+            stream.uint8_read()
+        )
+        for _ in range(entry.uNumFxMetadata)
+    ]
+
+    entry.bOverrideAttachmentParams = stream.uint8_read()
+    entry.OverrideBusId = stream.uint32_read()
+    entry.DirectParentId = stream.uint32_read()
+    entry.byBitVectorA = stream.uint8_read()
+
+    # [Parsing Properties - No Modulator]
+    entry.PropBundles.cProps = stream.uint8_read()
+    entry.PropBundles.pIDs = [
+        stream.uint8_read() for _ in range(entry.PropBundles.cProps)
+    ]
+    entry.PropBundles.pValues = [
+        stream.read(4) for _ in range(entry.PropBundles.cProps)
+    ]
+
+    # [Parsing Range Based Properties - No Modulator]
+    entry.RangePropBundles.cProps = stream.uint8_read()
+    entry.RangePropBundles.pIDs = [
+        stream.uint8_read() for _ in range(entry.RangePropBundles.cProps)
+    ]
+    entry.RangePropBundles.rangedValues = [
+        (stream.float_read(), stream.float_read()) 
+        for _ in range(entry.RangePropBundles.cProps)
+    ]
+
+    entry.misc = stream.read(entry.size - (stream.tell() - head))
+
+    return entry
+
+
+def pack_sound(sound: Sound):
+    b = struct.pack(
+        "<BII", sound.hierarchy_type, sound.size, sound.hierarchy_id,
+    )
+
+    b += pack_bank_source_struct(sound.sources[0])
+
+    b += struct.pack("<BB", sound.bIsOverrideParentFx, sound.uNumFx)
+    if sound.uNumFx > 0:
+        b += struct.pack("<B", sound.bitsFxBypass)
+        for fxChunk in sound.fxChunks:
+            b += fxChunk.to_bytes()
+
+    b += struct.pack("<BB", sound.bIsOverrideParentMetadata, sound.uNumFxMetadata)
+    for fxChunkMetadata in sound.fxChunksMetadata:
+        b += fxChunkMetadata.to_bytes()
+
+    b += struct.pack(
+        "<BIIB",
+        sound.bOverrideAttachmentParams,
+        sound.OverrideBusId,
+        sound.DirectParentId,
+        sound.byBitVectorA
+    )
+
+    b += sound.PropBundles.to_bytes()
+    b += sound.RangePropBundles.to_bytes()
+
+    b += struct.pack(f"{len(sound.misc)}s", sound.misc)
+
+    return b
+
+
+def pack_bank_source_struct(bank_source_struct: BankSourceStruct):
+    b = struct.pack(
+        "<IBIIB", 
+        bank_source_struct.plugin_id,
+        bank_source_struct.stream_type,
+        bank_source_struct.source_id,
+        bank_source_struct.mem_size,
+        bank_source_struct.bit_flags
+    )
+    if (bank_source_struct.plugin_id & 0X0F) == 2:
+        if bank_source_struct.plugin_id:
+            b += struct.pack(f"<I", bank_source_struct.plugin_size)
+            if bank_source_struct.plugin_size > 0:
+                b += struct.pack(
+                    f"<{len(bank_source_struct.plugin_contents)}s",
+                    bank_source_struct.plugin_contents
+                )
+    return b
