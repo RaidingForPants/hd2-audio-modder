@@ -27,6 +27,8 @@ SYS_CLIPBOARD = ""
 WWISE_CLI = ""
 WWISE_VERSION = ""
 
+os.environ["TEST_FLAG"] = "False"
+
 match SYSTEM:
     case "Windows":
         FFMPEG = "ffmpeg.exe"
