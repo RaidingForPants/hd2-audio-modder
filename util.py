@@ -82,29 +82,33 @@ class MemoryStream:
             return bytearray(value)
         return value
         
-    def int8_read(self):
+    def int8_read(self) -> int:
         return self.read_format('b', 1)
 
-    def uint8_read(self):
+    def uint8_read(self) -> int:
         return self.read_format('B', 1)
 
-    def int16_read(self):
+    def int16_read(self) -> int:
         return self.read_format('h', 2)
 
-    def uint16_read(self):
+    def uint16_read(self) -> int:
         return self.read_format('H', 2)
 
-    def int32_read(self):
+    def int32_read(self) -> int:
         return self.read_format('i', 4)
 
-    def uint32_read(self):
+    def uint32_read(self) -> int:
         return self.read_format('I', 4)
 
-    def int64_read(self):
+    def int64_read(self) -> int:
         return self.read_format('q', 8)
 
-    def uint64_read(self):
+    def uint64_read(self) -> int:
         return self.read_format('Q', 8)
+
+    def float_read(self) -> float:
+        return self.read_format('f', 4)
+
         
 def pad_to_16_byte_align(data):
     b = bytearray(data)
