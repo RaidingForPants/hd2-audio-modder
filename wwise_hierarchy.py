@@ -9,8 +9,6 @@ class HircEntry:
     hierarchy_type - U8
     size - U32
     hierarchy_id - tid
-    -------------------
-    1 + 4 + 4 = 9 bytes
     """
     
     import_values = ["misc", "parent_id"]
@@ -144,33 +142,29 @@ class MusicRandomSequence(HircEntry):
         return b""
 
 
-class Container(HircEntry):
+class HircEntryWithParams(HircEntry):
     """
-    bIsOverrideParentFx 8 bits
-    uNumFx 8 bits
-    bitsFxBypass 8 bits
-    fxChunks uNumFx * 7 bytes
+    Data from HircEntry plus the following:
+        bIsOverrideParentFx U8x
+        uNumFx u32
+        bitsFxBypass U8x
+        fxChunks uNumFx * sizeof(FxChunk)
 
-    bIsOverrideParentMetadata 8 bits
-    uNumFxMetadata 8 bits
-    fxChunksMetadata uNumFxMetadata * 6 bytes
+        bIsOverrideParentMetadata U8x
+        uNumFxMetadata u8i 
+        fxChunksMetadata uNumFxMetadata * sizeof(FxChunkMetadata)
 
-    bOverrideAttachmentParams 8 bits
+        bOverrideAttachmentParams U8x
+        OverrideBusId tid
+        DirectParentID tid
+        byBitVectorA U8x 
 
-    OverrideBusId 32 bits
+        AuxParams sizeof(AuxParams)
+        AdvSetting sizeof(AdvSetting)
+        StateParams sizeof(StateParams)
 
-    DirectParentID 32 bits
-
-    byBitVectorA 8 bits
-
-    AuxParams
-
-    AdvSetting
-
-    StateParams
-
-    ulNumRTPC u16
-    RTPC
+        ulNumRTPC u16
+        RTPCs ulNumRTPC * sizeof(RTPC)
     """
 
     def __init__(self):
@@ -211,20 +205,32 @@ class Container(HircEntry):
         self.unused_sections = []
 
 
+class Container(HircEntryWithParams):
+    """
+    Data from hierarchy entry parameters plus the following:
+        numChildren u32
+        children numChildren * tid
+    """
+
+    def __init__(self):
+        super().__init__()
+
+        self.numChildren = 0
+        self.children: list[int] = []
+
+
 class RandomSequenceContainer(Container):
     """
-    numChildren u32
-    contents numChildren * tid
+    Data from container plus the following:
+        sCntrPlayListSetting izeof(CntrPlayListSetting)
+        ulPlayListItem u16
+        PlayListItem ulPlayListItem * sizeof(PlayListItem)
     """
     import_values = ["unused_sections", "contents", "parent_id"]
-    
     def __init__(self):
         super().__init__()
 
         self.CntrPlayListSetting = CntrPlayListSetting()
-
-        self.numChildren = 0
-        self.children: list[int] = []
 
         self.ulPlayListItem = 0
         self.PlayListItems: list[PlayListItem] = []
@@ -508,7 +514,7 @@ class HircEntryFactory:
             return Sound.from_memory_stream(stream)
         elif hierarchy_type == 0x05: # random / sequence container
             if os.environ["TEST"] == "1":
-                return new_cntr(stream)
+                return new_rand_seq_cntr(stream)
             else:
                 return RandomSequenceContainer.from_memory_stream(stream)
         elif hierarchy_type == 0x0A: #music segment
@@ -633,7 +639,6 @@ class FxChunk:
     fxId - tid
     bIsShareSet - U8x
     bIsRendered - U8x
-    1 + 4 + 1 + 1 = 7 bytes
     """
 
     def __init__(self, uFxIndex: int, fxId: int, bIsShareSet: int, bIsRendered: int):
@@ -653,7 +658,6 @@ class FxChunkMetadata:
     uFxIndex - u8i
     fxId - tid
     bIsShareSet - U8x
-    1 + 4 + 1 = 6 bytes
     """
 
     def __init__(self, uFxIndex: int, fxId: int, bIsShareSet: int):
@@ -669,7 +673,7 @@ class PropBundle:
     """
     cProps - u8i
     pIDs[cProps] - cProps * u8i
-    pValues[cProps] - cProps * tid / uni (4 bytes)
+    pValues[cProps] - cProps * tid / uni
     """
 
     def __init__(self, cProps: int = 0, pIDs: list[int] = [], pValues: list[bytearray] = []):
@@ -694,7 +698,7 @@ class RangedPropBundle:
     """
     cProps - u8i
     pIDs[cProps] - cProps * u8i
-    rangedValues[cProps] - cProps * (uni [4 bytes] + uni [4 bytes])
+    rangedValues[cProps] - cProps * (uni + uni)
     """
 
     def __init__(
@@ -786,7 +790,7 @@ class AdvSetting:
 
 class StateProp:
     """
-    PropertyId var 8 bits
+    PropertyId var (8 bits)
     accumType U8x
     inDb bool U8x 
     """
@@ -818,7 +822,7 @@ class StateGroup:
     """
     ulStateGroupID tid
     eStateSyncType U8x
-    ulNumStates var 8 bits
+    ulNumStates var (8 bits)
     """
 
     def __init__(
@@ -848,9 +852,9 @@ class StateGroup:
 
 class StateParams:
     """
-    ulNumStatesProps var 8 bits
-    stateProps ulNumStateProps * 3 bytes
-    ulNumStateGroups var 8 bits
+    ulNumStatesProps var (8 bits)
+    stateProps ulNumStateProps * sizeof(StateProp)
+    ulNumStateGroups var (8 bits)
     stateGroups
     """
 
@@ -894,9 +898,9 @@ class StateParams:
 
 class RTPCGraphPoint:
     """
-    f32 From
-    f32 To
-    U32 Interp
+    From f32
+    To f32
+    Interp U32
     """
 
     def __init__(self, From: float = 0.0, To: float = 0.0, Interp: int = 0):
@@ -910,14 +914,14 @@ class RTPCGraphPoint:
 
 class RTPC:
     """
-    tid RTPCID
-    U8x rtpcType
-    U8x rtpcAccum
-    var 8 bits ParamID
-    sid rtpcCurveID
-    U8x eScaling 
-    u16 ulSize
-    RTPCInterpPoints
+    RTPCID tid
+    rtpcType U8x
+    rtpcAccum U8x
+    ParamID var (8 bits)
+    rtpcCurveID sid
+    eScaling  U8x
+    ulSize u16
+    RTPCGraphPoints ulSize * sizeof(RTPCGraphPoint)
     """
 
     def __init__(
@@ -1027,7 +1031,9 @@ class PlayListItem:
         return struct.pack("<II", self.ulPlayID, self.weight)
 
 
-class LayerContainer(RandomSequenceContainer):
+class LayerContainer(Container):
+    """
+    """
 
     def __init__(self):
         super().__init__()
@@ -1046,7 +1052,13 @@ class LayerContainer(RandomSequenceContainer):
 
         set_hierarchy_params(cntr, stream)
 
-        #
+        # [Children]
+        cntr.numChildren = stream.uint32_read()
+        for _ in range(cntr.numChildren):
+            cntr.children.append(stream.uint32_read())
+
+        # [Layer]
+
 
         tail = stream.tell()
 
@@ -1056,7 +1068,7 @@ class LayerContainer(RandomSequenceContainer):
         return cntr
 
 
-def new_cntr(stream: MemoryStream):
+def new_rand_seq_cntr(stream: MemoryStream):
     cntr = RandomSequenceContainer()
 
     cntr.hierarchy_type = stream.uint8_read()
@@ -1102,10 +1114,7 @@ def new_cntr(stream: MemoryStream):
     return cntr
 
 
-def set_hierarchy_params(
-    entry: RandomSequenceContainer | LayerContainer,
-    stream: MemoryStream
-):
+def set_hierarchy_params(entry: HircEntryWithParams, stream: MemoryStream):
     # [Fx]
     entry.bIsOverrideParentFx = stream.uint8_read()
     entry.uNumFx = stream.uint8_read()
@@ -1240,7 +1249,7 @@ def set_hierarchy_params(
     entry.RTPCs = RTPCs
 
 
-def pack_hierarchy_params(entry: RandomSequenceContainer | LayerContainer,):
+def pack_hierarchy_params(entry: HircEntryWithParams):
     b = b""
 
     # [Fx]
@@ -1288,7 +1297,7 @@ def pack_hierarchy_params(entry: RandomSequenceContainer | LayerContainer,):
     return b
 
 
-def pack_cntr(cntr: RandomSequenceContainer):
+def pack_rand_seq_cntr(cntr: RandomSequenceContainer):
     b = struct.pack("<BII", cntr.hierarchy_type, cntr.size, cntr.hierarchy_id)
     b += struct.pack("<BB", cntr.bIsOverrideParentFx, cntr.uNumFx)
 
