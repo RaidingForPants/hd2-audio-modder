@@ -144,7 +144,7 @@ class MusicRandomSequence(HircEntry):
         return b""
 
 
-class RandomSequenceContainer(HircEntry):
+class Container(HircEntry):
     """
     bIsOverrideParentFx 8 bits
     uNumFx 8 bits
@@ -171,13 +171,8 @@ class RandomSequenceContainer(HircEntry):
 
     ulNumRTPC u16
     RTPC
-
-    numChildren u32
-    contents numChildren * tid
     """
-    
-    import_values = ["unused_sections", "contents", "parent_id"]
-    
+
     def __init__(self):
         super().__init__()
 
@@ -213,16 +208,27 @@ class RandomSequenceContainer(HircEntry):
         self.ulNumRTPC: int = 0
         self.RTPCs: list[RTPC] = []
 
+        self.unused_sections = []
+
+
+class RandomSequenceContainer(Container):
+    """
+    numChildren u32
+    contents numChildren * tid
+    """
+    import_values = ["unused_sections", "contents", "parent_id"]
+    
+    def __init__(self):
+        super().__init__()
+
         self.CntrPlayListSetting = CntrPlayListSetting()
 
         self.numChildren = 0
-        self.contents: list[int] = []
+        self.children: list[int] = []
 
         self.ulPlayListItem = 0
         self.PlayListItems: list[PlayListItem] = []
 
-        self.unused_sections = []
-        
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         entry = RandomSequenceContainer()
@@ -264,7 +270,7 @@ class RandomSequenceContainer(HircEntry):
         entry.unused_sections.append(stream.read(section_end-section_start+24))
 
         for _ in range(stream.uint32_read()): #number of children (tracks)
-            entry.contents.append(stream.uint32_read())
+            entry.children.append(stream.uint32_read())
 
         entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
         return entry
@@ -274,8 +280,8 @@ class RandomSequenceContainer(HircEntry):
             b"".join([
                 struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
                 self.unused_sections[0],
-                len(self.contents).to_bytes(4, byteorder="little"),
-                b"".join([x.to_bytes(4, byteorder="little") for x in self.contents]),
+                len(self.children).to_bytes(4, byteorder="little"),
+                b"".join([x.to_bytes(4, byteorder="little") for x in self.children]),
                 self.unused_sections[1]
             ])
         )
@@ -1028,7 +1034,72 @@ class LayerContainer(RandomSequenceContainer):
 
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
-        return LayerContainer()
+        cntr = LayerContainer()
+
+        cntr.hierarchy_type = stream.uint8_read()
+
+        cntr.size = stream.uint32_read()
+
+        head = stream.tell()
+
+        cntr.hierarchy_id = stream.uint32_read()
+
+        set_hierarchy_params(cntr, stream)
+
+        #
+
+        tail = stream.tell()
+
+        if cntr.size != (tail - head):
+            raise AssertionError("LayerContainer.size != (tail - head) fails")
+
+        return cntr
+
+
+def new_cntr(stream: MemoryStream):
+    cntr = RandomSequenceContainer()
+
+    cntr.hierarchy_type = stream.uint8_read()
+
+    cntr.size = stream.uint32_read()
+
+    head = stream.tell()
+
+    cntr.hierarchy_id = stream.uint32_read()
+
+    set_hierarchy_params(cntr, stream)
+
+    # [PlayList Setting]
+    cntr.CntrPlayListSetting.sLoopCount = stream.uint16_read()
+    cntr.CntrPlayListSetting.sLoopModMin = stream.uint16_read()
+    cntr.CntrPlayListSetting.sLoopModMax = stream.uint16_read()
+    cntr.CntrPlayListSetting.fTransitionTime = stream.float_read()
+    cntr.CntrPlayListSetting.fTransitionTimeModMin = stream.float_read()
+    cntr.CntrPlayListSetting.fTransitionTimeModMax = stream.float_read()
+    cntr.CntrPlayListSetting.wAvoidReaptCount = stream.uint16_read()
+    cntr.CntrPlayListSetting.eTransitionMode = stream.uint8_read()
+    cntr.CntrPlayListSetting.eRandomMode = stream.uint8_read()
+    cntr.CntrPlayListSetting.eMode = stream.uint8_read()
+    cntr.CntrPlayListSetting.byBitVectorPlayList = stream.uint8_read()
+
+    # [Children]
+    cntr.numChildren = stream.uint32_read()
+    for _ in range(cntr.numChildren):
+        cntr.children.append(stream.uint32_read())
+
+    # [PlayListItem]
+    cntr.ulPlayListItem = stream.uint16_read()
+    cntr.PlayListItems = [
+        PlayListItem(stream.uint32_read(), stream.int32_read())
+        for _ in range(cntr.ulPlayListItem)
+    ]
+
+    tail = stream.tell()
+
+    if cntr.size != (tail - head):
+        raise AssertionError("RandomSequenceContainer.size != (tail - head) fails")
+
+    return cntr
 
 
 def set_hierarchy_params(
@@ -1168,52 +1239,6 @@ def set_hierarchy_params(
         ))
     entry.RTPCs = RTPCs
 
-    # [PlayList Setting]
-    entry.CntrPlayListSetting.sLoopCount = stream.uint16_read()
-    entry.CntrPlayListSetting.sLoopModMin = stream.uint16_read()
-    entry.CntrPlayListSetting.sLoopModMax = stream.uint16_read()
-    entry.CntrPlayListSetting.fTransitionTime = stream.float_read()
-    entry.CntrPlayListSetting.fTransitionTimeModMin = stream.float_read()
-    entry.CntrPlayListSetting.fTransitionTimeModMax = stream.float_read()
-    entry.CntrPlayListSetting.wAvoidReaptCount = stream.uint16_read()
-    entry.CntrPlayListSetting.eTransitionMode = stream.uint8_read()
-    entry.CntrPlayListSetting.eRandomMode = stream.uint8_read()
-    entry.CntrPlayListSetting.eMode = stream.uint8_read()
-    entry.CntrPlayListSetting.byBitVectorPlayList = stream.uint8_read()
-
-    # [Children]
-    entry.numChildren = stream.uint32_read()
-    for _ in range(entry.numChildren):
-        entry.contents.append(stream.uint32_read())
-
-    # [PlayListItem]
-    entry.ulPlayListItem = stream.uint16_read()
-    entry.PlayListItems = [
-        PlayListItem(stream.uint32_read(), stream.int32_read())
-        for _ in range(entry.ulPlayListItem)
-    ]
-
-
-def new_cntr(stream: MemoryStream):
-    entry = RandomSequenceContainer()
-
-    entry.hierarchy_type = stream.uint8_read()
-
-    entry.size = stream.uint32_read()
-
-    head = stream.tell()
-
-    entry.hierarchy_id = stream.uint32_read()
-
-    set_hierarchy_params(entry, stream)
-
-    tail = stream.tell()
-
-    if entry.size != (tail - head):
-        raise AssertionError("RandomSequenceContainer.size != (tail - head) fails")
-
-    return entry
-
 
 def pack_hierarchy_params(entry: RandomSequenceContainer | LayerContainer,):
     b = b""
@@ -1260,20 +1285,6 @@ def pack_hierarchy_params(entry: RandomSequenceContainer | LayerContainer,):
     for rtpc in entry.RTPCs:
         b += rtpc.to_bytes()
 
-    b += entry.CntrPlayListSetting.to_bytes()
-
-    if entry.numChildren != len(entry.contents):
-        raise AssertionError("RandomSequenceContainer.numChildren != len(RandomSequenceContainer.contents) fails")
-    b += struct.pack("<I", entry.numChildren)
-    for content in entry.contents:
-        b += struct.pack("<I", content)
-
-    if entry.ulPlayListItem != len(entry.PlayListItems):
-        raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
-    b += struct.pack("<H", entry.ulPlayListItem)
-    for playListItem in entry.PlayListItems:
-        b += playListItem.to_bytes()
-
     return b
 
 
@@ -1282,6 +1293,20 @@ def pack_cntr(cntr: RandomSequenceContainer):
     b += struct.pack("<BB", cntr.bIsOverrideParentFx, cntr.uNumFx)
 
     b += pack_hierarchy_params(cntr)
+
+    b += cntr.CntrPlayListSetting.to_bytes()
+
+    if cntr.numChildren != len(cntr.children):
+        raise AssertionError("RandomSequenceContainer.numChildren != len(RandomSequenceContainer.contents) fails")
+    b += struct.pack("<I", cntr.numChildren)
+    for child in cntr.children:
+        b += struct.pack("<I", child)
+
+    if cntr.ulPlayListItem != len(cntr.PlayListItems):
+        raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
+    b += struct.pack("<H", cntr.ulPlayListItem)
+    for playListItem in cntr.PlayListItems:
+        b += playListItem.to_bytes()
 
     if cntr.size != len(b) - 5:
         raise AssertionError(f"Packing size mismatch with specified size: {cntr.size} and {len(b) - 5}")
