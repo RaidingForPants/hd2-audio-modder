@@ -498,17 +498,17 @@ class HircEntryFactory:
     def from_memory_stream(cls, stream: MemoryStream):
         hierarchy_type = stream.uint8_read()
         stream.seek(stream.tell()-1)
-        if hierarchy_type == 2: #sound
+        if hierarchy_type == 2: # sound
             return Sound.from_memory_stream(stream)
-        elif hierarchy_type == 11: #music track
-            return MusicTrack.from_memory_stream(stream)
-        elif hierarchy_type == 0x0A: #music segment
-            return MusicSegment.from_memory_stream(stream)
-        elif hierarchy_type == 0x05: #random sequence container
+        elif hierarchy_type == 0x05: # random / sequence container
             if os.environ["TEST"] == "1":
                 return new_cntr(stream)
             else:
                 return RandomSequenceContainer.from_memory_stream(stream)
+        elif hierarchy_type == 0x0A: #music segment
+            return MusicSegment.from_memory_stream(stream)
+        elif hierarchy_type == 0X0B: #music track
+            return MusicTrack.from_memory_stream(stream)
         else:
             return HircEntry.from_memory_stream(stream)
             
@@ -1021,23 +1021,20 @@ class PlayListItem:
         return struct.pack("<II", self.ulPlayID, self.weight)
 
 
-class LayerContainer(HircEntry):
+class LayerContainer(RandomSequenceContainer):
 
     def __init__(self):
         super().__init__()
 
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        return LayerContainer()
 
-def new_cntr(stream: MemoryStream):
-    entry = RandomSequenceContainer()
 
-    entry.hierarchy_type = stream.uint8_read()
-
-    entry.size = stream.uint32_read()
-
-    head = stream.tell()
-
-    entry.hierarchy_id = stream.uint32_read()
-
+def set_hierarchy_params(
+    entry: RandomSequenceContainer | LayerContainer,
+    stream: MemoryStream
+):
     # [Fx]
     entry.bIsOverrideParentFx = stream.uint8_read()
     entry.uNumFx = stream.uint8_read()
@@ -1196,79 +1193,97 @@ def new_cntr(stream: MemoryStream):
         for _ in range(entry.ulPlayListItem)
     ]
 
+
+def new_cntr(stream: MemoryStream):
+    entry = RandomSequenceContainer()
+
+    entry.hierarchy_type = stream.uint8_read()
+
+    entry.size = stream.uint32_read()
+
+    head = stream.tell()
+
+    entry.hierarchy_id = stream.uint32_read()
+
+    set_hierarchy_params(entry, stream)
+
     tail = stream.tell()
 
     if entry.size != (tail - head):
-        raise AssertionError("RandomSequenceContainer.size != tail - head fails")
+        raise AssertionError("RandomSequenceContainer.size != (tail - head) fails")
 
     return entry
+
+
+def pack_hierarchy_params(entry: RandomSequenceContainer | LayerContainer,):
+    b = b""
+
+    # [Fx]
+    if entry.uNumFx != len(entry.fxChunks):
+        raise AssertionError("RandomSequenceContainer.uNumFx != len(RandomSequenceContainer.fxChunks) fails")
+    if entry.uNumFx > 0:
+        b += struct.pack("<B", entry.bitsFxBypass)
+        for fxChunk in entry.fxChunks:
+            b += fxChunk.to_bytes()
+
+    # [Metadata Fx]
+    if entry.uNumFxMetadata != len(entry.fxChunksMetadata):
+        raise AssertionError("RandomSequenceContainer.uNumFxMetadata != len(RandomSequenceContainer.fxChunksMetadata) fails")
+    b += struct.pack("<BB", entry.bIsOverrideParentMetadata, entry.uNumFxMetadata)
+    if entry.uNumFxMetadata > 0:
+        for fxChunkMetadata in entry.fxChunksMetadata:
+            b += fxChunkMetadata.to_bytes()
+
+    b += struct.pack(
+        "<BIIB", 
+        entry.bOverrideAttachmentParams,
+        entry.OverrideBusId,
+        entry.DirectParentID,
+        entry.byBitVectorA
+    )
+
+    b += entry.PropBundle.to_bytes()
+
+    b += entry.RangePropBundle.to_bytes()
+    
+    b += struct.pack(f"<{len(entry.positioningParamContent)}s", entry.positioningParamContent)
+
+    b += entry.AuxParams.to_bytes()
+
+    b += entry.AdvSetting.to_bytes()
+
+    b += entry.StateParams.to_bytes()
+
+    b += struct.pack("<H", entry.ulNumRTPC)
+    if entry.ulNumRTPC != len(entry.RTPCs):
+        raise AssertionError("RandomSequenceContainer.ulNumRTPC != len(RandomSequenceContainer.RTPCs) fails")
+    for rtpc in entry.RTPCs:
+        b += rtpc.to_bytes()
+
+    b += entry.CntrPlayListSetting.to_bytes()
+
+    if entry.numChildren != len(entry.contents):
+        raise AssertionError("RandomSequenceContainer.numChildren != len(RandomSequenceContainer.contents) fails")
+    b += struct.pack("<I", entry.numChildren)
+    for content in entry.contents:
+        b += struct.pack("<I", content)
+
+    if entry.ulPlayListItem != len(entry.PlayListItems):
+        raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
+    b += struct.pack("<H", entry.ulPlayListItem)
+    for playListItem in entry.PlayListItems:
+        b += playListItem.to_bytes()
+
+    return b
 
 
 def pack_cntr(cntr: RandomSequenceContainer):
     b = struct.pack("<BII", cntr.hierarchy_type, cntr.size, cntr.hierarchy_id)
     b += struct.pack("<BB", cntr.bIsOverrideParentFx, cntr.uNumFx)
 
-    # [Fx]
-    if cntr.uNumFx != len(cntr.fxChunks):
-        raise AssertionError("RandomSequenceContainer.uNumFx != len(RandomSequenceContainer.fxChunks) fails")
-    if cntr.uNumFx > 0:
-        b += struct.pack("<B", cntr.bitsFxBypass)
-        for fxChunk in cntr.fxChunks:
-            b += fxChunk.to_bytes()
-
-    # [Metadata Fx]
-    if cntr.uNumFxMetadata != len(cntr.fxChunksMetadata):
-        raise AssertionError("RandomSequenceContainer.uNumFxMetadata != len(RandomSequenceContainer.fxChunksMetadata) fails")
-    b += struct.pack("<BB", cntr.bIsOverrideParentMetadata, cntr.uNumFxMetadata)
-    if cntr.uNumFxMetadata > 0:
-        for fxChunkMetadata in cntr.fxChunksMetadata:
-            b += fxChunkMetadata.to_bytes()
-
-    b += struct.pack(
-        "<BIIB", 
-        cntr.bOverrideAttachmentParams,
-        cntr.OverrideBusId,
-        cntr.DirectParentID,
-        cntr.byBitVectorA
-    )
-
-    b += cntr.PropBundle.to_bytes()
-
-    b += cntr.RangePropBundle.to_bytes()
-    
-    b += struct.pack(f"<{len(cntr.positioningParamContent)}s", cntr.positioningParamContent)
-
-    b += cntr.AuxParams.to_bytes()
-
-    b += cntr.AdvSetting.to_bytes()
-
-    b += cntr.StateParams.to_bytes()
-
-    b += struct.pack("<H", cntr.ulNumRTPC)
-    if cntr.ulNumRTPC != len(cntr.RTPCs):
-        raise AssertionError("RandomSequenceContainer.ulNumRTPC != len(RandomSequenceContainer.RTPCs) fails")
-    for rtpc in cntr.RTPCs:
-        b += rtpc.to_bytes()
-
-    b += cntr.CntrPlayListSetting.to_bytes()
-
-    if cntr.numChildren != len(cntr.contents):
-        raise AssertionError("RandomSequenceContainer.numChildren != len(RandomSequenceContainer.contents) fails")
-    b += struct.pack("<I", cntr.numChildren)
-    for content in cntr.contents:
-        b += struct.pack("<I", content)
-
-    if cntr.ulPlayListItem != len(cntr.PlayListItems):
-        raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
-    b += struct.pack("<H", cntr.ulPlayListItem)
-    for playListItem in cntr.PlayListItems:
-        b += playListItem.to_bytes()
+    b += pack_hierarchy_params(cntr)
 
     if cntr.size != len(b) - 5:
         raise AssertionError(f"Packing size mismatch with specified size: {cntr.size} and {len(b) - 5}")
 
     return b
-
-
-def new_layer_cntr(self):
-    pass
