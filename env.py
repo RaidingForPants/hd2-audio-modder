@@ -27,7 +27,8 @@ SYS_CLIPBOARD = ""
 WWISE_CLI = ""
 WWISE_VERSION = ""
 
-os.environ["TEST"] = "0"
+os.environ["TEST_RAND"] = "0"
+os.environ["TEST_LAYER"] = "0"
 
 match SYSTEM:
     case "Windows":

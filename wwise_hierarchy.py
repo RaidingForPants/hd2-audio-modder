@@ -1,6 +1,7 @@
 import struct
 
 from util import *
+from log import logger
 
 
 class HircEntry:
@@ -189,7 +190,7 @@ class HircEntryWithParams(HircEntry):
 
         self.PropBundle = PropBundle()
 
-        self.positioningParamContent: bytearray = bytearray()
+        self.positioningParamData: bytearray = bytearray()
 
         self.RangePropBundle = RangedPropBundle()
 
@@ -513,10 +514,15 @@ class HircEntryFactory:
         if hierarchy_type == 2: # sound
             return Sound.from_memory_stream(stream)
         elif hierarchy_type == 0x05: # random / sequence container
-            if os.environ["TEST"] == "1":
+            if os.environ["TEST_RAND"] == "1":
                 return new_rand_seq_cntr(stream)
             else:
                 return RandomSequenceContainer.from_memory_stream(stream)
+        elif hierarchy_type == 0x09:
+            if os.environ["TEST_LAYER"] == "1":
+                return LayerContainer.from_memory_stream(stream)
+            else:
+                return HircEntry.from_memory_stream(stream)
         elif hierarchy_type == 0x0A: #music segment
             return MusicSegment.from_memory_stream(stream)
         elif hierarchy_type == 0X0B: #music track
@@ -1033,10 +1039,13 @@ class PlayListItem:
 
 class LayerContainer(Container):
     """
+    ulNumLayers u32
     """
 
     def __init__(self):
         super().__init__()
+        self.ulNumLayers: int = 0
+        self.layer_data: bytearray = bytearray()
 
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -1057,8 +1066,8 @@ class LayerContainer(Container):
         for _ in range(cntr.numChildren):
             cntr.children.append(stream.uint32_read())
 
-        # [Layer]
-
+        # [Skip Layer]
+        cntr.layer_data = stream.read(cntr.size - (stream.tell() - head))
 
         tail = stream.tell()
 
@@ -1066,6 +1075,25 @@ class LayerContainer(Container):
             raise AssertionError("LayerContainer.size != (tail - head) fails")
 
         return cntr
+
+    def get_data(self):
+        b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
+        b += struct.pack("<BB", self.bIsOverrideParentFx, self.uNumFx)
+
+        b += pack_hierarchy_params(self)
+
+        if self.numChildren != len(self.children):
+            raise AssertionError("RandomSequenceContainer.numChildren != len(RandomSequenceContainer.contents) fails")
+        b += struct.pack("<I", self.numChildren)
+        for child in self.children:
+            b += struct.pack("<I", child)
+
+        b += struct.pack(f"<{len(self.layer_data)}s", self.layer_data)
+
+        if self.size != len(b) - 5:
+            raise AssertionError(f"Packing size mismatch with specified size: {self.size} and {len(b) - 5}")
+
+        return b
 
 
 def new_rand_seq_cntr(stream: MemoryStream):
@@ -1113,6 +1141,56 @@ def new_rand_seq_cntr(stream: MemoryStream):
 
     return cntr
 
+def parse_positioning_params(stream: MemoryStream):
+    """
+    Keep this algorithm here but the data is not used currently
+    """
+    head = stream.tell()
+
+    uBitsPositioning = stream.uint8_read() # U8x
+    has_positioning = (uBitsPositioning >> 0) & 1
+
+    has_3d = False
+    if has_positioning:
+        has_3d = (uBitsPositioning >> 1) & 1
+
+    if has_positioning and has_3d:
+        uBits3d = stream.uint8_read() # U8x
+        eType = 0
+
+        e3DPositionType = (uBitsPositioning >> 5) & 3
+        has_automation = (e3DPositionType != 0)
+
+        if has_automation:
+            ePathMode = stream.uint8_read() # U8x
+            TransitionTime = stream.int32_read() # s32
+
+            ulNumVertices = stream.uint32_read() # u32
+            vertices: list[tuple[float, float, float, int]] = [
+                (
+                    stream.float_read(),
+                    stream.float_read(),
+                    stream.float_read(),
+                    stream.int32_read()
+                ) for _ in range(ulNumVertices)
+            ]
+
+            ulNumPlayListItem = stream.uint32_read() # u32
+            playListItems: list[tuple[int, int]] = [
+                (stream.uint32_read(), stream.uint32_read())
+                for _ in range(ulNumPlayListItem)
+            ]
+
+            _3DAutomationParams: list[tuple[float, float, float]] = [
+                (stream.float_read(), stream.float_read(), stream.float_read())
+                for _ in range(ulNumPlayListItem)
+            ]
+
+    tail = stream.tell()
+
+    stream.seek(head)
+
+    return stream.read(tail - head)
 
 def set_hierarchy_params(entry: HircEntryWithParams, stream: MemoryStream):
     # [Fx]
@@ -1170,16 +1248,8 @@ def set_hierarchy_params(entry: HircEntryWithParams, stream: MemoryStream):
         for _ in range(entry.RangePropBundle.cProps)
     ]
 
-    # [Skip Positioning Param]
-    positioningParamStart = stream.tell()
-    if stream.uint8_read() & 0b0000_0010: # positioning bit vector
-        if stream.uint8_read() & 0b0100_0000: # relative pathing bit vector
-            stream.advance(5)
-            stream.advance(16*stream.uint32_read())
-            stream.advance(20*stream.uint32_read())
-    positioningParamContenSize = stream.tell() - positioningParamStart
-    stream.seek(positioningParamStart)
-    entry.positioningParamContent = stream.read(positioningParamContenSize)
+    # [Positioning Param]
+    entry.positioningParamData = parse_positioning_params(stream)
 
     # [Aux Params]
     entry.AuxParams.byBitVectorAux = stream.uint8_read()
@@ -1280,7 +1350,7 @@ def pack_hierarchy_params(entry: HircEntryWithParams):
 
     b += entry.RangePropBundle.to_bytes()
     
-    b += struct.pack(f"<{len(entry.positioningParamContent)}s", entry.positioningParamContent)
+    b += struct.pack(f"<{len(entry.positioningParamData)}s", entry.positioningParamData)
 
     b += entry.AuxParams.to_bytes()
 
