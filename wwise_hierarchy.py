@@ -27,6 +27,7 @@ class HircEntry:
         self.parent_id: int = 0
         self.parent: HircEntry | None = None
         self.data_old: bytes | bytearray = b""
+        self.unused_sections = []
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -143,98 +144,24 @@ class MusicRandomSequence(HircEntry):
         return b""
 
 
-class HircEntryWithParams(HircEntry):
-    """
-    Data from HircEntry plus the following:
-        bIsOverrideParentFx U8x
-        uNumFx u32
-        bitsFxBypass U8x
-        fxChunks uNumFx * sizeof(FxChunk)
-
-        bIsOverrideParentMetadata U8x
-        uNumFxMetadata u8i 
-        fxChunksMetadata uNumFxMetadata * sizeof(FxChunkMetadata)
-
-        bOverrideAttachmentParams U8x
-        OverrideBusId tid
-        DirectParentID tid
-        byBitVectorA U8x 
-
-        AuxParams sizeof(AuxParams)
-        AdvSetting sizeof(AdvSetting)
-        StateParams sizeof(StateParams)
-
-        ulNumRTPC u16
-        RTPCs ulNumRTPC * sizeof(RTPC)
-    """
-
-    def __init__(self):
-        super().__init__()
-
-        self.bIsOverrideParentFx: int = 0
-        self.uNumFx: int = 0
-        self.bitsFxBypass = 0
-        self.fxChunks: list[FxChunk] = []
-
-        self.bIsOverrideParentMetadata: int = 0
-        self.uNumFxMetadata: int = 0
-        self.fxChunksMetadata: list[FxChunkMetadata] = []
-
-        self.bOverrideAttachmentParams: int = 0
-
-        self.OverrideBusId: int = 0
-
-        self.DirectParentID: int = 0
-
-        self.byBitVectorA: int = 0
-
-        self.PropBundle = PropBundle()
-
-        self.positioningParamData: bytearray = bytearray()
-
-        self.RangePropBundle = RangedPropBundle()
-
-        self.AuxParams = AuxParams()
-
-        self.AdvSetting = AdvSetting()
-
-        self.StateParams = StateParams()
-
-        self.ulNumRTPC: int = 0
-        self.RTPCs: list[RTPC] = []
-
-        self.unused_sections = []
-
-
-class Container(HircEntryWithParams):
-    """
-    Data from hierarchy entry parameters plus the following:
-        numChildren u32
-        children numChildren * tid
-    """
-
-    def __init__(self):
-        super().__init__()
-
-        self.numChildren = 0
-        self.children: list[int] = []
-
-
-class RandomSequenceContainer(Container):
+class RandomSequenceContainer(HircEntry):
     """
     Data from container plus the following:
+        baseParam sizeof(BaseParam)
+        children sizeof(ContainerChildren)
         sCntrPlayListSetting izeof(CntrPlayListSetting)
         ulPlayListItem u16
-        PlayListItem ulPlayListItem * sizeof(PlayListItem)
+        playListItem ulPlayListItem * sizeof(PlayListItem)
     """
     import_values = ["unused_sections", "contents", "parent_id"]
     def __init__(self):
         super().__init__()
-
-        self.CntrPlayListSetting = CntrPlayListSetting()
-
+        self.baseParam: BaseParam | None = None
+        self.children: list[int] = []
+        self.containerChildren: ContainerChildren = ContainerChildren()
+        self.playListSetting = PlayListSetting()
         self.ulPlayListItem = 0
-        self.PlayListItems: list[PlayListItem] = []
+        self.playListItems: list[PlayListItem] = []
 
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -647,7 +574,9 @@ class FxChunk:
     bIsRendered - U8x
     """
 
-    def __init__(self, uFxIndex: int, fxId: int, bIsShareSet: int, bIsRendered: int):
+    def __init__(
+        self, uFxIndex: int, fxId: int, bIsShareSet: int, bIsRendered: int
+    ):
         self.uFxIndex: int = uFxIndex # U8i
         self.fxId: int = fxId # tid
         self.bIsShareSet: int = bIsShareSet # U8x
@@ -682,7 +611,12 @@ class PropBundle:
     pValues[cProps] - cProps * tid / uni
     """
 
-    def __init__(self, cProps: int = 0, pIDs: list[int] = [], pValues: list[bytearray] = []):
+    def __init__(
+        self,
+        cProps: int = 0,
+        pIDs: list[int] = [],
+        pValues: list[bytearray] = []
+    ):
         self.cProps = cProps
         self.pIDs = pIDs
         self.pValues = pValues
@@ -737,7 +671,12 @@ class AuxParams:
     reflectionAuxBus - tid
     """
 
-    def __init__(self, byBitVectorAux: int = 0, auxIDs: list[int] = [], reflectionAuxBus: int = 0):
+    def __init__(
+        self,
+        byBitVectorAux: int = 0,
+        auxIDs: list[int] = [],
+        reflectionAuxBus: int = 0
+    ):
         self.byBitVectorAux = byBitVectorAux
         self.has_aux = self.byBitVectorAux & 0b0000_1000
         self.auxIDs = auxIDs
@@ -796,18 +735,18 @@ class AdvSetting:
 
 class StateProp:
     """
-    PropertyId var (8 bits)
+    propertyId var (8 bits)
     accumType U8x
     inDb bool U8x 
     """
 
-    def __init__(self, PropertyId: int = 0, accumType: int = 0, inDb: int = 0):
-        self.PropertyId = PropertyId
+    def __init__(self, propertyId: int = 0, accumType: int = 0, inDb: int = 0):
+        self.propertyId = propertyId
         self.accumType = accumType
         self.inDb = inDb
 
     def to_bytes(self):
-        return struct.pack("<3B", self.PropertyId, self.accumType, self.inDb)
+        return struct.pack("<3B", self.propertyId, self.accumType, self.inDb)
 
 
 class StateGroupState:
@@ -904,68 +843,302 @@ class StateParams:
 
 class RTPCGraphPoint:
     """
-    From f32
-    To f32
-    Interp U32
+    from f32
+    to f32
+    interp U32
     """
 
-    def __init__(self, From: float = 0.0, To: float = 0.0, Interp: int = 0):
-        self.From = From
-        self.To = To
-        self.Interp = Interp
+    def __init__(self, _from: float = 0.0, to: float = 0.0, interp: int = 0):
+        self._from = _from
+        self.to = to
+        self.interp = interp
 
     def to_bytes(self):
-        return struct.pack("<ffI", self.From, self.To, self.Interp)
+        return struct.pack("<ffI", self._from, self.to, self.interp)
 
 
 class RTPC:
     """
-    RTPCID tid
+    rtpcID tid
     rtpcType U8x
     rtpcAccum U8x
-    ParamID var (8 bits)
+    paramID var (8 bits)
     rtpcCurveID sid
     eScaling  U8x
     ulSize u16
-    RTPCGraphPoints ulSize * sizeof(RTPCGraphPoint)
+    rtpcGraphPoints ulSize * sizeof(RTPCGraphPoint)
     """
 
     def __init__(
         self, 
-        RTPCID: int = 0,
+        rtpcID: int = 0,
         rtpcType: int = 0,
         rtpcAccum: int = 0,
-        ParamID: int = 0,
+        paramID: int = 0,
         rtpcCurveID: int = 0,
         eScaling: int = 0,
         ulSize: int = 0,
-        RTPCGraphPoints: list[RTPCGraphPoint] = []
+        rtpcGraphPoints: list[RTPCGraphPoint] = []
     ):
-        self.RTPCID = RTPCID
+        self.rtpcID = rtpcID
         self.rtpcType = rtpcType
         self.rtpcAccum = rtpcAccum
-        self.ParamID = ParamID
+        self.paramID = paramID
         self.rtpcCurveID = rtpcCurveID
         self.eScaling = eScaling
         self.ulSize = ulSize
-        self.RTPCGraphPoints = RTPCGraphPoints
-        if self.ulSize != len(self.RTPCGraphPoints):
+        self.rtpcGraphPoints = rtpcGraphPoints
+        if self.ulSize != len(self.rtpcGraphPoints):
             raise AssertionError("RTPC.ulSize != len(RTPC.RTPCGraphPoints) fails")
 
     def to_bytes(self):
-        if self.ulSize != len(self.RTPCGraphPoints):
+        if self.ulSize != len(self.rtpcGraphPoints):
             raise AssertionError("RTPC.ulSize != len(RTPC.RTPCGraphPoints) fails")
         b = struct.pack(
             "<IBBBIBH",
-            self.RTPCID, self.rtpcType, self.rtpcAccum, self.ParamID, 
+            self.rtpcID, self.rtpcType, self.rtpcAccum, self.paramID, 
             self.rtpcCurveID, self.eScaling, self.ulSize
         )
-        for p in self.RTPCGraphPoints:
+        for p in self.rtpcGraphPoints:
             b += p.to_bytes()
         return b
 
 
-class CntrPlayListSetting:
+class BaseParam:
+
+    def __init__(self):
+        self.bIsOverrideParentFx: int = 0
+        self.uNumFx: int = 0
+        self.bitsFxBypass = 0
+        self.fxChunks: list[FxChunk] = []
+
+        self.bIsOverrideParentMetadata: int = 0
+        self.uNumFxMetadata: int = 0
+        self.fxChunksMetadata: list[FxChunkMetadata] = []
+
+        self.bOverrideAttachmentParams: int = 0
+        self.overrideBusId: int = 0
+        self.directParentID: int = 0
+        self.byBitVectorA: int = 0
+
+        self.propBundle = PropBundle()
+
+        self.positioningParamData: bytearray = bytearray()
+
+        self.rangePropBundle = RangedPropBundle()
+
+        self.auxParams = AuxParams()
+
+        self.advSetting = AdvSetting()
+
+        self.stateParams = StateParams()
+
+        self.ulNumRTPC: int = 0
+        self.rtpcs: list[RTPC] = []
+
+    @staticmethod
+    def from_memory_stream(stream: MemoryStream):
+        # [Fx]
+        baseParam = BaseParam()
+
+        baseParam.bIsOverrideParentFx = stream.uint8_read()
+        baseParam.uNumFx = stream.uint8_read()
+        if baseParam.uNumFx > 0:
+            baseParam.bitsFxBypass = stream.uint8_read()
+            baseParam.fxChunks = [
+                FxChunk(
+                    stream.uint8_read(),
+                    stream.uint32_read(),
+                    stream.uint8_read(),
+                    stream.uint8_read()
+                )
+                for _ in range(baseParam.uNumFx)
+            ]
+
+        # [Metadata Fx]
+        baseParam.bIsOverrideParentMetadata = stream.uint8_read()
+        baseParam.uNumFxMetadata = stream.uint8_read()
+        if baseParam.uNumFxMetadata > 0:
+            baseParam.fxChunksMetadata = [
+                FxChunkMetadata(
+                    stream.uint8_read(),
+                    stream.uint32_read(),
+                    stream.uint8_read()
+                )
+                for _ in range(baseParam.uNumFxMetadata)
+            ]
+
+        baseParam.bOverrideAttachmentParams = stream.uint8_read()
+
+        baseParam.overrideBusId = stream.uint32_read()
+
+        baseParam.directParentID = stream.uint32_read()
+
+        baseParam.byBitVectorA = stream.uint8_read()
+
+        # [Properties - No Modulator]
+        baseParam.propBundle.cProps = stream.uint8_read()
+        baseParam.propBundle.pIDs = [
+            stream.uint8_read() for _ in range(baseParam.propBundle.cProps)
+        ]
+        baseParam.propBundle.pValues = [
+            stream.read(4) for _ in range(baseParam.propBundle.cProps)
+        ]
+
+        # [Range Based Properties - No Modulator]
+        baseParam.rangePropBundle.cProps = stream.uint8_read()
+        baseParam.rangePropBundle.pIDs = [
+            stream.uint8_read() for _ in range(baseParam.rangePropBundle.cProps)
+        ]
+        baseParam.rangePropBundle.rangedValues = [
+            (stream.float_read(), stream.float_read()) 
+            for _ in range(baseParam.rangePropBundle.cProps)
+        ]
+
+        # [Positioning Param]
+        baseParam.positioningParamData = parse_positioning_params(stream)
+
+        # [Aux Params]
+        baseParam.auxParams.byBitVectorAux = stream.uint8_read()
+        baseParam.auxParams.has_aux = baseParam.auxParams.byBitVectorAux & 0b0000_1000 
+        if baseParam.auxParams.has_aux:
+            auxIDs: list[int] = [stream.uint32_read() for _ in range(4)] 
+            baseParam.auxParams.auxIDs = auxIDs
+        baseParam.auxParams.reflectionAuxBus = stream.uint32_read()
+
+        # [Adv Setting Params]
+        baseParam.advSetting.byBitVectorAdv = stream.uint8_read()
+        baseParam.advSetting.eVirtualQueueBehavior = stream.uint8_read()
+        baseParam.advSetting.u16MaxNumInstance = stream.uint16_read()
+        baseParam.advSetting.eBelowThresholdBehavior = stream.uint8_read()
+        baseParam.advSetting.byBitVectorHDR = stream.uint8_read()
+
+        # [State]
+        baseParam.stateParams.ulNumStateProps = stream.uint8_read()
+        baseParam.stateParams.stateProps = [
+            StateProp(
+                stream.uint8_read(),
+                stream.uint8_read(),
+                stream.uint8_read()
+            ) for _ in range(baseParam.stateParams.ulNumStateProps)
+        ]
+        baseParam.stateParams.ulNumStateGroups = stream.uint8_read()
+        stateGroups: list[StateGroup] = []
+        for _ in range(baseParam.stateParams.ulNumStateGroups):
+            ulStateGroupID = stream.uint32_read()
+            eStateSyncType = stream.uint8_read()
+            ulNumStates = stream.uint8_read()
+            states: list[StateGroupState] = [
+                StateGroupState(stream.uint32_read(), stream.uint32_read())
+                for _ in range(ulNumStates)
+            ]
+            stateGroups.append(StateGroup(
+                ulStateGroupID,
+                eStateSyncType,
+                ulNumStates,
+                states
+            ))
+        baseParam.stateParams.stateGroups = stateGroups
+
+        # [RTPC No Modulator]
+        baseParam.ulNumRTPC = stream.uint16_read()
+        rtpcs: list[RTPC] = []
+        for _ in range(baseParam.ulNumRTPC):
+            RTPCID = stream.uint32_read()
+            rtpcType = stream.uint8_read()
+            rtpcAccum = stream.uint8_read()
+            ParamID = stream.uint8_read()
+            rtpcCurveID = stream.uint32_read()
+            eScaling  = stream.uint8_read()
+            ulSize = stream.uint16_read()
+            RTPCGraphPoints: list[RTPCGraphPoint] = [
+                RTPCGraphPoint(
+                    stream.float_read(), 
+                    stream.float_read(), 
+                    stream.uint32_read()
+                )
+                for _ in range(ulSize)
+            ]
+            rtpcs.append(RTPC(
+                RTPCID, rtpcType, rtpcAccum, ParamID, rtpcCurveID, eScaling, ulSize, 
+                RTPCGraphPoints
+            ))
+        baseParam.rtpcs = rtpcs
+
+        return baseParam
+
+
+    def get_data(self):
+        b = struct.pack("<BB", self.bIsOverrideParentFx, self.uNumFx)
+
+        # [Fx]
+        if self.uNumFx != len(self.fxChunks):
+            raise AssertionError("RandomSequenceContainer.uNumFx != len(RandomSequenceContainer.fxChunks) fails")
+        if self.uNumFx > 0:
+            b += struct.pack("<B", self.bitsFxBypass)
+            for fxChunk in self.fxChunks:
+                b += fxChunk.to_bytes()
+
+        # [Metadata Fx]
+        if self.uNumFxMetadata != len(self.fxChunksMetadata):
+            raise AssertionError("RandomSequenceContainer.uNumFxMetadata != len(RandomSequenceContainer.fxChunksMetadata) fails")
+        b += struct.pack("<BB", self.bIsOverrideParentMetadata, self.uNumFxMetadata)
+        if self.uNumFxMetadata > 0:
+            for fxChunkMetadata in self.fxChunksMetadata:
+                b += fxChunkMetadata.to_bytes()
+
+        b += struct.pack(
+            "<BIIB", 
+            self.bOverrideAttachmentParams,
+            self.overrideBusId,
+            self.directParentID,
+            self.byBitVectorA
+        )
+
+        b += self.propBundle.to_bytes()
+
+        b += self.rangePropBundle.to_bytes()
+        
+        b += struct.pack(f"<{len(self.positioningParamData)}s", self.positioningParamData)
+
+        b += self.auxParams.to_bytes()
+
+        b += self.advSetting.to_bytes()
+
+        b += self.stateParams.to_bytes()
+
+        b += struct.pack("<H", self.ulNumRTPC)
+        if self.ulNumRTPC != len(self.rtpcs):
+            raise AssertionError("RandomSequenceContainer.ulNumRTPC != len(RandomSequenceContainer.RTPCs) fails")
+        for rtpc in self.rtpcs:
+            b += rtpc.to_bytes()
+
+        return b
+
+
+class ContainerChildren:
+    """
+    numChildren u32
+    children numChildren * tid
+    """
+
+    def __init__(self):
+        self.numChildren = 0
+        self.children: list[int] = []
+
+    def get_data(self):
+        if self.numChildren != len(self.children):
+            raise AssertionError(
+                "ContainerChildren.numChildren != len(ContainerChildren.contents) "
+                "fails"
+            )
+        b = struct.pack("<I", self.numChildren)
+        for child in self.children:
+            b += struct.pack("<I", child)
+        return b
+
+
+class PlayListSetting:
     """
     sLoopCount u16
     sLoopModMin u16
@@ -1037,15 +1210,17 @@ class PlayListItem:
         return struct.pack("<II", self.ulPlayID, self.weight)
 
 
-class LayerContainer(Container):
+class LayerContainer(HircEntry):
     """
     ulNumLayers u32
     """
 
     def __init__(self):
         super().__init__()
+        self.baseParam: BaseParam | None = None
+        self.children: ContainerChildren = ContainerChildren()
         self.ulNumLayers: int = 0
-        self.layer_data: bytearray = bytearray()
+        self.layerData: bytearray = bytearray()
 
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -1059,15 +1234,15 @@ class LayerContainer(Container):
 
         cntr.hierarchy_id = stream.uint32_read()
 
-        set_hierarchy_params(cntr, stream)
+        cntr.baseParam = BaseParam.from_memory_stream(stream)
 
         # [Children]
-        cntr.numChildren = stream.uint32_read()
-        for _ in range(cntr.numChildren):
-            cntr.children.append(stream.uint32_read())
+        cntr.children.numChildren = stream.uint32_read()
+        for _ in range(cntr.children.numChildren):
+            cntr.children.children.append(stream.uint32_read())
 
         # [Skip Layer]
-        cntr.layer_data = stream.read(cntr.size - (stream.tell() - head))
+        cntr.layerData = stream.read(cntr.size - (stream.tell() - head))
 
         tail = stream.tell()
 
@@ -1078,17 +1253,16 @@ class LayerContainer(Container):
 
     def get_data(self):
         b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
-        b += struct.pack("<BB", self.bIsOverrideParentFx, self.uNumFx)
 
-        b += pack_hierarchy_params(self)
+        if self.baseParam == None:
+            raise AssertionError(
+                "Layer container does not has a base parameter."
+            )
+        b += self.baseParam.get_data()
 
-        if self.numChildren != len(self.children):
-            raise AssertionError("RandomSequenceContainer.numChildren != len(RandomSequenceContainer.contents) fails")
-        b += struct.pack("<I", self.numChildren)
-        for child in self.children:
-            b += struct.pack("<I", child)
+        b += self.children.get_data()
 
-        b += struct.pack(f"<{len(self.layer_data)}s", self.layer_data)
+        b += struct.pack(f"<{len(self.layerData)}s", self.layerData)
 
         if self.size != len(b) - 5:
             raise AssertionError(f"Packing size mismatch with specified size: {self.size} and {len(b) - 5}")
@@ -1107,29 +1281,29 @@ def new_rand_seq_cntr(stream: MemoryStream):
 
     cntr.hierarchy_id = stream.uint32_read()
 
-    set_hierarchy_params(cntr, stream)
+    cntr.baseParam = BaseParam.from_memory_stream(stream)
 
     # [PlayList Setting]
-    cntr.CntrPlayListSetting.sLoopCount = stream.uint16_read()
-    cntr.CntrPlayListSetting.sLoopModMin = stream.uint16_read()
-    cntr.CntrPlayListSetting.sLoopModMax = stream.uint16_read()
-    cntr.CntrPlayListSetting.fTransitionTime = stream.float_read()
-    cntr.CntrPlayListSetting.fTransitionTimeModMin = stream.float_read()
-    cntr.CntrPlayListSetting.fTransitionTimeModMax = stream.float_read()
-    cntr.CntrPlayListSetting.wAvoidReaptCount = stream.uint16_read()
-    cntr.CntrPlayListSetting.eTransitionMode = stream.uint8_read()
-    cntr.CntrPlayListSetting.eRandomMode = stream.uint8_read()
-    cntr.CntrPlayListSetting.eMode = stream.uint8_read()
-    cntr.CntrPlayListSetting.byBitVectorPlayList = stream.uint8_read()
+    cntr.playListSetting.sLoopCount = stream.uint16_read()
+    cntr.playListSetting.sLoopModMin = stream.uint16_read()
+    cntr.playListSetting.sLoopModMax = stream.uint16_read()
+    cntr.playListSetting.fTransitionTime = stream.float_read()
+    cntr.playListSetting.fTransitionTimeModMin = stream.float_read()
+    cntr.playListSetting.fTransitionTimeModMax = stream.float_read()
+    cntr.playListSetting.wAvoidReaptCount = stream.uint16_read()
+    cntr.playListSetting.eTransitionMode = stream.uint8_read()
+    cntr.playListSetting.eRandomMode = stream.uint8_read()
+    cntr.playListSetting.eMode = stream.uint8_read()
+    cntr.playListSetting.byBitVectorPlayList = stream.uint8_read()
 
     # [Children]
-    cntr.numChildren = stream.uint32_read()
-    for _ in range(cntr.numChildren):
-        cntr.children.append(stream.uint32_read())
+    cntr.containerChildren.numChildren = stream.uint32_read()
+    for _ in range(cntr.containerChildren.numChildren):
+        cntr.containerChildren.children.append(stream.uint32_read())
 
     # [PlayListItem]
     cntr.ulPlayListItem = stream.uint16_read()
-    cntr.PlayListItems = [
+    cntr.playListItems = [
         PlayListItem(stream.uint32_read(), stream.int32_read())
         for _ in range(cntr.ulPlayListItem)
     ]
@@ -1192,199 +1366,24 @@ def parse_positioning_params(stream: MemoryStream):
 
     return stream.read(tail - head)
 
-def set_hierarchy_params(entry: HircEntryWithParams, stream: MemoryStream):
-    # [Fx]
-    entry.bIsOverrideParentFx = stream.uint8_read()
-    entry.uNumFx = stream.uint8_read()
-    if entry.uNumFx > 0:
-        entry.bitsFxBypass = stream.uint8_read()
-        entry.fxChunks = [
-            FxChunk(
-                stream.uint8_read(),
-                stream.uint32_read(),
-                stream.uint8_read(),
-                stream.uint8_read()
-            )
-            for _ in range(entry.uNumFx)
-        ]
-
-    # [Metadata Fx]
-    entry.bIsOverrideParentMetadata = stream.uint8_read()
-    entry.uNumFxMetadata = stream.uint8_read()
-    if entry.uNumFxMetadata > 0:
-        entry.fxChunksMetadata = [
-            FxChunkMetadata(
-                stream.uint8_read(),
-                stream.uint32_read(),
-                stream.uint8_read()
-            )
-            for _ in range(entry.uNumFxMetadata)
-        ]
-
-    entry.bOverrideAttachmentParams = stream.uint8_read()
-
-    entry.OverrideBusId = stream.uint32_read()
-
-    entry.DirectParentID = stream.uint32_read()
-
-    entry.byBitVectorA = stream.uint8_read()
-
-    # [Properties - No Modulator]
-    entry.PropBundle.cProps = stream.uint8_read()
-    entry.PropBundle.pIDs = [
-        stream.uint8_read() for _ in range(entry.PropBundle.cProps)
-    ]
-    entry.PropBundle.pValues = [
-        stream.read(4) for _ in range(entry.PropBundle.cProps)
-    ]
-
-    # [Range Based Properties - No Modulator]
-    entry.RangePropBundle.cProps = stream.uint8_read()
-    entry.RangePropBundle.pIDs = [
-        stream.uint8_read() for _ in range(entry.RangePropBundle.cProps)
-    ]
-    entry.RangePropBundle.rangedValues = [
-        (stream.float_read(), stream.float_read()) 
-        for _ in range(entry.RangePropBundle.cProps)
-    ]
-
-    # [Positioning Param]
-    entry.positioningParamData = parse_positioning_params(stream)
-
-    # [Aux Params]
-    entry.AuxParams.byBitVectorAux = stream.uint8_read()
-    entry.AuxParams.has_aux = entry.AuxParams.byBitVectorAux & 0b0000_1000 
-    if entry.AuxParams.has_aux:
-        auxIDs: list[int] = [stream.uint32_read() for _ in range(4)] 
-        entry.AuxParams.auxIDs = auxIDs
-    entry.AuxParams.reflectionAuxBus = stream.uint32_read()
-
-    # [Adv Setting Params]
-    entry.AdvSetting.byBitVectorAdv = stream.uint8_read()
-    entry.AdvSetting.eVirtualQueueBehavior = stream.uint8_read()
-    entry.AdvSetting.u16MaxNumInstance = stream.uint16_read()
-    entry.AdvSetting.eBelowThresholdBehavior = stream.uint8_read()
-    entry.AdvSetting.byBitVectorHDR = stream.uint8_read()
-
-    # [State]
-    entry.StateParams.ulNumStateProps = stream.uint8_read()
-    entry.StateParams.stateProps = [
-        StateProp(
-            stream.uint8_read(),
-            stream.uint8_read(),
-            stream.uint8_read()
-        ) for _ in range(entry.StateParams.ulNumStateProps)
-    ]
-    entry.StateParams.ulNumStateGroups = stream.uint8_read()
-    stateGroups: list[StateGroup] = []
-    for _ in range(entry.StateParams.ulNumStateGroups):
-        ulStateGroupID = stream.uint32_read()
-        eStateSyncType = stream.uint8_read()
-        ulNumStates = stream.uint8_read()
-        states: list[StateGroupState] = [
-            StateGroupState(stream.uint32_read(), stream.uint32_read())
-            for _ in range(ulNumStates)
-        ]
-        stateGroups.append(StateGroup(
-            ulStateGroupID,
-            eStateSyncType,
-            ulNumStates,
-            states
-        ))
-    entry.StateParams.stateGroups = stateGroups
-
-    # [RTPC No Modulator]
-    entry.ulNumRTPC = stream.uint16_read()
-    RTPCs: list[RTPC] = []
-    for _ in range(entry.ulNumRTPC):
-        RTPCID = stream.uint32_read()
-        rtpcType = stream.uint8_read()
-        rtpcAccum = stream.uint8_read()
-        ParamID = stream.uint8_read()
-        rtpcCurveID = stream.uint32_read()
-        eScaling  = stream.uint8_read()
-        ulSize = stream.uint16_read()
-        RTPCGraphPoints: list[RTPCGraphPoint] = [
-            RTPCGraphPoint(
-                stream.float_read(), 
-                stream.float_read(), 
-                stream.uint32_read()
-            )
-            for _ in range(ulSize)
-        ]
-        RTPCs.append(RTPC(
-            RTPCID, rtpcType, rtpcAccum, ParamID, rtpcCurveID, eScaling, ulSize, 
-            RTPCGraphPoints
-        ))
-    entry.RTPCs = RTPCs
-
-
-def pack_hierarchy_params(entry: HircEntryWithParams):
-    b = b""
-
-    # [Fx]
-    if entry.uNumFx != len(entry.fxChunks):
-        raise AssertionError("RandomSequenceContainer.uNumFx != len(RandomSequenceContainer.fxChunks) fails")
-    if entry.uNumFx > 0:
-        b += struct.pack("<B", entry.bitsFxBypass)
-        for fxChunk in entry.fxChunks:
-            b += fxChunk.to_bytes()
-
-    # [Metadata Fx]
-    if entry.uNumFxMetadata != len(entry.fxChunksMetadata):
-        raise AssertionError("RandomSequenceContainer.uNumFxMetadata != len(RandomSequenceContainer.fxChunksMetadata) fails")
-    b += struct.pack("<BB", entry.bIsOverrideParentMetadata, entry.uNumFxMetadata)
-    if entry.uNumFxMetadata > 0:
-        for fxChunkMetadata in entry.fxChunksMetadata:
-            b += fxChunkMetadata.to_bytes()
-
-    b += struct.pack(
-        "<BIIB", 
-        entry.bOverrideAttachmentParams,
-        entry.OverrideBusId,
-        entry.DirectParentID,
-        entry.byBitVectorA
-    )
-
-    b += entry.PropBundle.to_bytes()
-
-    b += entry.RangePropBundle.to_bytes()
-    
-    b += struct.pack(f"<{len(entry.positioningParamData)}s", entry.positioningParamData)
-
-    b += entry.AuxParams.to_bytes()
-
-    b += entry.AdvSetting.to_bytes()
-
-    b += entry.StateParams.to_bytes()
-
-    b += struct.pack("<H", entry.ulNumRTPC)
-    if entry.ulNumRTPC != len(entry.RTPCs):
-        raise AssertionError("RandomSequenceContainer.ulNumRTPC != len(RandomSequenceContainer.RTPCs) fails")
-    for rtpc in entry.RTPCs:
-        b += rtpc.to_bytes()
-
-    return b
-
-
 def pack_rand_seq_cntr(cntr: RandomSequenceContainer):
     b = struct.pack("<BII", cntr.hierarchy_type, cntr.size, cntr.hierarchy_id)
-    b += struct.pack("<BB", cntr.bIsOverrideParentFx, cntr.uNumFx)
 
-    b += pack_hierarchy_params(cntr)
+    if cntr.baseParam == None:
+        raise AssertionError(
+            "Random / Sequence container does not has a base parameter."
+        )
 
-    b += cntr.CntrPlayListSetting.to_bytes()
+    b += cntr.baseParam.get_data()
 
-    if cntr.numChildren != len(cntr.children):
-        raise AssertionError("RandomSequenceContainer.numChildren != len(RandomSequenceContainer.contents) fails")
-    b += struct.pack("<I", cntr.numChildren)
-    for child in cntr.children:
-        b += struct.pack("<I", child)
+    b += cntr.playListSetting.to_bytes()
 
-    if cntr.ulPlayListItem != len(cntr.PlayListItems):
+    b += cntr.containerChildren.get_data()
+
+    if cntr.ulPlayListItem != len(cntr.playListItems):
         raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
     b += struct.pack("<H", cntr.ulPlayListItem)
-    for playListItem in cntr.PlayListItems:
+    for playListItem in cntr.playListItems:
         b += playListItem.to_bytes()
 
     if cntr.size != len(b) - 5:
