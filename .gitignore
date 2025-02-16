@@ -8,6 +8,7 @@ vgmstream-win64/
 vgmstream-linux/
 vgmstream-macos/
 __pycache__/
+**/.tmp
 **/.venv
 **/.vscode
 **/database
