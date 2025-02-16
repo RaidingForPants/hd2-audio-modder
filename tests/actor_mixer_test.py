@@ -3,7 +3,7 @@ import unittest
 
 from core import GameArchive
 from log import logger
-from tests.multiprocess_test import test_all_archive_sync
+from tests.parser_test_common import test_all_archive_sync
 from wwise_hierarchy import ActorMixer, HircEntry
 
 
