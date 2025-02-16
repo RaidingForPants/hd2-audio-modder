@@ -445,6 +445,11 @@ class HircEntryFactory:
                 return new_rand_seq_cntr(stream)
             else:
                 return RandomSequenceContainer.from_memory_stream(stream)
+        elif hierarchy_type == 0x07:
+            if os.environ["TEST_ACTOR_MIXER"] == "1":
+                return ActorMixer.from_memory_stream(stream)
+            else:
+                return HircEntry.from_memory_stream(stream)
         elif hierarchy_type == 0x09:
             if os.environ["TEST_LAYER"] == "1":
                 return LayerContainer.from_memory_stream(stream)
@@ -582,7 +587,7 @@ class FxChunk:
         self.bIsShareSet: int = bIsShareSet # U8x
         self.bIsRendered: int = bIsRendered # U8x
 
-    def to_bytes(self):
+    def get_data(self):
         return struct.pack(
             "<BIBB", self.uFxIndex, self.fxId, self.bIsShareSet, self.bIsRendered
         )
@@ -623,7 +628,7 @@ class PropBundle:
         if self.cProps != len(self.pIDs) != len(self.pValues):
             raise AssertionError("PropBundle.cProps != len(PropBundle.pIDs) != len(PropBundle.pValues) fails")
 
-    def to_bytes(self):
+    def get_data(self):
         if self.cProps != len(self.pIDs) != len(self.pValues):
             raise AssertionError("PropBundle.cProps != len(PropBundle.pIDs) != len(PropBundle.pValues) fails")
         b = struct.pack("<B", self.cProps)
@@ -653,7 +658,7 @@ class RangedPropBundle:
         if self.cProps != len(self.pIDs) != len(self.rangedValues):
             raise AssertionError("PropBundle.cProps != len(PropBundle.pIDs) != len(PropBundle.pValues) fails")
 
-    def to_bytes(self):
+    def get_data(self):
         if self.cProps != len(self.pIDs) != len(self.rangedValues):
             raise AssertionError("PropBundle.cProps != len(PropBundle.pIDs) != len(PropBundle.pValues) fails")
         b = struct.pack("<B", self.cProps)
@@ -686,7 +691,7 @@ class AuxParams:
         if self.has_aux and len(auxIDs) != 4:
             raise AssertionError("AuxParams.has_aux and len(auxIDs) != 4 fails")
 
-    def to_bytes(self):
+    def get_data(self):
         if not self.has_aux and len(self.auxIDs) > 0:
             raise AssertionError("AuxParams.has_aux and len(self.auxIDs) > 0 fails")
         if self.has_aux and len(self.auxIDs) != 4:
@@ -722,7 +727,7 @@ class AdvSetting:
         self.eBelowThresholdBehavior = eBelowThresholdBehavior
         self.byBitVectorHDR = byBitVectorHDR
 
-    def to_bytes(self):
+    def get_data(self):
         return struct.pack(
             "<BBHBB",
             self.byBitVectorAdv,
@@ -759,7 +764,7 @@ class StateGroupState:
        self.ulStateID = ulStateID 
        self.ulStateInstanceID = ulStateInstanceID
 
-    def to_bytes(self):
+    def get_data(self):
         return struct.pack("<II", self.ulStateID, self.ulStateInstanceID)
 
 
@@ -784,14 +789,14 @@ class StateGroup:
         if self.ulNumStates != len(self.states):
             raise AssertionError("StateGroup.ulNumStates != len(StateGroup.states) fails")
 
-    def to_bytes(self):
+    def get_data(self):
         if self.ulNumStates != len(self.states):
             raise AssertionError("StateGroup.ulNumStates != len(StateGroup.states) fails")
         b = struct.pack(
             "<IBB", self.ulStateGroupID, self.eStateSyncType, self.ulNumStates
         )
         for state in self.states:
-            b += state.to_bytes()
+            b += state.get_data()
         return b
 
 
@@ -823,7 +828,7 @@ class StateParams:
                 "StateParams.ulNumStateGroups != len(StateParams.stateGroups) fails"
             )
 
-    def to_bytes(self):
+    def get_data(self):
         if self.ulNumStateProps != len(self.stateProps):
             raise AssertionError(
                 "StateParams.ulNumStateProps != len(StateParams.stateProps) fails"
@@ -837,7 +842,7 @@ class StateParams:
             b += stateProp.to_bytes()
         b += struct.pack("<B", self.ulNumStateGroups)
         for stateGroup in self.stateGroups:
-            b += stateGroup.to_bytes()
+            b += stateGroup.get_data()
         return b
 
 
@@ -853,7 +858,7 @@ class RTPCGraphPoint:
         self.to = to
         self.interp = interp
 
-    def to_bytes(self):
+    def get_data(self):
         return struct.pack("<ffI", self._from, self.to, self.interp)
 
 
@@ -891,7 +896,7 @@ class RTPC:
         if self.ulSize != len(self.rtpcGraphPoints):
             raise AssertionError("RTPC.ulSize != len(RTPC.RTPCGraphPoints) fails")
 
-    def to_bytes(self):
+    def get_data(self):
         if self.ulSize != len(self.rtpcGraphPoints):
             raise AssertionError("RTPC.ulSize != len(RTPC.RTPCGraphPoints) fails")
         b = struct.pack(
@@ -900,7 +905,7 @@ class RTPC:
             self.rtpcCurveID, self.eScaling, self.ulSize
         )
         for p in self.rtpcGraphPoints:
-            b += p.to_bytes()
+            b += p.get_data()
         return b
 
 
@@ -1077,7 +1082,7 @@ class BaseParam:
         if self.uNumFx > 0:
             b += struct.pack("<B", self.bitsFxBypass)
             for fxChunk in self.fxChunks:
-                b += fxChunk.to_bytes()
+                b += fxChunk.get_data()
 
         # [Metadata Fx]
         if self.uNumFxMetadata != len(self.fxChunksMetadata):
@@ -1095,23 +1100,23 @@ class BaseParam:
             self.byBitVectorA
         )
 
-        b += self.propBundle.to_bytes()
+        b += self.propBundle.get_data()
 
-        b += self.rangePropBundle.to_bytes()
+        b += self.rangePropBundle.get_data()
         
         b += struct.pack(f"<{len(self.positioningParamData)}s", self.positioningParamData)
 
-        b += self.auxParams.to_bytes()
+        b += self.auxParams.get_data()
 
-        b += self.advSetting.to_bytes()
+        b += self.advSetting.get_data()
 
-        b += self.stateParams.to_bytes()
+        b += self.stateParams.get_data()
 
         b += struct.pack("<H", self.ulNumRTPC)
         if self.ulNumRTPC != len(self.rtpcs):
             raise AssertionError("RandomSequenceContainer.ulNumRTPC != len(RandomSequenceContainer.RTPCs) fails")
         for rtpc in self.rtpcs:
-            b += rtpc.to_bytes()
+            b += rtpc.get_data()
 
         return b
 
@@ -1179,7 +1184,7 @@ class PlayListSetting:
         self.eMode = eMode 
         self.byBitVectorPlayList = byBitVectorPlayList 
 
-    def to_bytes(self):
+    def get_data(self):
         return struct.pack(
             "<HHHfffHBBBB",
             self.sLoopCount,
@@ -1206,7 +1211,7 @@ class PlayListItem:
         self.ulPlayID = ulPlayID
         self.weight = weight
 
-    def to_bytes(self):
+    def get_data(self):
         return struct.pack("<II", self.ulPlayID, self.weight)
 
 
@@ -1265,8 +1270,59 @@ class LayerContainer(HircEntry):
         b += struct.pack(f"<{len(self.layerData)}s", self.layerData)
 
         if self.size != len(b) - 5:
-            raise AssertionError(f"Packing size mismatch with specified size: {self.size} and {len(b) - 5}")
+            raise AssertionError(f"LayerContainer: packing size mismatch with specified size: {self.size} and {len(b) - 5}")
 
+        return b
+
+
+class ActorMixer(HircEntry):
+
+    def __init__(self):
+        super().__init__()
+        self.baseParam: BaseParam | None = None
+        self.children: ContainerChildren = ContainerChildren()
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        mixer = ActorMixer()
+
+        mixer.hierarchy_type = stream.uint8_read()
+
+        mixer.size = stream.uint32_read()
+
+        head = stream.tell()
+
+        mixer.hierarchy_id = stream.uint32_read()
+
+        mixer.baseParam = BaseParam.from_memory_stream(stream)
+
+        # [Children]
+        mixer.children.numChildren = stream.uint32_read()
+        for _ in range(mixer.children.numChildren):
+            mixer.children.children.append(stream.uint32_read())
+
+        tail = stream.tell()
+
+        if mixer.size != (tail - head):
+            raise AssertionError("ActorMixer.size != (tail - head) fails")
+
+        return mixer
+
+    def get_data(self):
+        b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
+
+        if self.baseParam == None:
+            raise AssertionError(
+                "Layer container does not has a base parameter."
+            )
+
+        b += self.baseParam.get_data()
+        
+        b += self.children.get_data()
+
+        if self.size != len(b) - 5:
+            raise AssertionError(f"ActorMixer: packing size mismatch with specified size: {self.size} and {len(b) - 5}")
+       
         return b
 
 
@@ -1314,6 +1370,7 @@ def new_rand_seq_cntr(stream: MemoryStream):
         raise AssertionError("RandomSequenceContainer.size != (tail - head) fails")
 
     return cntr
+
 
 def parse_positioning_params(stream: MemoryStream):
     """
@@ -1366,6 +1423,7 @@ def parse_positioning_params(stream: MemoryStream):
 
     return stream.read(tail - head)
 
+
 def pack_rand_seq_cntr(cntr: RandomSequenceContainer):
     b = struct.pack("<BII", cntr.hierarchy_type, cntr.size, cntr.hierarchy_id)
 
@@ -1376,7 +1434,7 @@ def pack_rand_seq_cntr(cntr: RandomSequenceContainer):
 
     b += cntr.baseParam.get_data()
 
-    b += cntr.playListSetting.to_bytes()
+    b += cntr.playListSetting.get_data()
 
     b += cntr.containerChildren.get_data()
 
@@ -1384,9 +1442,9 @@ def pack_rand_seq_cntr(cntr: RandomSequenceContainer):
         raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
     b += struct.pack("<H", cntr.ulPlayListItem)
     for playListItem in cntr.playListItems:
-        b += playListItem.to_bytes()
+        b += playListItem.get_data()
 
     if cntr.size != len(b) - 5:
-        raise AssertionError(f"Packing size mismatch with specified size: {cntr.size} and {len(b) - 5}")
+        raise AssertionError(f"Random / Sequence container: packing size mismatch with specified size: {cntr.size} and {len(b) - 5}")
 
     return b
