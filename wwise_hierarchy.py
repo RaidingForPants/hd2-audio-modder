@@ -210,6 +210,9 @@ class RandomSequenceContainer(HircEntry):
         return entry
         
     def get_data(self):
+        if os.environ["TEST_RAND"] == "1":
+            return pack_rand_seq_cntr(self)
+
         return (
             b"".join([
                 struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
@@ -445,6 +448,8 @@ class Sound(HircEntry):
         return entry
 
     def get_data(self):
+        if os.environ["TEST_SOUND"] == "1":
+            return pack_sound(self)
         return struct.pack(f"<BII14s{len(self.misc)}s", self.hierarchy_type, self.size, self.hierarchy_id, self.sources[0].get_data(), self.misc)
         
         
