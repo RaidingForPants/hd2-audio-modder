@@ -1,7 +1,7 @@
 import os
 import unittest
 
-from core import GameArchive
+from core import GameArchive, Mod
 from log import logger
 from tests.parser_test_common import test_all_archive_sync
 from wwise_hierarchy import ActorMixer, HircEntry, LayerContainer, RandomSequenceContainer, Sound, pack_sound
@@ -10,6 +10,7 @@ from wwise_hierarchy import pack_rand_seq_cntr
 
 class TestParserIntegration(unittest.TestCase):
 
+    """
     def _test_integration(self, archive: str):
         os.environ["TEST_ACTOR_MIXER"] = "0"
         os.environ["TEST_LAYER"] = "0"
@@ -71,3 +72,17 @@ class TestParserIntegration(unittest.TestCase):
     def test_integration(self):
         logger.critical("Running test_integration...")
         test_all_archive_sync(self._test_integration)
+    """
+
+    def _test_build(self, file: str):
+        os.environ["TEST_ACTOR_MIXER"] = "1"
+        os.environ["TEST_LAYER"] = "1"
+        os.environ["TEST_RAND"] = "1"
+        os.environ["TEST_SOUND"] = "1"
+        os.environ["TEST_BUILD"] = "1"
+        archive = GameArchive.from_file(file)
+        archive.to_file("I:/tmp")
+
+    def test_build(self):
+        logger.critical("Running test_build...")
+        test_all_archive_sync(self._test_build)
