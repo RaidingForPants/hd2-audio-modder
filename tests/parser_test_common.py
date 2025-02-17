@@ -46,9 +46,10 @@ def test_all_archive_multi_process(func: Callable[[str], None], func_name: str):
                 logger.critical(f"{failed_test[0]}: {failed_test[1]}")
 
 def test_all_archive_sync(func: Callable[[str], None]):
-    os.environ["TEST_RAND"] = "0"
-    os.environ["TEST_LAYER"] = "0"
     os.environ["TEST_ACTOR_MIXER"] = "0"
+    os.environ["TEST_LAYER"] = "0"
+    os.environ["TEST_RAND"] = "0"
+    os.environ["TEST_SOUND"] = "0"
 
     files = os.scandir(env.get_data_path())
 
