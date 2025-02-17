@@ -1469,15 +1469,15 @@ class Mod:
         patch_game_archive.text_banks = {}
             
         for key, value in self.get_wwise_streams().items():
-            if os.environ["TEST_BUILD"] == "1" or value.modified:
+            if value.modified:
                 patch_game_archive.wwise_streams[key] = value
                 
         for key, value in self.get_wwise_banks().items():
-            if os.environ["TEST_BUILD"] == "1" or value.modified:
+            if value.modified:
                 patch_game_archive.wwise_banks[key] = value
                 
         for key, value in self.get_text_banks().items():
-            if os.environ["TEST_BUILD"] == "1" or value.modified:
+            if value.modified:
                 patch_game_archive.text_banks[key] = value
  
         patch_game_archive.to_file(output_folder)
