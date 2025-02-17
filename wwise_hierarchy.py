@@ -18,7 +18,7 @@ class HircEntry:
         self.size: int = 0
         self.hierarchy_type: int = 0
         self.hierarchy_id: int = 0
-        self.sources = []
+        self.sources: list[BankSourceStruct] = []
         self.track_info = []
         self.soundbank: Any = None # WwiseBank
         self.misc: bytearray = bytearray()
@@ -165,63 +165,74 @@ class RandomSequenceContainer(HircEntry):
 
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
-        entry = RandomSequenceContainer()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        start_position = stream.tell()
-        entry.hierarchy_id = stream.uint32_read()
+        cntr = RandomSequenceContainer()
 
-        # ---------------------------------------
-        section_start = stream.tell()
-        stream.advance(1)
-        n = stream.uint8_read() #num fx
-        if n == 0:
-            stream.advance(12)
-        else:
-            stream.advance(7*n + 13)
-        stream.advance(5*stream.uint8_read()) #number of props
-        stream.advance(9*stream.uint8_read()) #number of props (again)
-        if stream.uint8_read() & 0b0000_0010: #positioning bit vector
-            if stream.uint8_read() & 0b0100_0000: # relative pathing bit vector
-                stream.advance(5)
-                stream.advance(16*stream.uint32_read())
-                stream.advance(20*stream.uint32_read())
-        if stream.uint8_read() & 0b0000_1000: #I forget what this is for (if HAS AUX)
-            stream.advance(26)
-        else:
-           stream.advance(10)
-        stream.advance(3*stream.uint8_read()) #num state props
-        for _ in range(stream.uint8_read()): #num state groups
-            stream.advance(5)
-            stream.advance(8*stream.uint8_read())
-        for _ in range(stream.uint16_read()):  # num RTPC
-            stream.advance(12)
-            stream.advance(stream.uint16_read()*12)
-        section_end = stream.tell()
-        # ---------------------------------------
+        cntr.hierarchy_type = stream.uint8_read()
 
-        stream.seek(section_start)
-        entry.unused_sections.append(stream.read(section_end-section_start+24))
+        cntr.size = stream.uint32_read()
 
-        for _ in range(stream.uint32_read()): #number of children (tracks)
-            entry.children.append(stream.uint32_read())
+        head = stream.tell()
 
-        entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
-        return entry
-        
+        cntr.hierarchy_id = stream.uint32_read()
+
+        cntr.baseParam = BaseParam.from_memory_stream(stream)
+
+        # [PlayList Setting]
+        cntr.playListSetting.sLoopCount = stream.uint16_read()
+        cntr.playListSetting.sLoopModMin = stream.uint16_read()
+        cntr.playListSetting.sLoopModMax = stream.uint16_read()
+        cntr.playListSetting.fTransitionTime = stream.float_read()
+        cntr.playListSetting.fTransitionTimeModMin = stream.float_read()
+        cntr.playListSetting.fTransitionTimeModMax = stream.float_read()
+        cntr.playListSetting.wAvoidReaptCount = stream.uint16_read()
+        cntr.playListSetting.eTransitionMode = stream.uint8_read()
+        cntr.playListSetting.eRandomMode = stream.uint8_read()
+        cntr.playListSetting.eMode = stream.uint8_read()
+        cntr.playListSetting.byBitVectorPlayList = stream.uint8_read()
+
+        # [Children]
+        cntr.containerChildren.numChildren = stream.uint32_read()
+        for _ in range(cntr.containerChildren.numChildren):
+            cntr.containerChildren.children.append(stream.uint32_read())
+
+        # [PlayListItem]
+        cntr.ulPlayListItem = stream.uint16_read()
+        cntr.playListItems = [
+            PlayListItem(stream.uint32_read(), stream.int32_read())
+            for _ in range(cntr.ulPlayListItem)
+        ]
+
+        tail = stream.tell()
+
+        if cntr.size != (tail - head):
+            raise AssertionError("RandomSequenceContainer.size != (tail - head) fails")
+
+        return cntr
+
+
     def get_data(self):
-        if os.environ["TEST_RAND"] == "1":
-            return pack_rand_seq_cntr(self)
+        b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
 
-        return (
-            b"".join([
-                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
-                self.unused_sections[0],
-                len(self.children).to_bytes(4, byteorder="little"),
-                b"".join([x.to_bytes(4, byteorder="little") for x in self.children]),
-                self.unused_sections[1]
-            ])
-        )
+        if self.baseParam == None:
+            raise AssertionError(
+                f"Random / Sequence container {self.hierarchy_id} does not has a base parameter."
+            )
+        b += self.baseParam.get_data()
+
+        b += self.playListSetting.get_data()
+
+        b += self.containerChildren.get_data()
+
+        if self.ulPlayListItem != len(self.playListItems):
+            raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
+        b += struct.pack("<H", self.ulPlayListItem)
+        for playListItem in self.playListItems:
+            b += playListItem.get_data()
+
+        if self.size != len(b) - 5:
+            raise AssertionError(f"Random / Sequence container: packing size mismatch with specified size: {self.size} and {len(b) - 5}")
+
+        return b
     
 
 class MusicSegment(HircEntry):
@@ -350,13 +361,37 @@ class BankSourceStruct:
         self.plugin_data: bytearray = bytearray()
         
     @classmethod
-    def from_bytes(cls, bytes: bytes | bytearray):
+    def from_memory_stream(cls, stream: MemoryStream):
         b = BankSourceStruct()
-        b.plugin_id, b.stream_type, b.source_id, b.mem_size, b.bit_flags = struct.unpack("<IBIIB", bytes)
+        b.plugin_id, b.stream_type, b.source_id, b.mem_size, b.bit_flags = \
+            struct.unpack("<IBIIB", stream.read(14))
+        if (b.plugin_id & 0x0F) == 2:
+            if b.plugin_id:
+                b.plugin_size = stream.uint32_read()
+                if b.plugin_size > 0:
+                    b.plugin_data = stream.read(b.plugin_size)
         return b
         
     def get_data(self):
-        return struct.pack("<IBIIB", self.plugin_id, self.stream_type, self.source_id, self.mem_size, self.bit_flags)
+        b = struct.pack(
+            "<IBIIB",
+            self.plugin_id,
+            self.stream_type,
+            self.source_id,
+            self.mem_size,
+            self.bit_flags
+        )
+        if (self.plugin_id & 0X0F) == 2:
+            if self.plugin_id:
+                b += struct.pack(f"<I", self.plugin_size)
+                if self.plugin_size > 0:
+                    if self.plugin_size != len(self.plugin_data):
+                        raise AssertionError(
+                            "BankSourceStruct.plugin_size != len(BankSourceStruct.plugin_data)",
+                            " fails"
+                        )
+                    b += struct.pack(f"<{len(self.plugin_data)}s", self.plugin_data)
+        return b
         
 
 class TrackInfoStruct:
@@ -399,7 +434,7 @@ class MusicTrack(HircEntry):
         entry.bit_flags = stream.uint8_read()
         num_sources = stream.uint32_read()
         for _ in range(num_sources):
-            source = BankSourceStruct.from_bytes(stream.read(14))
+            source = BankSourceStruct.from_memory_stream(stream)
             entry.sources.append(source)
         num_track_info = stream.uint32_read()
         for _ in range(num_track_info):
@@ -439,18 +474,36 @@ class Sound(HircEntry):
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
-        entry = Sound()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        entry.hierarchy_id = stream.uint32_read()
-        entry.sources.append(BankSourceStruct.from_bytes(stream.read(14)))
-        entry.misc = stream.read(entry.size - 18)
-        return entry
+        sound = Sound()
+
+        sound.hierarchy_type = stream.uint8_read()
+
+        sound.size = stream.uint32_read()
+
+        head = stream.tell()
+
+        sound.hierarchy_id = stream.uint32_read()
+
+        sound.sources.append(BankSourceStruct.from_memory_stream(stream))
+
+        sound.baseParam = BaseParam.from_memory_stream(stream)
+
+        tail = stream.tell()
+
+        if sound.size != (tail - head):
+            raise AssertionError("Sound.size != (tail - head) fails")
+
+        return sound
 
     def get_data(self):
-        if os.environ["TEST_SOUND"] == "1":
-            return pack_sound(self)
-        return struct.pack(f"<BII14s{len(self.misc)}s", self.hierarchy_type, self.size, self.hierarchy_id, self.sources[0].get_data(), self.misc)
+        b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
+        b += self.sources[0].get_data()
+        if self.baseParam == None:
+            raise AssertionError(
+                f"Sound {self.hierarchy_id} does not has a base parameter."
+            )
+        b += self.baseParam.get_data()
+        return b
         
         
 class HircEntryFactory:
@@ -460,25 +513,13 @@ class HircEntryFactory:
         hierarchy_type = stream.uint8_read()
         stream.seek(stream.tell()-1)
         if hierarchy_type == 0x02: # sound
-            if os.environ["TEST_SOUND"] == "1":
-                return new_sound(stream)
-            else:
-                return Sound.from_memory_stream(stream)
+            return Sound.from_memory_stream(stream)
         elif hierarchy_type == 0x05: # random / sequence container
-            if os.environ["TEST_RAND"] == "1":
-                return new_rand_seq_cntr(stream)
-            else:
-                return RandomSequenceContainer.from_memory_stream(stream)
+            return RandomSequenceContainer.from_memory_stream(stream)
         elif hierarchy_type == 0x07:
-            if os.environ["TEST_ACTOR_MIXER"] == "1":
-                return ActorMixer.from_memory_stream(stream)
-            else:
-                return HircEntry.from_memory_stream(stream)
+            return ActorMixer.from_memory_stream(stream)
         elif hierarchy_type == 0x09:
-            if os.environ["TEST_LAYER"] == "1":
-                return LayerContainer.from_memory_stream(stream)
-            else:
-                return HircEntry.from_memory_stream(stream)
+            return LayerContainer.from_memory_stream(stream)
         elif hierarchy_type == 0x0A: #music segment
             return MusicSegment.from_memory_stream(stream)
         elif hierarchy_type == 0X0B: #music track
@@ -1350,88 +1391,6 @@ class ActorMixer(HircEntry):
         return b
 
 
-def new_rand_seq_cntr(stream: MemoryStream):
-    cntr = RandomSequenceContainer()
-
-    cntr.hierarchy_type = stream.uint8_read()
-
-    cntr.size = stream.uint32_read()
-
-    head = stream.tell()
-
-    cntr.hierarchy_id = stream.uint32_read()
-
-    cntr.baseParam = BaseParam.from_memory_stream(stream)
-
-    # [PlayList Setting]
-    cntr.playListSetting.sLoopCount = stream.uint16_read()
-    cntr.playListSetting.sLoopModMin = stream.uint16_read()
-    cntr.playListSetting.sLoopModMax = stream.uint16_read()
-    cntr.playListSetting.fTransitionTime = stream.float_read()
-    cntr.playListSetting.fTransitionTimeModMin = stream.float_read()
-    cntr.playListSetting.fTransitionTimeModMax = stream.float_read()
-    cntr.playListSetting.wAvoidReaptCount = stream.uint16_read()
-    cntr.playListSetting.eTransitionMode = stream.uint8_read()
-    cntr.playListSetting.eRandomMode = stream.uint8_read()
-    cntr.playListSetting.eMode = stream.uint8_read()
-    cntr.playListSetting.byBitVectorPlayList = stream.uint8_read()
-
-    # [Children]
-    cntr.containerChildren.numChildren = stream.uint32_read()
-    for _ in range(cntr.containerChildren.numChildren):
-        cntr.containerChildren.children.append(stream.uint32_read())
-
-    # [PlayListItem]
-    cntr.ulPlayListItem = stream.uint16_read()
-    cntr.playListItems = [
-        PlayListItem(stream.uint32_read(), stream.int32_read())
-        for _ in range(cntr.ulPlayListItem)
-    ]
-
-    tail = stream.tell()
-
-    if cntr.size != (tail - head):
-        raise AssertionError("RandomSequenceContainer.size != (tail - head) fails")
-
-    return cntr
-
-
-def new_sound(stream: MemoryStream):
-    sound = Sound()
-
-    sound.hierarchy_type = stream.uint8_read()
-
-    sound.size = stream.uint32_read()
-
-    head = stream.tell()
-
-    sound.hierarchy_id = stream.uint32_read()
-
-    sound.sources.append(new_bank_source_struct(stream))
-
-    sound.baseParam = BaseParam.from_memory_stream(stream)
-
-    tail = stream.tell()
-
-    if sound.size != (tail - head):
-        raise AssertionError("Sound.size != (tail - head) fails")
-
-    return sound
-
-
-def new_bank_source_struct(stream: MemoryStream):
-    b = BankSourceStruct()
-    b.plugin_id, b.stream_type, b.source_id, b.mem_size, b.bit_flags = \
-        struct.unpack("<IBIIB", stream.read(14))
-    if (b.plugin_id & 0x0F) == 2:
-        if b.plugin_id:
-            b.plugin_size = stream.uint32_read()
-            if b.plugin_size > 0:
-                b.plugin_data = stream.read(b.plugin_size)
-    return b
-
-
-
 def parse_positioning_params(stream: MemoryStream):
     """
     Keep this algorithm here but the data is not used currently
@@ -1482,62 +1441,3 @@ def parse_positioning_params(stream: MemoryStream):
     stream.seek(head)
 
     return stream.read(tail - head)
-
-
-def pack_rand_seq_cntr(r: RandomSequenceContainer):
-    b = struct.pack("<BII", r.hierarchy_type, r.size, r.hierarchy_id)
-
-    if r.baseParam == None:
-        raise AssertionError(
-            f"Random / Sequence container {r.hierarchy_id} does not has a base parameter."
-        )
-
-    b += r.baseParam.get_data()
-
-    b += r.playListSetting.get_data()
-
-    b += r.containerChildren.get_data()
-
-    if r.ulPlayListItem != len(r.playListItems):
-        raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
-    b += struct.pack("<H", r.ulPlayListItem)
-    for playListItem in r.playListItems:
-        b += playListItem.get_data()
-
-    if r.size != len(b) - 5:
-        raise AssertionError(f"Random / Sequence container: packing size mismatch with specified size: {r.size} and {len(b) - 5}")
-
-    return b
-
-
-def pack_sound(s: Sound):
-    b = struct.pack("<BII", s.hierarchy_type, s.size, s.hierarchy_id)
-    b += pack_bank_source_struct(s.sources[0])
-    if s.baseParam == None:
-        raise AssertionError(
-            f"Sound {s.hierarchy_id} does not has a base parameter."
-        )
-    b += s.baseParam.get_data()
-    return b
-
-
-def pack_bank_source_struct(bk: BankSourceStruct):
-    b = struct.pack(
-        "<IBIIB",
-        bk.plugin_id,
-        bk.stream_type,
-        bk.source_id,
-        bk.mem_size,
-        bk.bit_flags
-    )
-    if (bk.plugin_id & 0X0F) == 2:
-        if bk.plugin_id:
-            b += struct.pack(f"<I", bk.plugin_size)
-            if bk.plugin_size > 0:
-                if bk.plugin_size != len(bk.plugin_data):
-                    raise AssertionError(
-                        "BankSourceStruct.plugin_size != len(BankSourceStruct.plugin_data)",
-                        " fails"
-                    )
-                b += struct.pack(f"<{len(bk.plugin_data)}s", bk.plugin_data)
-    return b
