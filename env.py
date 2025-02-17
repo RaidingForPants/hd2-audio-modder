@@ -30,6 +30,7 @@ WWISE_VERSION = ""
 os.environ["TEST_ACTOR_MIXER"] = "0"
 os.environ["TEST_LAYER"] = "0"
 os.environ["TEST_RAND"] = "0"
+os.environ["TEST_SOUND"] = "0"
 
 match SYSTEM:
     case "Windows":
