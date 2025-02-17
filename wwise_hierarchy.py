@@ -205,7 +205,10 @@ class RandomSequenceContainer(HircEntry):
         tail = stream.tell()
 
         if cntr.size != (tail - head):
-            raise AssertionError("RandomSequenceContainer.size != (tail - head) fails")
+            raise AssertionError(
+                f"Random Sequence container {cntr.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from read data"
+            )
 
         return cntr
 
@@ -215,7 +218,8 @@ class RandomSequenceContainer(HircEntry):
 
         if self.baseParam == None:
             raise AssertionError(
-                f"Random / Sequence container {self.hierarchy_id} does not has a base parameter."
+                f"Random Sequence container {self.hierarchy_id} does not has a "
+                 "base parameter."
             )
         b += self.baseParam.get_data()
 
@@ -224,13 +228,20 @@ class RandomSequenceContainer(HircEntry):
         b += self.containerChildren.get_data()
 
         if self.ulPlayListItem != len(self.playListItems):
-            raise AssertionError("RandomSequenceContainer.ulPlayListItem != len(RandomSequenceContainer.PlayListItems) fails")
+            raise AssertionError(
+                f"Random Sequence container {self.hierarchy_id} assertion break: "
+                f" # of playlist item != # of item in the playlist item in the "
+                f" array"
+                )
         b += struct.pack("<H", self.ulPlayListItem)
         for playListItem in self.playListItems:
             b += playListItem.get_data()
 
         if self.size != len(b) - 5:
-            raise AssertionError(f"Random / Sequence container: packing size mismatch with specified size: {self.size} and {len(b) - 5}")
+            raise AssertionError(
+                f"Random Sequence container {self.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from packed data"
+            )
 
         return b
     
@@ -387,8 +398,7 @@ class BankSourceStruct:
                 if self.plugin_size > 0:
                     if self.plugin_size != len(self.plugin_data):
                         raise AssertionError(
-                            "BankSourceStruct.plugin_size != len(BankSourceStruct.plugin_data)",
-                            " fails"
+                            "plugin size != size of plugin data"
                         )
                     b += struct.pack(f"<{len(self.plugin_data)}s", self.plugin_data)
         return b
@@ -491,7 +501,10 @@ class Sound(HircEntry):
         tail = stream.tell()
 
         if sound.size != (tail - head):
-            raise AssertionError("Sound.size != (tail - head) fails")
+            raise AssertionError(
+                f"Sound {sound.hierarchy_id} assertion break: "
+                 "data size specified in header != data size from read data"
+            )
 
         return sound
 
@@ -503,6 +516,11 @@ class Sound(HircEntry):
                 f"Sound {self.hierarchy_id} does not has a base parameter."
             )
         b += self.baseParam.get_data()
+        if self.size != len(b) - 5:
+            raise AssertionError(
+                f"Sound {self.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from packed data"
+            )
         return b
         
         
@@ -691,11 +709,15 @@ class PropBundle:
         self.pIDs = pIDs
         self.pValues = pValues
         if self.cProps != len(self.pIDs) != len(self.pValues):
-            raise AssertionError("PropBundle.cProps != len(PropBundle.pIDs) != len(PropBundle.pValues) fails")
+            raise AssertionError(
+                "# of props specified != # of props stored"
+            )
 
     def get_data(self):
         if self.cProps != len(self.pIDs) != len(self.pValues):
-            raise AssertionError("PropBundle.cProps != len(PropBundle.pIDs) != len(PropBundle.pValues) fails")
+            raise AssertionError(
+                "# of props specified != # of props stored"
+            )
         b = struct.pack("<B", self.cProps)
         for pID in self.pIDs:
             b += struct.pack("<B", pID)
@@ -721,11 +743,15 @@ class RangedPropBundle:
         self.pIDs = pIDs
         self.rangedValues = rangedValues
         if self.cProps != len(self.pIDs) != len(self.rangedValues):
-            raise AssertionError("PropBundle.cProps != len(PropBundle.pIDs) != len(PropBundle.pValues) fails")
+            raise AssertionError(
+                "# of range props specified != # of range props stored"
+            )
 
     def get_data(self):
         if self.cProps != len(self.pIDs) != len(self.rangedValues):
-            raise AssertionError("PropBundle.cProps != len(PropBundle.pIDs) != len(PropBundle.pValues) fails")
+            raise AssertionError(
+                "# of range props specified != # of range props stored"
+            )
         b = struct.pack("<B", self.cProps)
         for pID in self.pIDs:
             b += struct.pack("<B", pID)
@@ -752,15 +778,15 @@ class AuxParams:
         self.auxIDs = auxIDs
         self.reflectionAuxBus = reflectionAuxBus
         if not self.has_aux and len(auxIDs) > 0:
-            raise AssertionError("AuxParams.has_aux and len(auxIDs) > 0 fails")
+            raise AssertionError("Has No Aux but # of Aux Bus IDs > 0")
         if self.has_aux and len(auxIDs) != 4:
-            raise AssertionError("AuxParams.has_aux and len(auxIDs) != 4 fails")
+            raise AssertionError("Has Aux but # of Aux Bus IDs != 4")
 
     def get_data(self):
         if not self.has_aux and len(self.auxIDs) > 0:
-            raise AssertionError("AuxParams.has_aux and len(self.auxIDs) > 0 fails")
+            raise AssertionError("Has No Aux but # of Aux Bus IDs > 0")
         if self.has_aux and len(self.auxIDs) != 4:
-            raise AssertionError("AuxParams.has_aux and len(auxIDs) != 4 fails")
+            raise AssertionError("Has Aux and # of Aux Bus IDs != 4")
         b = struct.pack("<B", self.byBitVectorAux)
         if self.has_aux:
             for auxID in self.auxIDs:
@@ -852,11 +878,15 @@ class StateGroup:
         self.ulNumStates = ulNumStates
         self.states = states
         if self.ulNumStates != len(self.states):
-            raise AssertionError("StateGroup.ulNumStates != len(StateGroup.states) fails")
+            raise AssertionError(
+                "# of states specified in state group != # of states stored in state group"
+            )
 
     def get_data(self):
         if self.ulNumStates != len(self.states):
-            raise AssertionError("StateGroup.ulNumStates != len(StateGroup.states) fails")
+            raise AssertionError(
+                "# of states specified in state group != # of states stored in state group"
+            )
         b = struct.pack(
             "<IBB", self.ulStateGroupID, self.eStateSyncType, self.ulNumStates
         )
@@ -886,21 +916,21 @@ class StateParams:
         self.stateGroups = stateGroups
         if self.ulNumStateProps != len(self.stateProps):
             raise AssertionError(
-                "StateParams.ulNumStateProps != len(StateParams.stateProps) fails"
+                "# of state props sepcified != # of state props stored"
             )
         if self.ulNumStateGroups != len(self.stateGroups):
             raise AssertionError(
-                "StateParams.ulNumStateGroups != len(StateParams.stateGroups) fails"
+                "# of state groups specified != # of state groups stored"
             )
 
     def get_data(self):
         if self.ulNumStateProps != len(self.stateProps):
             raise AssertionError(
-                "StateParams.ulNumStateProps != len(StateParams.stateProps) fails"
+                "# of state props sepcified != # of state props stored"
             )
         if self.ulNumStateGroups != len(self.stateGroups):
             raise AssertionError(
-                "StateParams.ulNumStateGroups != len(StateParams.stateGroups) fails"
+                "# of state groups specified != # of state groups stored"
             )
         b = struct.pack("<B", self.ulNumStateProps)
         for stateProp in self.stateProps:
@@ -959,11 +989,15 @@ class RTPC:
         self.ulSize = ulSize
         self.rtpcGraphPoints = rtpcGraphPoints
         if self.ulSize != len(self.rtpcGraphPoints):
-            raise AssertionError("RTPC.ulSize != len(RTPC.RTPCGraphPoints) fails")
+            raise AssertionError(
+                "# of RTPC graph points specified != # of RTPC graph points stored"
+            )
 
     def get_data(self):
         if self.ulSize != len(self.rtpcGraphPoints):
-            raise AssertionError("RTPC.ulSize != len(RTPC.RTPCGraphPoints) fails")
+            raise AssertionError(
+                "# of RTPC graph points specified != # of RTPC graph points stored"
+            )
         b = struct.pack(
             "<IBBBIBH",
             self.rtpcID, self.rtpcType, self.rtpcAccum, self.paramID, 
@@ -1143,7 +1177,9 @@ class BaseParam:
 
         # [Fx]
         if self.uNumFx != len(self.fxChunks):
-            raise AssertionError("RandomSequenceContainer.uNumFx != len(RandomSequenceContainer.fxChunks) fails")
+            raise AssertionError(
+                "# of FX specified != # of FX stored"
+            )
         if self.uNumFx > 0:
             b += struct.pack("<B", self.bitsFxBypass)
             for fxChunk in self.fxChunks:
@@ -1151,7 +1187,9 @@ class BaseParam:
 
         # [Metadata Fx]
         if self.uNumFxMetadata != len(self.fxChunksMetadata):
-            raise AssertionError("RandomSequenceContainer.uNumFxMetadata != len(RandomSequenceContainer.fxChunksMetadata) fails")
+            raise AssertionError(
+                "# of metadata FX specified != # of metadata FX stored"
+            )
         b += struct.pack("<BB", self.bIsOverrideParentMetadata, self.uNumFxMetadata)
         if self.uNumFxMetadata > 0:
             for fxChunkMetadata in self.fxChunksMetadata:
@@ -1179,7 +1217,9 @@ class BaseParam:
 
         b += struct.pack("<H", self.ulNumRTPC)
         if self.ulNumRTPC != len(self.rtpcs):
-            raise AssertionError("RandomSequenceContainer.ulNumRTPC != len(RandomSequenceContainer.RTPCs) fails")
+            raise AssertionError(
+                "# of RTPC sepcified != # of RTPC stored"
+            )
         for rtpc in self.rtpcs:
             b += rtpc.get_data()
 
@@ -1199,8 +1239,7 @@ class ContainerChildren:
     def get_data(self):
         if self.numChildren != len(self.children):
             raise AssertionError(
-                "ContainerChildren.numChildren != len(ContainerChildren.contents) "
-                "fails"
+                "# of children specified != # of children stored"
             )
         b = struct.pack("<I", self.numChildren)
         for child in self.children:
@@ -1317,7 +1356,10 @@ class LayerContainer(HircEntry):
         tail = stream.tell()
 
         if l.size != (tail - head):
-            raise AssertionError("LayerContainer.size != (tail - head) fails")
+            raise AssertionError(
+                f"Layer container {l.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from read data"
+            )
 
         return l
 
@@ -1335,7 +1377,10 @@ class LayerContainer(HircEntry):
         b += struct.pack(f"<{len(self.layerData)}s", self.layerData)
 
         if self.size != len(b) - 5:
-            raise AssertionError(f"LayerContainer: packing size mismatch with specified size: {self.size} and {len(b) - 5}")
+            raise AssertionError(
+                f"Layer container {self.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from packed data"
+            )
 
         return b
 
@@ -1369,7 +1414,10 @@ class ActorMixer(HircEntry):
         tail = stream.tell()
 
         if mixer.size != (tail - head):
-            raise AssertionError("ActorMixer.size != (tail - head) fails")
+            raise AssertionError(
+                f"ActorMixer {mixer.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from packed data"
+            )
 
         return mixer
 
@@ -1378,7 +1426,7 @@ class ActorMixer(HircEntry):
 
         if self.baseParam == None:
             raise AssertionError(
-                "Layer container does not has a base parameter."
+                f"ActorMixer {self.hierarchy_id} does not has a base parameter."
             )
 
         b += self.baseParam.get_data()
@@ -1386,7 +1434,10 @@ class ActorMixer(HircEntry):
         b += self.children.get_data()
 
         if self.size != len(b) - 5:
-            raise AssertionError(f"ActorMixer: packing size mismatch with specified size: {self.size} and {len(b) - 5}")
+            raise AssertionError(
+                f"ActorMixer {self.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from packed data"
+            )
        
         return b
 
