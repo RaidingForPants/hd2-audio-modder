@@ -87,6 +87,14 @@ class HircEntry:
                 self.parent.lower_modified()
             else:
                 self.soundbank.lower_modified()
+
+    def update_size(self):
+        """
+        Interface contract and usage:
+        - Must call this after modifying an hierarhcy object
+        - Otherwise, get_data will most likely fail due to assertion
+        """
+        pass
         
     def import_entry(self, new_entry):
         if (
@@ -124,6 +132,9 @@ class HircEntry:
             self.soundbank.lower_modified()
         
     def get_data(self):
+        """
+        Include header
+        """
         return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
         
 
@@ -212,38 +223,46 @@ class RandomSequenceContainer(HircEntry):
 
         return cntr
 
-
     def get_data(self):
-        b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
+        data = self._pack()
+        if self.size != len(data):
+            raise AssertionError(
+                f"Random Sequence container {self.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from packed data"
+            )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data 
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = struct.pack("<I", self.hierarchy_id)
 
         if self.baseParam == None:
             raise AssertionError(
                 f"Random Sequence container {self.hierarchy_id} does not has a "
                  "base parameter."
             )
-        b += self.baseParam.get_data()
+        data += self.baseParam.get_data()
 
-        b += self.playListSetting.get_data()
+        data += self.playListSetting.get_data()
 
-        b += self.containerChildren.get_data()
+        data += self.containerChildren.get_data()
 
         if self.ulPlayListItem != len(self.playListItems):
             raise AssertionError(
                 f"Random Sequence container {self.hierarchy_id} assertion break: "
                 f" # of playlist item != # of item in the playlist item in the "
                 f" array"
-                )
-        b += struct.pack("<H", self.ulPlayListItem)
-        for playListItem in self.playListItems:
-            b += playListItem.get_data()
-
-        if self.size != len(b) - 5:
-            raise AssertionError(
-                f"Random Sequence container {self.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from packed data"
             )
+        data += struct.pack("<H", self.ulPlayListItem)
+        for playListItem in self.playListItems:
+            data += playListItem.get_data()
 
-        return b
+        return data
     
 
 class MusicSegment(HircEntry):
@@ -509,19 +528,29 @@ class Sound(HircEntry):
         return sound
 
     def get_data(self):
-        b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
-        b += self.sources[0].get_data()
-        if self.baseParam == None:
-            raise AssertionError(
-                f"Sound {self.hierarchy_id} does not has a base parameter."
-            )
-        b += self.baseParam.get_data()
-        if self.size != len(b) - 5:
+        data = self._pack()
+        if self.size != len(data):
             raise AssertionError(
                 f"Sound {self.hierarchy_id} assertion break: "
                 f"data size specified in header != data size from packed data"
             )
-        return b
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = struct.pack("<I", self.hierarchy_id)
+        data += self.sources[0].get_data()
+        if self.baseParam == None:
+            raise AssertionError(
+                f"Sound {self.hierarchy_id} does not has a base parameter."
+            )
+        data += self.baseParam.get_data()
+
+        return data
         
         
 class HircEntryFactory:
@@ -1364,25 +1393,35 @@ class LayerContainer(HircEntry):
         return l
 
     def get_data(self):
-        b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
+        data = self._pack() 
 
-        if self.baseParam == None:
-            raise AssertionError(
-                f"Layer container {self.hierarchy_id} does not has a base parameter."
-            )
-        b += self.baseParam.get_data()
-
-        b += self.children.get_data()
-
-        b += struct.pack(f"<{len(self.layerData)}s", self.layerData)
-
-        if self.size != len(b) - 5:
+        if self.size != len(data):
             raise AssertionError(
                 f"Layer container {self.hierarchy_id} assertion break: "
                 f"data size specified in header != data size from packed data"
             )
 
-        return b
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = struct.pack("<I", self.hierarchy_id)
+        
+        if self.baseParam == None:
+            raise AssertionError(
+                f"Layer container {self.hierarchy_id} does not has a base parameter."
+            )
+        data += self.baseParam.get_data()
+
+        data += self.children.get_data()
+
+        data += struct.pack(f"<{len(self.layerData)}s", self.layerData)
+
+        return data
 
 
 class ActorMixer(HircEntry):
@@ -1421,25 +1460,34 @@ class ActorMixer(HircEntry):
 
         return mixer
 
+    def update_size(self):
+        self.size = len(self._pack())
+
     def get_data(self):
-        b = struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id)
+        data = self._pack()
+        if self.size != len(data):
+            raise AssertionError(
+                f"ActorMixer {self.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from packed data"
+            )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def _pack(self):
+        data = struct.pack("<I", self.hierarchy_id)
 
         if self.baseParam == None:
             raise AssertionError(
                 f"ActorMixer {self.hierarchy_id} does not has a base parameter."
             )
 
-        b += self.baseParam.get_data()
+        data += self.baseParam.get_data()
         
-        b += self.children.get_data()
+        data += self.children.get_data()
 
-        if self.size != len(b) - 5:
-            raise AssertionError(
-                f"ActorMixer {self.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from packed data"
-            )
-       
-        return b
+        return data
 
 
 def parse_positioning_params(stream: MemoryStream):
