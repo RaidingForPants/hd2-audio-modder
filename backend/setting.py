@@ -30,7 +30,7 @@ def load_setting(path: str = default_path) -> Setting:
     """
     if not os.path.exists(path):
         logger.warning(
-            "Failed to locate existing application setting. Creating  new one..."
+            "Failed to locate existing application setting. Creating new one..."
         )
 
         setting = Setting()
