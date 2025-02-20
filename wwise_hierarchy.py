@@ -1,4 +1,5 @@
 import struct
+from typing import Union
 
 from util import *
 from log import logger
@@ -164,7 +165,15 @@ class RandomSequenceContainer(HircEntry):
         ulPlayListItem u16
         playListItem ulPlayListItem * sizeof(PlayListItem)
     """
-    import_values = ["unused_sections", "contents", "parent_id"]
+    import_values = [
+        "parent_id",
+        "baseParam",
+        "children",
+        "containerChildren",
+        "playListSetting",
+        "ulPlayListItem",
+        "playListItems",
+    ]
     def __init__(self):
         super().__init__()
         self.baseParam: BaseParam | None = None
@@ -234,6 +243,34 @@ class RandomSequenceContainer(HircEntry):
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data 
+
+    def set_data(self, entry: Union['RandomSequenceContainer', None] = None, **data):
+        if self.soundbank == None:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
+
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
+
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
+
+        self.modified = True
+        self.update_size()
+
+        try:
+            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
+        except:
+            self.parent = None
 
     def update_size(self):
         self.size = len(self._pack())
@@ -494,13 +531,17 @@ class MusicTrack(HircEntry):
     
 class Sound(HircEntry):
     
-    import_values = ["misc", "sources", "parent_id"]
+    import_values = [
+        "sources",
+        "parent_id",
+        "baseParam",
+    ]
     
     def __init__(self):
         super().__init__()
 
         self.baseParam: BaseParam | None = None 
-    
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         sound = Sound()
@@ -537,6 +578,34 @@ class Sound(HircEntry):
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data
+
+    def set_data(self, entry: Union['Sound', None] = None, **data):
+        if self.soundbank == None:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
+
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
+
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
+
+        self.modified = True
+        self.update_size()
+
+        try:
+            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
+        except:
+            self.parent = None
 
     def update_size(self):
         self.size = len(self._pack())
@@ -1353,6 +1422,14 @@ class LayerContainer(HircEntry):
     ulNumLayers u32
     """
 
+    import_values = [
+        "parent_id",
+        "baseParam",
+        "children",
+        "ulNumLayers",
+        "layerData"
+    ]
+
     def __init__(self):
         super().__init__()
         self.baseParam: BaseParam | None = None
@@ -1405,6 +1482,34 @@ class LayerContainer(HircEntry):
 
         return header + data
 
+    def set_data(self, entry: Union['LayerContainer', None] = None, **data):
+        if self.soundbank == None:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
+
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
+
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
+
+        self.modified = True
+        self.update_size()
+
+        try:
+            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
+        except:
+            self.parent = None
+
     def update_size(self):
         self.size = len(self._pack())
 
@@ -1425,6 +1530,12 @@ class LayerContainer(HircEntry):
 
 
 class ActorMixer(HircEntry):
+
+    import_values = [
+        "parent_id",
+        "baseParam",
+        "children"
+    ]
 
     def __init__(self):
         super().__init__()
@@ -1474,6 +1585,34 @@ class ActorMixer(HircEntry):
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data
+
+    def set_data(self, entry: Union['ActorMixer', None] = None, **data):
+        if self.soundbank == None:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
+
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
+
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
+
+        self.modified = True
+        self.update_size()
+
+        try:
+            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
+        except:
+            self.parent = None
 
     def _pack(self):
         data = struct.pack("<I", self.hierarchy_id)
