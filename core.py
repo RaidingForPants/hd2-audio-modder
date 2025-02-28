@@ -1,15 +1,18 @@
-import numpy
-import os
-import pyaudio
-import subprocess
-import struct
-import wave
 import copy
 import locale
+import numpy
+import os
+import posixpath as xpath
+import pyaudio
 import random
+import subprocess
+import struct
 import xml.etree.ElementTree as etree
+import wave
 
 from typing import Callable, Literal, Union
+
+import fileutil
 
 from const import *
 from env import *
@@ -18,7 +21,7 @@ from util import *
 from wwise_hierarchy import *
 
 from log import logger
-    
+   
 
 class AudioSource:
 
@@ -491,7 +494,6 @@ class GameArchive:
     def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
         
-        
     def write_type_header(self, toc_file: MemoryStream, entry_type: int, num_entries: int):
         if num_entries > 0:
             toc_file.write(struct.pack("<QQQII", 0, entry_type, num_entries, 16, 64))
@@ -882,9 +884,11 @@ class SoundHandler:
         
         return stereo_array.tobytes() # type: ignore
         
+
 class Mod:
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, db: SQLiteDatabase):
+        self.db = db
         self.wwise_streams: dict[int, WwiseStream] = {}
         self.stream_count: dict[int, int] = {}
         self.wwise_banks: dict[int, WwiseBank] = {}
@@ -944,6 +948,62 @@ class Mod:
         self.revert_wwise_hierarchy(soundbank_id)
         for audio in self.get_wwise_bank(soundbank_id).get_content():
             audio.revert_modifications()
+
+    def reroute_sound(self, sound: Sound, audio_data: bytearray):
+        """
+        @exception
+        - AssertionError
+        - NotImplementedError
+        - KeyError
+        """
+        if len(sound.sources) != 1:
+            raise AssertionError(
+                "There are more than one audio source in a Sound object."
+            )
+
+        source_struct = sound.sources[0]
+        if source_struct.plugin_id != VORBIS:
+            raise NotImplementedError(
+                "Sound rerouting only work with VORBIS type of audio source."
+               f" The Sound object {sound.hierarchy_id} has plugin id"
+               f" {source_struct.plugin_id}."
+            )
+        
+        short_id = ak_media_id(self.db)
+        if short_id in self.audio_sources:
+            raise KeyError(
+                f"Audio source short ID {short_id} already exists. Please retry "
+                f"with this method call."
+            )
+
+        # Create new AudioSource
+        audio_source = AudioSource()
+        audio_source.data = audio_data
+        audio_source.size = len(audio_data)
+        audio_source.short_id = short_id
+        audio_source.data_old = audio_data
+        audio_source.parents.add(sound)
+        audio_source.stream_type = BANK
+
+        # Update BankSourceStruct
+        source_struct.source_id = short_id
+
+        # Mark sound is modified
+        sound.raise_modified()
+
+        # Update WwiseBank audio source list
+        bank = sound.soundbank
+        if not isinstance(bank, WwiseBank): 
+            raise AssertionError(
+                f"Sound object {sound.hierarchy_id} sound bank field is not "
+                 "an instance of sound bank."
+            )
+        bank.content.append(audio_source)
+
+        # Update Mod audio source list
+        self.audio_sources[short_id] = audio_source
+        self.audio_count[short_id] = 1
+
         
     def dump_as_wem(self, file_id: int, output_path: str = ""):
         """
@@ -1652,17 +1712,18 @@ class ModHandler:
     
     handler_instance: Union['ModHandler', None] = None
     
-    def __init__(self):
+    def __init__(self, db: SQLiteDatabase):
+        self.db = db
         self.mods: dict[str, Mod] = {}
         
     @classmethod
-    def create_instance(cls):
-        cls.handler_instance = ModHandler()
+    def create_instance(cls, db: SQLiteDatabase):
+        cls.handler_instance = ModHandler(db)
         
     @classmethod
-    def get_instance(cls) -> 'ModHandler':
+    def get_instance(cls, db: SQLiteDatabase) -> 'ModHandler':
         if cls.handler_instance == None:
-            cls.handler_instance = ModHandler()
+            cls.handler_instance = ModHandler(db)
         return cls.handler_instance
 
     def add_new_mod(self, mod_name: str, mod: Mod):
@@ -1682,7 +1743,7 @@ class ModHandler:
         """
         if mod_name in self.mods.keys():
             raise KeyError(f"Mod name '{mod_name}' already exists!")
-        new_mod = Mod(mod_name)
+        new_mod = Mod(mod_name, self.db)
         self.mods[mod_name] = new_mod
         self.active_mod = new_mod
         return new_mod
