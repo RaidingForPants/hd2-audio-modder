@@ -1,7 +1,9 @@
-from typing import Any
-import struct
 import os
+import struct
+
+from ctypes import c_uint32
 from math import ceil
+from typing import Any
 from itertools import takewhile
 
 class MemoryStream:
@@ -202,3 +204,20 @@ def strip_patch_index(filename):
             break
     filename = ".".join(split)
     return filename
+
+
+_FNV_32_OFFSET_BASIS = c_uint32(2166136261)
+_FNV_32_PRIME = c_uint32(16777619)
+_FNV_30_MASK = c_uint32((1 << 30) - 1)
+
+
+def fnv_30(data: bytes):
+    h = _FNV_32_OFFSET_BASIS
+    for b in data:
+        b = c_uint32(b)
+        h = c_uint32(h.value * _FNV_32_PRIME.value)
+        h = c_uint32(h.value ^ b.value)
+    downshift = c_uint32(h.value >> 30)
+    mask = c_uint32(h.value & _FNV_30_MASK.value)
+
+    return c_uint32(downshift.value ^ mask.value).value
