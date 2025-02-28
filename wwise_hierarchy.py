@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import struct
 from typing import Union
 
@@ -48,6 +49,14 @@ class HircEntry:
         
     def has_modified_children(self):
         return self.modified_children != 0
+
+    def import_entry(self, new_entry):
+        if (
+            (self.modified and new_entry.get_data() != self.data_old)
+            or
+            (not self.modified and new_entry.get_data() != self.get_data())
+        ):
+            self.set_data(new_entry)
         
     def set_data(self, entry = None, **data):
         if self.soundbank == None:
@@ -69,11 +78,19 @@ class HircEntry:
                 setattr(self, name, value)
         self.modified = True
         self.size = len(self.get_data())-5
-        try:
-            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
-        except:
+
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
             self.parent = None
 
+    def get_data(self):
+        """
+        Include header
+        """
+        return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
+        
     def revert_modifications(self):
         if self.soundbank == None:
             raise AssertionError(
@@ -89,29 +106,10 @@ class HircEntry:
             else:
                 self.soundbank.lower_modified()
 
-    def update_size(self):
-        """
-        Interface contract and usage:
-        - Must call this after modifying an hierarhcy object
-        - Otherwise, get_data will most likely fail due to assertion
-        """
-        pass
-        
-    def import_entry(self, new_entry):
-        if (
-            (self.modified and new_entry.get_data() != self.data_old)
-            or
-            (not self.modified and new_entry.get_data() != self.get_data())
-        ):
-            self.set_data(new_entry)
-        
-    def get_id(self):
-        return self.hierarchy_id
-        
     def raise_modified(self):
         if self.soundbank == None:
             raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
+                "No WwiseBank object is attached to this instance wiseHierarchy"
             )
 
         self.modified_children+=1
@@ -131,14 +129,33 @@ class HircEntry:
             self.parent.lower_modified()
         else:
             self.soundbank.lower_modified()
-        
-    def get_data(self):
-        """
-        Include header
-        """
-        return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
-        
 
+    def update_size(self):
+        """
+        Interface contract and usage:
+        - Must call this after modifying an hierarhcy object
+        - Otherwise, get_data will most likely fail due to assertion
+        """
+        pass
+
+    def modifier(self, callback: Callable):
+        """
+        A helper function that receive and call a callback which make some 
+        changes in a hierarchy entry. Then it will automatically call 
+        `update_size` and `raise_modified`.
+
+        This helper function is intended to use with the classes that enforce 
+        size and intergity checking using header information when getting / 
+        setting data.
+        """
+        callback()
+        self.update_size()
+        self.raise_modified()
+        
+    def get_id(self):
+        return self.hierarchy_id
+        
+        
 class MusicRandomSequence(HircEntry):
     
     def __init__(self):
@@ -267,9 +284,10 @@ class RandomSequenceContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        try:
-            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
-        except:
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
             self.parent = None
 
     def update_size(self):
@@ -382,9 +400,11 @@ class MusicSegment(HircEntry):
                     setattr(self, name, value)
         self.modified = True
         self.size = len(self.get_data()) - 5
-        try:
-            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
-        except:
+
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
             self.parent = None
         
     def get_data(self):
@@ -602,9 +622,10 @@ class Sound(HircEntry):
         self.modified = True
         self.update_size()
 
-        try:
-            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
-        except:
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
             self.parent = None
 
     def update_size(self):
@@ -734,9 +755,44 @@ class WwiseHierarchy:
                 self.soundbank.raise_modified()
             self.type_lists[entry.hierarchy_type].remove(entry)
             del self.entries[entry.hierarchy_id]
+    
+    def has_entry(self, entry_id: int):
+        return entry_id in self.entries
             
     def get_entry(self, entry_id: int):
         return self.entries[entry_id]
+
+    def get_actor_mixer_by_id(self, _id: int):
+        entry = self.entries[_id]
+        if not isinstance(entry, ActorMixer):
+            raise AssertionError(
+                f"Hierarchy entry {_id} is not an actor mixer"
+            )
+        return entry
+
+    def get_layer_container_by_id(self, _id: int):
+        entry = self.entries[_id]
+        if not isinstance(entry, LayerContainer):
+            raise AssertionError(
+                f"Hierarchy entry {_id} is not an layer container"
+            )
+        return entry
+
+    def get_rand_seq_cntr_by_id(self, _id: int):
+        entry = self.entries[_id]
+        if not isinstance(entry, RandomSequenceContainer):
+            raise AssertionError(
+                f"Hierarchy entry {_id} is not a random / sequence container."
+            )
+        return entry
+
+    def get_sound_by_id(self, _id: int):
+        entry = self.entries[_id]
+        if not isinstance(entry, Sound):
+            raise AssertionError(
+                f"Hierarchy entry {_id} is not a Sound."
+            )
+        return entry
         
     def get_entries(self):
         return self.entries.values()
@@ -811,6 +867,114 @@ class PropBundle:
                 "# of props specified != # of props stored"
             )
 
+    def assert_prop_count(self, prop_count):
+        if self.cProps != prop_count:
+            raise AssertionError(
+                f"There are {self.cProps} properties but expected value is "
+                f"{prop_count}."
+            )
+        if len(self.pIDs) != prop_count:
+            raise AssertionError(
+                f"There are {len(self.pIDs)} property IDs but expected value is "
+                f"{prop_count}."
+            )
+        if len(self.pValues) != prop_count:
+            raise AssertionError(
+                f"There are {len(self.pValues)} property values but expected "
+                f"value is {prop_count}."
+            )
+
+    def assert_prop_id(self, pos: int, prop_id: int):
+        if self.pIDs[pos] != prop_id:
+            raise AssertionError(
+                f"Expect property ID at position {pos} but receive "
+                f"{self.pIDs[pos]}!"
+            )
+
+    def set_prop_value_float_by_pid(self, pID: int, new_value: float):
+        pIDs = self.pIDs
+        pValues = self.pValues
+
+        for i, _pID in enumerate(pIDs):
+            if _pID == pID:
+                pValues[i] = bytearray(struct.pack("<f", new_value))
+                return
+
+        raise ValueError(
+            f"Property ID {pID} does not exist. Please use add_prop_value_float to "
+             "add a new property!"
+        )
+
+    def add_prop_value_float(self, new_pid: int, new_value: float):
+        if self.cProps == 0 or self.pIDs[-1] < new_pid:
+            self.pIDs.append(new_pid)
+            self.pValues.append(bytearray(struct.pack("<f", new_value)))
+            self.cProps += 1 
+            if len(self.pIDs) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property IDs."
+                )
+            if len(self.pValues) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property values."
+                )
+            if len(self.pIDs) != len(self.pValues):
+                raise AssertionError(
+                    "# of property IDs does not match up # of property values."
+                )
+            return
+
+        if self.cProps > 0 and self.pIDs[0] > new_pid:
+            self.pIDs.insert(0, new_pid)
+            self.pValues.insert(0, bytearray(struct.pack("<f", new_value)))
+            self.cProps += 1
+            if len(self.pIDs) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property IDs."
+                )
+            if len(self.pValues) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property values."
+                )
+            if len(self.pIDs) != len(self.pValues):
+                raise AssertionError(
+                    "# of property IDs does not match up # of property values."
+                )
+            return
+
+        l = self.cProps
+        pIDs = self.pIDs
+        pValues = self.pValues
+        for i in range(l):
+            if pIDs[l - i - 1] > new_pid:
+                continue
+
+            if pIDs[l - i - 1] == new_pid:
+                raise AssertionError(
+                    f"Property with ID {new_pid} already exists. Please use "
+                    "`set_prop_value_float_by_pid instead to set this property!"
+                )
+
+            pIDs.insert(l - i, new_pid)
+            pValues.insert(l - i, bytearray(struct.pack("<f", new_value)))
+            self.cProps += 1
+
+            if len(self.pIDs) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property IDs."
+                )
+            if len(self.pValues) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property values."
+                )
+            if len(self.pIDs) != len(self.pValues):
+                raise AssertionError(
+                    "# of property IDs does not match up # of property values."
+                )
+            return
+
+        raise AssertionError("Assertion failed. Reached invalid code path.")
+
     def get_data(self):
         if self.cProps != len(self.pIDs) != len(self.pValues):
             raise AssertionError(
@@ -844,6 +1008,117 @@ class RangedPropBundle:
             raise AssertionError(
                 "# of range props specified != # of range props stored"
             )
+
+    def assert_range_prop_count(self, prop_count: int):
+        if self.cProps != prop_count:
+            raise AssertionError(
+                f"There are {self.cProps} properties but expected value is "
+                f"{prop_count}."
+            )
+        if len(self.pIDs) != prop_count:
+            raise AssertionError(
+                f"There are has {self.pIDs} property IDs but expected value is "
+                f"{prop_count}."
+            )
+        if len(self.rangedValues) != prop_count:
+            raise AssertionError(
+                f"There are {len(self.rangedValues)} property values but "
+                f"expected value is {prop_count}."
+            )
+    
+    def assert_range_prop_id(self, pos: int, prop_id: int):
+        if self.pIDs[pos] != prop_id:
+            raise AssertionError(
+                f"Expect property ID at position {pos} but receive "
+                f"{self.pIDs[pos]}!"
+            )
+
+    def set_range_prop_value_by_pid(
+        self, pID: int, new_values: tuple[float, float]
+    ):
+        pIDs = self.pIDs
+        rangeValues = self.rangedValues
+
+        for i, _pID in enumerate(pIDs):
+            if _pID == pID:
+                rangeValues[i] = (new_values[0], new_values[1])
+                return
+
+        raise ValueError(
+            f"Property ID {pID} does not exist. Please use add_range_prop_value to "
+             "add a new property!"
+        )
+
+    def add_range_prop_value(
+        self, new_pid: int, new_values: tuple[float, float]
+    ):
+        if new_pid < 0:
+            raise ValueError(f"Invalid property ID {new_pid}!")
+
+        if self.cProps == 0 or self.pIDs[-1] < new_pid:
+            self.pIDs.append(new_pid)
+            self.rangedValues.append((new_values[0], new_values[1]))
+            self.cProps += 1
+            if len(self.pIDs) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property IDs."
+                )
+            if len(self.rangedValues) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property values."
+                )
+            if len(self.pIDs) != len(self.rangedValues):
+                raise AssertionError(
+                    "# of property IDs does not match up # of property values."
+                )
+            return
+
+        if self.cProps > 0 and self.pIDs[0] > new_pid:
+            self.pIDs.insert(0, new_pid)
+            self.rangedValues.insert(0, (new_values[0], new_values[1]))
+            self.cProps += 1
+            if len(self.pIDs) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property IDs."
+                )
+            if len(self.rangedValues) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property values."
+                )
+            if len(self.pIDs) != len(self.rangedValues):
+                raise AssertionError(
+                    "# of property IDs does not match up # of property values."
+                )
+            return
+
+        l = self.cProps
+        pIDs = self.pIDs
+        rangeValues = self.rangedValues
+        for i in range(l):
+            if pIDs[l - i - 1] > new_pid:
+                continue
+            if pIDs[l - i - 1] == new_pid:
+                raise AssertionError(
+                    f"Property with ID {new_pid} already exists. Please use "
+                     "`set_prop_value_float_by_pid instead to set this property!"
+                )
+            pIDs.insert(l - i, new_pid)
+            rangeValues.insert(l - i, (new_values[0], new_values[1]))
+            self.cProps += 1
+            if len(self.pIDs) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property IDs."
+                )
+            if len(self.rangedValues) != self.cProps:
+                raise AssertionError(
+                    "Property counter does not match up # of property values."
+                )
+            if len(self.pIDs) != len(self.rangedValues):
+                raise AssertionError(
+                    "# of property IDs does not match up # of property values."
+                )
+
+        raise AssertionError(f"Provided property ID {new_pid} cannot be added.")
 
     def get_data(self):
         if self.cProps != len(self.pIDs) != len(self.rangedValues):
@@ -1505,9 +1780,10 @@ class LayerContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        try:
-            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
-        except:
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
             self.parent = None
 
     def update_size(self):
@@ -1609,9 +1885,10 @@ class ActorMixer(HircEntry):
         self.modified = True
         self.update_size()
 
-        try:
-            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
-        except:
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
             self.parent = None
 
     def _pack(self):
