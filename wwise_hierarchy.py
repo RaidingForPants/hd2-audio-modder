@@ -1,5 +1,7 @@
-from collections.abc import Callable
 import struct
+import uuid
+
+from collections.abc import Callable
 from typing import Union
 
 from util import *
@@ -2225,3 +2227,7 @@ def parse_positioning_params(stream: MemoryStream):
     stream.seek(head)
 
     return stream.read(tail - head)
+
+
+def ak_media_id():
+    return fnv_30(uuid.uuid4().bytes)
