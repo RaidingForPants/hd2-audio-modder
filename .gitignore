@@ -14,3 +14,4 @@ __pycache__/
 **/database
 **/log.txt
 **/*.pickle
+**/database*
