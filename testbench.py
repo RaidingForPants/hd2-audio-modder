@@ -4,7 +4,8 @@ import unittest
 # from tests.sound_parser_test import TestSoundParser
 # from tests.cntr_parser_test import TestCntrParser
 # from tests.parser_integration_test import TestParserIntegration
-from tests.switch_cntr_test import TestSwitchContainerParser
+# from tests.switch_cntr_test import TestSwitchContainerParser
+from tests.source_id_gen_test import TestSourceIDGen
 
 
 if __name__ == "__main__":
