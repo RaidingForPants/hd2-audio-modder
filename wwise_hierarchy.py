@@ -4,6 +4,8 @@ import uuid
 from collections.abc import Callable
 from typing import Union
 
+from backend.db import SQLiteDatabase
+from log import logger
 from util import *
 
 
@@ -2229,5 +2231,15 @@ def parse_positioning_params(stream: MemoryStream):
     return stream.read(tail - head)
 
 
-def ak_media_id():
-    return fnv_30(uuid.uuid4().bytes)
+def ak_media_id(db: SQLiteDatabase, retry: int = 32):
+    if retry <= 0:
+        raise ValueError(f"Invalid retry value: {retry}")
+    for _ in range(retry):
+        h = fnv_30(uuid.uuid4().bytes)
+        if not db.has_audio_source_id(h):
+            return h
+        logger.info(
+            f"{h} media ID is already used. Retrying "
+            f"(# of retry remains: {retry})..."
+        )
+    raise KeyError("Failed to generate media ID. Please try to generate again!")
