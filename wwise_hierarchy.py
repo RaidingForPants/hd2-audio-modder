@@ -11,12 +11,12 @@ class HircEntry:
         self.hierarchy_id: int = 0
         self.sources = []
         self.track_info = []
-        self.soundbank = None # WwiseBank
+        self.soundbank: Any = None # WwiseBank
         self.misc: bytearray = bytearray()
         self.modified_children: int = 0
         self.modified: bool = False
         self.parent_id: int = 0
-        self.parent = None
+        self.parent: HircEntry | None = None
         self.data_old: bytes | bytearray = b""
     
     @classmethod
