@@ -15,12 +15,6 @@ def config_sqlite_conn(db_path: str):
         return conn
 
     return _get_sqlite_conn
-    
-def get_db_version(db_path: str):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    result = cursor.execute("PRAGMA user_version")
-    return result.fetchone()[0]
 
 class HelldiverAudioArchiveName:
 
