@@ -445,7 +445,10 @@ class BankSourceStruct:
         self.plugin_id: int = 0
         self.stream_type: int = 0
         self.source_id: int = 0
-        self.mem_size: int = 0
+
+        # For some reason, it still work although it's not being updated
+        self.mem_size: int = 0 
+
         self.bit_flags: int = 0
         self.plugin_size: int = 0
         self.plugin_data: bytearray = bytearray()
