@@ -6,7 +6,7 @@ import shutil
 import pathlib
 import zipfile
 import xml.etree.ElementTree as etree
-import urllib.request
+import requests
 import json
 
 from functools import partial
@@ -1564,11 +1564,16 @@ class MainWindow:
         else:
             tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
         if isinstance(entry, WwiseBank):
-            bank = self.name_lookup.lookup_soundbank(str(entry.get_id()))
-            if bank.language != "none":
-                name = f"{bank.friendlyname} ({bank.language})"
+            if self.name_lookup is not None:
+                bank = self.name_lookup.lookup_soundbank(str(entry.get_id()))
+                if not bank.success:
+                    name = entry.dep.data
+                elif bank.language != "none":
+                    name = f"{bank.friendlyname} ({bank.language})"
+                else:
+                    name = bank.friendlyname
             else:
-                name = bank.friendlyname
+                name = entry.dep.data
             entry_type = "Sound Bank"
         elif isinstance(entry, TextBank):
             name = f"{entry.get_id()}.text"
@@ -1905,33 +1910,33 @@ if __name__ == "__main__":
     if not os.path.exists(GAME_FILE_LOCATION):
         showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
             " Audio archive search is disabled.")
-    else:
-        try:
-            if os.path.exists("friendlynames.db"):
-                current_version = db.get_db_version("friendlynames.db") + 1
-            else:
-                current_version = -1
-            file, _ = urllib.request.urlretrieve("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
-            with open(file) as f:
-                data = json.loads(f.read())
-                download_url = data["assets"][0]["browser_download_url"]
-                latest_version = int(float(data["tag_name"].replace("v", "")))
-            if current_version < latest_version:
-                urllib.request.urlretrieve(download_url, "friendlynames.db")
-                if not os.path.exists("friendlynames.db"):
-                    logger.error("Failed to fetch audio database. Built-in audio archive search is disabled.")
-                    showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
-                else:
-                    try:
-                        lookup_store = db.FriendlyNameLookup("friendlynames.db")
-                    except Exception as err:
-                        logger.error("Failed to connect to audio archive database", 
-                                     stack_info=True)
-                        lookup_store = None
-        except:
-            pass
-        finally:
-            urllib.request.urlcleanup()
+    try:
+        if os.path.exists("friendlynames.db"):
+            current_version = db.get_db_version("friendlynames.db") + 1
+        else:
+            current_version = -1
+        r = requests.get("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
+        if r.status_code != 200:
+            raise Exception("Error fetching latest database")
+        data = r.json()
+        download_url = data["assets"][0]["browser_download_url"]
+        latest_version = int(float(data["tag_name"].replace("v", "")))
+        if current_version < latest_version:
+            r = requests.get(download_url)
+            if r.status_code != 200:
+                raise Exception("Error fetching latest database")
+            with open("friendlynames.db", "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+    except Exception as e:
+        print(e)
+        
+    try:
+        lookup_store = db.FriendlyNameLookup("friendlynames.db")
+    except Exception as err:
+        logger.error("Failed to connect to audio archive database", 
+                     stack_info=True)
+        lookup_store = None
         
     language = language_lookup("English (US)")
     window = MainWindow(app_state, lookup_store)
