@@ -41,6 +41,16 @@ from log import logger
 
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
+
+
+import sys
+
+from PySide6.QtCore import QSize, Qt, Signal, QMargins, QSortFilterProxyModel, QItemSelection, QItemSelectionModel
+from PySide6.QtWidgets import QApplication, QMainWindow, QTreeView, QFileSystemModel, QMenu, QHBoxLayout, QVBoxLayout, QAbstractItemView, QSizePolicy, QWidget, QSplitter, QListView, QPushButton, QSpacerItem, QFileDialog, QLabel, QTabWidget, QStyledItemDelegate
+from PySide6.QtGui import QStandardItem, QStandardItemModel, QPalette, QColor, QAction
+
+WORKSPACE_FOLDER = os.path.abspath("./workspace_folders")
+
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -761,243 +771,709 @@ class ArchiveSearch(ttk.Entry):
             self.fmt = fmt
         self.entries = entries
         self.delete(0, tkinter.END)
+        
 
-class MainWindow:
+class WorkspaceView(QTreeView):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.selectedFiles = []
+        self.initModel()
+        self.initUI()
+        
+    def initModel(self):
+        file_system_model = QFileSystemModel()
+        file_system_model.setRootPath(WORKSPACE_FOLDER)
+        file_system_model.setNameFilters(["*" + filetype for filetype in SUPPORTED_AUDIO_TYPES] + ["*.patch_*"])
+        file_system_model.setNameFilterDisables(1)
+        self.setModel(file_system_model)
+        self.setRootIndex(file_system_model.index(WORKSPACE_FOLDER))
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.resize(200, 200)
+        
+    def initUI(self):
+        self.setAcceptDrops(True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.showContextMenu)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.hideColumn(1)
+        self.hideColumn(2)
+        self.hideColumn(3)
+        self.initContextMenu()
+        
+    def addFolder(self, src):
+        os.symlink(src, os.path.join(WORKSPACE_FOLDER, os.path.basename(src)), target_is_directory=True)
+        
+    def removeSelected(self):
+        for f in self.selectedFiles:
+            self.model().rmdir(f)
+            self.model().remove(f)
+            
+    def importSelected(self):
+        for f in self.selectedFiles:
+            pass
+        
+    def setSelection(self, rect, command):
+        super().setSelection(rect, command)
+        self.selectedFiles = self.selectedIndexes()
+        
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            filename = url.toLocalFile()
+            if os.path.isdir(filename):
+                self.addFolder(filename)
+    
+    def dragEnterEvent(self, event):
+        for url in event.mimeData().urls():
+            if not os.path.isdir(url.toLocalFile()):
+                event.ignore()
+                return
+        event.accept()
+        
+    def dragMoveEvent(self, event):
+        for url in event.mimeData().urls():
+            if not os.path.isdir(url.toLocalFile()):
+                event.ignore()
+                return
+        event.accept()
+        
+    def mouseDoubleClickEvent(self, event):
+        selects = self.selectedIndexes()
+        if len(selects) == 1:
+            selectedIndex = selects[0]
+            if not self.model().isDir(selectedIndex):
+                filepath = self.model().filePath(selectedIndex)
+            if os.path.splitext(filepath)[1] in SUPPORTED_AUDIO_TYPES:
+                with open(filepath, "rb") as f:
+                    audio_data = f.read()
+                SoundHandler.get_instance().play_audio(os.path.basename(os.path.splitext(filepath)[0]), audio_data)
+                
+    def initContextMenu(self):
+        self.contextMenu = QMenu(self)
+        
+        #check selected indices to see which actions to add
+        
+        self.contextMenuDeleteAction = QAction("Delete")
+        self.contextMenuImportAction = QAction("Import")
+        
+        self.contextMenuDeleteAction.triggered.connect(self.removeSelected)
+        self.contextMenuImportAction.triggered.connect(self.importSelected)
+        
+    def showContextMenu(self, pos):
+        self.contextMenu.clear()
+        if not self.selectedIndexes():
+            return
+        self.contextMenu.addAction(self.contextMenuDeleteAction)
+        self.contextMenu.addAction(self.contextMenuImportAction)
+        global_pos = self.mapToGlobal(pos)
+        self.contextMenu.exec(global_pos)
 
-    dark_mode_bg = "#333333"
-    dark_mode_fg = "#ffffff"
-    dark_mode_modified_bg = "#ffffff"
-    dark_mode_modified_fg = "#333333"
-    light_mode_bg = "#ffffff"
-    light_mode_fg = "#000000"
-    light_mode_modified_bg = "#7CFC00"
-    light_mode_modified_fg = "#000000"
+class ModView(QWidget):
+    selectionChanged = Signal(QItemSelection, QItemSelection)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.initUI()
+        self.mod = None
+        
+    def initUI(self):
+        self.treeView = ModTreeView(self)
+        self.treeView.selectionChanged.connect(self.selectionChangedExport)
+        self.nameLabel = QLabel("No mod currently loaded")
+        self.layout = QVBoxLayout()
+        self.layout.addWidget(self.nameLabel)
+        self.layout.addWidget(self.treeView)
+        self.layout.setContentsMargins(QMargins(0, 0, 0, 0))
+        self.setLayout(self.layout)
+        
+    def setMod(self, mod):
+        self.mod = mod
+        self.treeView.setMod(mod)
+        if mod is not None:
+            self.nameLabel.setText(mod.name)
+        else:
+            self.nameLabel.setText("No mod currently loaded")
+        
+    def activeModChanged(self, mod_name):
+        try:
+            self.setMod(ModHandler.get_instance().get_active_mod())
+        except LookupError:
+            self.setMod(None)
+            
+    def selectionChangedExport(self, selected, deselected):
+        self.selectionChanged.emit(selected, deselected)
+            
+    def modRenamed(self, old_name, new_name):
+        self.nameLabel.setText(self.mod.name)
+        
+    def refresh(self):
+        self.treeView.refresh()
+
+class ModTreeView(QTreeView):
+    selectionChanged = Signal(QItemSelection, QItemSelection)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.selection = []
+        self.models = {}
+        self.initModel()
+        self.initUI()
+        
+    def initModel(self):
+        self.proxyModel = ModViewFilter()
+        self.setModel(self.proxyModel)
+        
+    def initUI(self):
+        self.setAcceptDrops(True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.selectionModel().selectionChanged.connect(self.selectionChangedExport)
+        self.customContextMenuRequested.connect(self.showContextMenu)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.resize(100, 100)
+        self.initContextMenu()
+        
+    def setSelection(self, rect, command):
+        super().setSelection(rect, command)
+        self.selection = self.selectedIndexes()
+        
+    def setMod(self, mod):
+        if mod in self.models.keys():
+            self.proxyModel.setSourceModel(self.models[mod])
+        else:
+            new_model = ModModel()
+            new_model.setMod(mod)
+            self.models[mod] = new_model
+            self.proxyModel.setSourceModel(self.models[mod])
+            
+    def selectionChangedExport(self, selected, deselected):
+        self.selectionChanged.emit(selected, deselected)
+        
+    def dropEvent(self, event):
+        pass
+        #for url in event.mimeData().urls():
+        #    filename = url.toLocalFile()
+        #    if os.path.isdir(filename):
+        #        self.addFolder(filename)
+        
+    def mouseDoubleClickEvent(self, event):
+        selection = self.proxyModel.mapToSource(self.selectedIndexes()[0])
+        selectedItem = self.proxyModel.sourceModel().itemFromIndex(selection)
+        if selectedItem:
+            audioSource = selectedItem.data()
+            if isinstance(audioSource, AudioSource):
+                SoundHandler.get_instance().play_audio(audioSource.get_id(), audioSource.get_data())
+    
+    def dragEnterEvent(self, event):
+        for url in event.mimeData().urls():
+            if not os.path.isdir(url.toLocalFile()):
+                event.ignore()
+                return
+        event.accept()
+        
+    def dragMoveEvent(self, event):
+        for url in event.mimeData().urls():
+            if not os.path.isdir(url.toLocalFile()):
+                event.ignore()
+                return
+        event.accept()
+        
+    def activeModChanged(self, mod_name):
+        try:
+            self.setMod(ModHandler.get_instance().get_active_mod())
+        except LookupError:
+            self.setMod(None)
+            
+    def initContextMenu(self):
+        self.contextMenuRemoveArchive = QAction("Remove")
+        self.contextMenuTargetedImport = QAction("Import")
+        self.contextMenuDumpWav = QAction("Dump as Wav")
+        self.contextMenuDumpWem = QAction("Dump as Wem")
+        
+    def showContextMenu(self, pos):
+        pass
+        #contextMenu = QMenu(self)
+        
+        #global_pos = self.mapToGlobal(pos)
+        #contextMenu.exec(global_pos)
+        
+    def refresh(self):
+        try:
+            self.proxyModel.sourceModel().refresh()
+        except:
+            pass
+    
+    def drawRow(self, painter, options, index):
+        data = self.proxyModel.sourceModel().itemFromIndex(self.proxyModel.mapToSource(index)).data()
+        if isinstance(data, GameArchive):
+            pass
+        elif isinstance(data, (WwiseBank, AudioSource, TextBank, StringEntry)):
+            if data.modified:
+                painter.fillRect(options.rect, QColor(128, 128, 128, 255))
+        elif isinstance(data, HircEntry):
+            if data.modified or data.has_modified_children():
+                painter.fillRect(options.rect, QColor(128, 128, 128, 255))
+        super().drawRow(painter, options, index)
+
+class ModViewFilter(QSortFilterProxyModel):
+    
+    acceptableTypes = (Sound, WwiseBank, MusicTrack, MusicSegment, GameArchive, AudioSource, StringEntry, TextBank)
+    autoAcceptTypes = (GameArchive, WwiseBank, TextBank)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+
+class ModModel(QStandardItemModel):
+    
+    ALL_TYPES = set([WwiseBank, TextBank, AudioSource, StringEntry, MusicTrack, MusicSegment, RandomSequenceContainer, GameArchive])
+    
+    def __init__(self):
+        super().__init__()
+        self.itemChanged.connect(self.update)
+        self.visibleTypes = set([WwiseBank, TextBank, AudioSource, StringEntry, MusicTrack, MusicSegment, RandomSequenceContainer, GameArchive])
+    
+    beforeItemChanged = Signal(QStandardItem)
+    
+    def _create_row(self, item):
+        if isinstance(item, WwiseBank):
+            name = item.dep.data.replace('\x00', '')
+            item_type = "Sound Bank"
+            item_id = item.get_id()
+        elif isinstance(item, TextBank):
+            name = f"{item.get_id()}.text"
+            item_type = "Text Bank"
+            item_id = item.get_id()
+        elif isinstance(item, AudioSource):
+            name = f"{item.get_id()}.wem"
+            item_type = "Audio Source"
+            item_id = item.get_id()
+        elif isinstance(item, TrackInfoStruct):
+            name = f"Event {item.get_id()}"
+            item_type = "Event"
+            item_id = item.get_id()
+        elif isinstance(item, StringEntry):
+            item_type = "String"
+            name = item.get_text()[:20]
+            item_id = item.get_id()
+        elif isinstance(item, MusicTrack):
+            item_type = "Music Track"
+            name = f"Track {item.get_id()}"
+            item_id = item.get_id()
+        elif isinstance(item, MusicSegment):
+            item_type = "Music Segment"
+            name = f"Segment {item.get_id()}"
+            item_id = item.get_id()
+        elif isinstance(item, RandomSequenceContainer):
+            item_type = "Random Sequence"
+            name = f"Sequence {item.get_id()}"
+            item_id = item.get_id()
+        elif isinstance(item, GameArchive):
+            name = item.name
+            item_type = "Archive File"
+            item_id = item.name
+        else:
+            name = f"{type(item).__name__} {item.get_id()}"
+            item_type = f"{type(item).__name__}"
+            item_id = item.get_id()
+        name_item = QStandardItem(name)
+        name_item.setData(item)
+        type_item = QStandardItem(item_type)
+        type_item.setEditable(False)
+        #id_item = QStandardItem(str(item_id))
+        #id_item.setEditable(False)
+        return [name_item, type_item]
+
+    def setTypeVisibility(self, type, visible):
+        if visible:
+            self.visibleTypes.add(type)
+        else:
+            self.visibleTypes.remove(type)
+    
+    #add function that does a diff instead of redoing the entire thing when loading/removing an archive
+    def refresh(self):
+        self.clear()
+        if self.mod is None:
+            return
+        self.setHorizontalHeaderLabels(["File Name", "Type"])
+        root = self.invisibleRootItem()
+        parentItem = root
+        game_archives = self.mod.get_game_archives()
+        sequence_sources = set()
+        for archive in game_archives.values():
+            archive_entry = self._create_row(archive)
+            root.appendRow(archive_entry)
+            for bank in archive.wwise_banks.values():
+                bank_entry = self._create_row(bank)
+                archive_entry[0].appendRow(bank_entry)
+                for hierarchy_entry in bank.hierarchy.entries.values():
+                    if isinstance(hierarchy_entry, MusicSegment):
+                        segment_entry = self._create_row(hierarchy_entry)
+                        bank_entry[0].appendRow(segment_entry)
+                        for track_id in hierarchy_entry.tracks:
+                            track = bank.hierarchy.entries[track_id]
+                            track_entry = self._create_row(track)
+                            segment_entry[0].appendRow(track_entry)
+                            for source in track.sources:
+                                if source.plugin_id == VORBIS:
+                                    try:
+                                        source_entry = self._create_row(self.mod.get_audio_source(source.source_id))
+                                        track_entry[0].appendRow(source_entry)
+                                    except:
+                                        pass
+                            for info in track.track_info:
+                                if info.event_id != 0:
+                                    event_entry = self._create_row(info)
+                                    track_entry[0].appendRow(event_entry)
+                    elif isinstance(hierarchy_entry, RandomSequenceContainer):
+                        container_entry = self._create_row(hierarchy_entry)
+                        bank_entry[0].appendRow(container_entry)
+                        for s_id in hierarchy_entry.contents:
+                            sound = bank.hierarchy.entries[s_id]
+                            if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
+                                sequence_sources.add(sound)
+                                try:
+                                    source_entry = self._create_row(self.mod.get_audio_source(sound.sources[0].source_id))
+                                    container_entry[0].appendRow(source_entry)
+                                except:
+                                    pass
+                for hierarchy_entry in bank.hierarchy.entries.values():
+                    if isinstance(hierarchy_entry, Sound) and hierarchy_entry not in sequence_sources:
+                        if hierarchy_entry.sources[0].plugin_id == VORBIS:
+                            try:
+                                source_entry = self._create_row(self.mod.get_audio_source(hierarchy_entry.sources[0].source_id))
+                                bank_entry[0].appendRow(source_entry)
+                            except:
+                                pass
+            for text_bank in archive.text_banks.values():
+                if text_bank.language == language:
+                    bank_entry = self._create_row(text_bank)
+                    archive_entry[0].appendRow(bank_entry)
+                    for string_entry in text_bank.entries.values():
+                        text_entry = self._create_row(string_entry)
+                        bank_entry[0].appendRow(text_entry)
+                        
+    def setMod(self, mod):
+        self.mod = mod
+        self.refresh()
+        
+    def update(self, item):
+        pass
+            
+
+class ModSelectorView(QWidget):
+    setActive = Signal(str)
+    modRenamed = Signal(str, str)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.listView = self.plusButton = self.minusButton = self.setActiveButton = None
+        self.model = None
+        self.initModel()
+        self.initUI()
+        
+    def initModel(self):
+        self.model = ModSelectorModel()
+        self.model.itemChanged.connect(self.itemChanged)
+        self.model.beforeItemChanged.connect(self.beforeItemChanged)
+        
+    def initUI(self):
+        self.listView = QListView(self)
+        self.listView.setModel(self.model)
+        self.plusButton = QPushButton("+", self)
+        self.plusButton.setFixedSize(20, 20)
+        #self.plusButton.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.minusButton = QPushButton("-", self)
+        self.minusButton.setFixedSize(20, 20)
+        #self.minusButton.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setActiveButton = QPushButton("Open", self)
+        self.setActiveButton.setFixedSize(50, 20)
+        #self.setActiveButton.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        buttonContainer = QWidget()
+        buttonLayout = QHBoxLayout()
+        buttonLayout.setContentsMargins(QMargins(4, 0, 4, 0))
+        spacer = QSpacerItem(110, 20, hData=QSizePolicy.Policy.Expanding)
+        buttonLayout.addSpacerItem(spacer)
+        buttonLayout.addWidget(self.plusButton)
+        buttonLayout.addWidget(self.minusButton)
+        buttonLayout.addWidget(self.setActiveButton)
+        self.plusButton.clicked.connect(self.addMod)
+        self.minusButton.clicked.connect(self.removeMod)
+        self.setActiveButton.clicked.connect(self.setActiveMod)
+        buttonContainer.setLayout(buttonLayout)
+        layout = QVBoxLayout()
+        #layout.setContentsMargins(QMargins(11, 4, 11, 11))
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.listView.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.listView.resize(100, 100)
+        layout.addWidget(buttonContainer)
+        layout.addWidget(self.listView)
+        self.setMinimumSize(250, 100)
+        self.resize(250, 175)
+        self.setLayout(layout)
+        
+    def addMod(self):
+        name = "new"
+        count = 1
+        while self.listView.model().nameTaken(name):
+            name = f"new{count}"
+            count += 1
+        self.listView.model().addMod(name)
+        ModHandler.get_instance().set_active_mod(name)
+        index = self.listView.model().indexFromItem(self.listView.model().findItems(name)[0])
+        selection = QItemSelection(index, index)
+        self.listView.selectionModel().select(selection, QItemSelectionModel.ClearAndSelect)
+        self.setActive.emit(ModHandler.get_instance().get_active_mod())
+        
+    def removeMod(self):
+        mod = self.listView.selectedIndexes()[0]
+        self.listView.model().removeMod(mod)
+        try:
+            mod = ModHandler.get_instance().get_active_mod()
+        except LookupError:
+            self.setActive.emit(None)
+            return
+        
+        index = self.listView.model().indexFromItem(self.listView.model().findItems(mod.name)[0])
+        selection = QItemSelection(index, index)
+        self.listView.selectionModel().select(selection, QItemSelectionModel.ClearAndSelect)
+        self.setActive.emit(mod)
+        
+    def setActiveMod(self):
+        selected_mod = self.listView.model().itemFromIndex(self.listView.selectedIndexes()[0]).text()
+        self.listView.model().mod_handler.set_active_mod(selected_mod)
+        self.setActive.emit(selected_mod)
+        
+    def beforeItemChanged(self, item):
+        self.old_name = item.text()
+        
+    def itemChanged(self, item):
+        self.modRenamed.emit(self.old_name, item.text())
+        
+    def closeEvent(self, event):
+        if not event.spontaneous():
+            event.accept()
+        else:
+            event.ignore()
+            self.hide()
+            
+    def toggleVisible(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self.show()
+        if self.isMinimized():
+            self.showNormal()
+    
+class ModSelectorModel(QStandardItemModel):
+    
+    beforeItemChanged = Signal(QStandardItem)
+    
+    def __init__(self):
+        super().__init__()
+        self.setHorizontalHeaderLabels([""])
+        self.itemChanged.connect(self.update)
+        self.beforeItemChanged.connect(self.beforeUpdate)
+        self.mod_handler = ModHandler.get_instance()
+        root = self.invisibleRootItem()
+        for name in self.mod_handler.get_mod_names():
+            item = QStandardItem(name)
+            root.appendRow(item)
+        
+    def getMod(self, mod_name):
+        pass 
+        
+    def setData(self, index, value, role=Qt.EditRole):
+        self.beforeItemChanged.emit(self.itemFromIndex(index))
+        return super().setData(index, value, role)
+    
+    def addMod(self, mod_name):
+        if not self.nameTaken(mod_name):
+            name_item = QStandardItem(mod_name)
+            self.invisibleRootItem().appendRow(name_item)
+            self.mod_handler.create_new_mod(mod_name)
+        
+    def removeMod(self, index):
+        row = self.takeRow(index.row())
+        self.mod_handler.delete_mod(row[0].text())
+        
+    def nameTaken(self, name):
+        return name in self.mod_handler.get_mod_names()
+        
+    def beforeUpdate(self, item):
+        self.old_name = item.text()
+        
+    def update(self, item):
+        self.mod_handler.rename_mod(self.old_name, item.text())
+
+class InfoView(QWidget):
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.initUI()
+        
+    def initUI(self):
+        self.layout = QVBoxLayout()
+        self.label = QLabel()
+        self.layout.addWidget(self.label)
+        self.setLayout(self.layout)
+        
+    def setContents(self, selected, deselected):
+        itemSelectionRange = selected.first()
+        content = itemSelectionRange.model().itemFromIndex(itemSelectionRange.topLeft()).data()
+        try:
+            self.label.setText(str(content.get_id()))
+        except:
+            self.label.setText("UNAVAILABLE")
+
+class WindowBar(QWidget):
+    
+    modSelectToggle = Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.initUI()
+        
+    def initUI(self):
+        layout = QHBoxLayout()
+        self.modSelectWindow = QPushButton("Manage Mods", self)
+        self.modSelectWindow.clicked.connect(self.modSelectWindowToggle)
+        layout.setContentsMargins(QMargins(4, 0, 4, 0))
+        layout.addWidget(self.modSelectWindow)
+        self.setLayout(layout)
+        
+    def modSelectWindowToggle(self):
+        self.modSelectToggle.emit()
+        
+class TopBar(QWidget):
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.initUI()
+        
+    def initUI(self):
+        layout = QHBoxLayout()
+        self.window_bar = WindowBar(self)
+        spacer = QSpacerItem(300, 1, hData=QSizePolicy.Policy.Expanding)
+        layout.addSpacerItem(spacer)
+        layout.setContentsMargins(QMargins(4, 4, 4, 4))
+        layout.addWidget(self.window_bar)
+        self.resize(300, 20)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setLayout(layout)
+
+class MainWindow(QMainWindow):
 
     def __init__(self, 
                  app_state: cfg.Config, 
                  lookup_store: db.LookupStore | None):
-        self.app_state = app_state
-        self.name_lookup = lookup_store
-        self.sound_handler = SoundHandler.get_instance()
-        self.watched_paths = []
+        super().__init__()
+        
         self.mod_handler = ModHandler.get_instance()
-        self.mod_handler.create_new_mod("default")
+        self.sound_handler = SoundHandler.get_instance()
+        self.mod_handler.create_new_mod("new mod", set_active=True)
+        self.setWindowTitle("HD2 Audio Modder")
+        self.resize(1280, 720)
         
-        self.root = TkinterDnD.Tk()
-        if os.path.exists("icon.ico"):
-            self.root.iconbitmap("icon.ico")
+        self.initComponents()
+        self.connectComponents()
+        self.layoutComponents()
         
-        self.drag_source_widget = None
-        self.workspace_selection = []
         
-        try:
-            self.root.tk.call("source", "azure.tcl")
-        except Exception as e:
-            logger.critical("Error occurred when loading themes:")
-            logger.critical(e)
-            logger.critical("Ensure azure.tcl and the themes folder are in the same folder as the executable")
+    def initComponents(self):
+        self.initMenuBar()
+        self.initModView()
+        self.initModSelectorView()
+        self.initInfoView()
+        self.initWorkspaceView()
+        self.initToolBars()
+        
+    def connectComponents(self):
+        self.mod_selector_view.setActive.connect(self.mod_view.activeModChanged)
+        self.mod_selector_view.modRenamed.connect(self.mod_view.modRenamed)
+        self.mod_view.selectionChanged.connect(self.info_view.setContents)
+        self.manageModsAction.triggered.connect(self.mod_selector_view.toggleVisible)
+        self.fileOpenArchiveAction.triggered.connect(lambda x: self.load_archive(initialdir=GAME_FILE_LOCATION))
+        self.fileImportAudioAction.triggered.connect(self.import_audio_files)
+        self.fileImportPatchAction.triggered.connect(self.import_patch)
+        self.fileWritePatchAction.triggered.connect(self.write_patch)
+        self.editRevertAllAction.triggered.connect(self.revert_all)
+        self.dumpAllAsWavAction.triggered.connect(self.dump_all_as_wav)
+        self.dumpAllAsWemAction.triggered.connect(self.dump_all_as_wem)
+        
+    def layoutComponents(self):
+        self.setMinimumSize(300, 200)
+        self.layout = QVBoxLayout()
 
-        self.fake_image = tkinter.PhotoImage(width=1, height=1)
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.addWidget(self.workspace_view)
+        self.splitter.addWidget(self.mod_view)
+        self.splitter.addWidget(self.info_view)
+        
+        self.layout.addWidget(self.splitter)
+        widget = QWidget()
+        
+        widget.setLayout(self.layout)
+        self.setCentralWidget(widget)
+        
+    def initMenuBar(self):
+        menu_bar = self.menuBar()
+        
+        self.file_menu = menu_bar.addMenu("File")
+        
+        self.fileOpenArchiveAction = QAction("Open Archive", self)
+        self.fileImportPatchAction = QAction("Import Patch File", self)
+        self.fileImportAudioAction = QAction("Import Audio Files", self)
+        self.fileWritePatchAction = QAction("Write Patch", self)
+        
+        self.file_menu.addAction(self.fileOpenArchiveAction)
+        self.file_menu.addAction(self.fileImportPatchAction)
+        self.file_menu.addAction(self.fileImportAudioAction)
+        self.file_menu.addAction(self.fileWritePatchAction)
+        
+        
+        self.edit_menu = menu_bar.addMenu("Edit")
+        
+        self.editRevertAllAction = QAction("Revert All", self)
+        self.editPreferencesAction = QAction("Preferences", self)
+        
+        self.edit_menu.addAction(self.editRevertAllAction)
+        
+        
+        self.dump_menu = menu_bar.addMenu("Dump")
+        
+        self.dumpAllAsWemAction = QAction("Dump All As Wem", self)
+        self.dumpAllAsWavAction = QAction("Dump All As Wav", self)
+        
+        self.dump_menu.addAction(self.dumpAllAsWemAction)
+        self.dump_menu.addAction(self.dumpAllAsWavAction)
+        
+        
+        
+    def initToolBars(self):
+        windowToolBar = self.addToolBar("Toolbar")
+        
+        self.manageModsAction = QAction("Manage Mods", self)
+        self.manageModsAction.setToolTip("Toggles the Mod Selector window")
+        windowToolBar.addAction(self.manageModsAction)
+        
+    def initTopBar(self):
+        self.top_bar = TopBar(self)
 
-        self.top_bar = Frame(self.root, width=WINDOW_WIDTH, height=40)
-        self.search_text_var = tkinter.StringVar(self.root)
-        self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
-        self.top_bar.pack(side="top", fill='x')
-        if lookup_store != None and os.path.exists(GAME_FILE_LOCATION):
-            self.init_archive_search_bar()
-
-        self.up_button = ttk.Button(self.top_bar, text='\u25b2',
-                                    width=2, command=self.search_up)
-        self.down_button = ttk.Button(self.top_bar, text='\u25bc',
-                                      width=2, command=self.search_down)
-
-        self.search_label = ttk.Label(self.top_bar,
-                                      width=10,
-                                      font=('Segoe UI', 14),
-                                      justify="center")
-
-        self.search_icon = ttk.Label(self.top_bar, font=('Arial', 20), text="\u2315")
-
-        self.search_label.pack(side="right", padx=1)
-        self.search_bar.pack(side="right", padx=1)
-        self.down_button.pack(side="right")
-        self.up_button.pack(side="right")
-        self.search_icon.pack(side="right", padx=4)
-
-        self.default_bg = "#333333"
-        self.default_fg = "#ffffff"
+    def initModView(self):
+        self.mod_view = ModView(self)
+        self.mod_view.setMod(self.mod_handler.get_active_mod())
         
-        self.window = PanedWindow(self.root, orient=HORIZONTAL, borderwidth=0, background="white")
-        self.window.config(sashwidth=8, sashrelief="raised")
-        self.window.pack(fill=BOTH)
-
+    def initModSelectorView(self):
+        self.mod_selector_view = ModSelectorView()
+        self.mod_selector_view.setWindowTitle("Manage Mods")
         
-        self.top_bar.pack(side="top")
+    def initWorkspaceView(self):
+        self.workspace_view = WorkspaceView(self)
         
-        self.search_results = []
-        self.search_result_index = 0
-
-        self.init_workspace()
-        
-        self.treeview_panel = Frame(self.window)
-        self.scroll_bar = ttk.Scrollbar(self.treeview_panel, orient=VERTICAL)
-        self.treeview = ttk.Treeview(self.treeview_panel, columns=("type",), height=WINDOW_HEIGHT-100)
-        self.scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
-        self.treeview.pack(side="right", padx=8, pady=8, fill="x", expand=True)
-        self.treeview.heading("#0", text="File")
-        self.treeview.column("#0", width=250)
-        self.treeview.column("type", width=100)
-        self.treeview.heading("type", text="Type")
-        self.treeview.configure(yscrollcommand=self.scroll_bar.set)
-        self.treeview.bind("<<TreeviewSelect>>", self.show_info_window)
-        self.treeview.bind("<Double-Button-1>", self.treeview_on_double_click)
-        self.treeview.bind("<Return>", self.treeview_on_double_click)
-        self.scroll_bar['command'] = self.treeview.yview
-
-        self.entry_info_panel = Frame(self.window, width=int(WINDOW_WIDTH/3))
-        self.entry_info_panel.pack(side="left", fill="both", padx=8, pady=8)
-        
-        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel,
-                                                  self.play_audio,
-                                                  self.check_modified)
-        self.event_info_panel = EventWindow(self.entry_info_panel,
-                                            self.check_modified)
-        self.string_info_panel = StringEntryWindow(self.entry_info_panel,
-                                                   self.check_modified)
-        self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
-                                                     self.check_modified)
-                                                     
-        self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified)
-                                                     
-        self.window.add(self.treeview_panel)
-        self.window.add(self.entry_info_panel)
-        
-        self.root.title("Helldivers 2 Audio Modder")
-        self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
-        
-        self.right_click_menu = Menu(self.treeview, tearoff=0)
-        self.right_click_id = 0
-
-        self.menu = Menu(self.root, tearoff=0)
-        
-        self.selected_view = StringVar()
-        self.selected_view.set("SourceView")
-        self.view_menu = Menu(self.menu, tearoff=0)
-        self.view_menu.add_radiobutton(label="Sources", variable=self.selected_view, value="SourceView", command=self.create_source_view)
-        self.view_menu.add_radiobutton(label="Hierarchy", variable=self.selected_view, value="HierarchyView", command=self.create_hierarchy_view)
-        
-        self.selected_language = StringVar()
-        self.options_menu = Menu(self.menu, tearoff=0)
-        
-        self.selected_theme = StringVar()
-        self.selected_theme.set(self.app_state.theme)
-        self.set_theme()
-        self.theme_menu = Menu(self.menu, tearoff=0)
-        self.theme_menu.add_radiobutton(label="Dark Mode", variable=self.selected_theme, value="dark_mode", command=self.set_theme)
-        self.theme_menu.add_radiobutton(label="Light Mode", variable=self.selected_theme, value="light_mode", command=self.set_theme)
-        self.options_menu.add_cascade(menu=self.theme_menu, label="Set Theme")
-        
-        self.language_menu = Menu(self.options_menu, tearoff=0)
-        
-        self.file_menu = Menu(self.menu, tearoff=0)
-
-        self.recent_file_menu = Menu(self.file_menu, tearoff=0)
-
-        self.load_archive_menu = Menu(self.menu, tearoff=0)
-        if os.path.exists(GAME_FILE_LOCATION):
-            self.load_archive_menu.add_command(
-                label="From HD2 Data Folder",
-                command=lambda: self.load_archive(initialdir=self.app_state.game_data_path)
-            )
-        self.load_archive_menu.add_command(
-            label="From File Explorer",
-            command=self.load_archive
-        )
-
-        for item in reversed(self.app_state.recent_files):
-            item = os.path.normpath(item)
-            self.recent_file_menu.add_command(
-                label=item,
-                command=partial(self.load_archive, "", item)
-            )
-
-        self.import_menu = Menu(self.menu, tearoff=0)
-        self.import_menu.add_command(
-            label="Import Patch File",
-            command=self.import_patch
-        )
-        self.import_menu.add_command(
-            label="Import Audio Files",
-            command=self.import_audio_files
-        )
-            
-        self.file_menu.add_cascade(
-            menu=self.load_archive_menu, 
-            label="Open"
-        )
-        self.file_menu.add_cascade(
-            menu=self.recent_file_menu,
-            label="Open Recent"
-        )
-        self.file_menu.add_cascade(
-            menu=self.import_menu,
-            label="Import"
-        )
-        
-        self.file_menu.add_command(label="Combine Music Mods", command=self.combine_music_mods)
-        
-        self.file_menu.add_command(label="Save", command=self.save_mod)
-        self.file_menu.add_command(label="Write Patch", command=self.write_patch)
-        
-        self.file_menu.add_command(label="Add a Folder to Workspace",
-                                   command=self.add_new_workspace)
-        
-        self.edit_menu = Menu(self.menu, tearoff=0)
-        self.edit_menu.add_command(label="Revert All Changes", command=self.revert_all)
-        
-        self.dump_menu = Menu(self.menu, tearoff=0)
-        if os.path.exists(VGMSTREAM):
-            self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
-        self.dump_menu.add_command(label="Dump all as .wem", command=self.dump_all_as_wem)
-        
-        self.menu.add_cascade(label="File", menu=self.file_menu)
-        self.menu.add_cascade(label="Edit", menu=self.edit_menu)
-        self.menu.add_cascade(label="Dump", menu=self.dump_menu)
-        self.menu.add_cascade(label="View", menu=self.view_menu)
-        self.menu.add_cascade(label="Options", menu=self.options_menu)
-        self.root.config(menu=self.menu)
-        
-        self.treeview.drop_target_register(DND_FILES)
-        self.workspace.drop_target_register(DND_FILES)
-        self.workspace.drag_source_register(1, DND_FILES)
-
-        self.treeview.bind("<Button-3>", self.treeview_on_right_click)
-        self.workspace.bind("<Button-3>", self.workspace_on_right_click)
-        self.workspace.bind("<Double-Button-1>", self.workspace_on_double_click)
-        self.search_bar.bind("<Return>", self.search_bar_on_enter_key)
-        self.treeview.dnd_bind("<<Drop>>", self.drop_import)
-        self.treeview.dnd_bind("<<DropPosition>>", self.drop_position)
-        self.workspace.dnd_bind("<<Drop>>", self.drop_add_to_workspace)
-        self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
-        self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
-        self.workspace.bind("<Button-1>", self.workspace_save_selection)
-
-        self.root.resizable(True, True)
-        self.root.mainloop()
-        
-    def drop_position(self, event):
-        if event.data:
-            if len(event.widget.tk.splitlist(event.data)) != 1:
-                return
-        self.treeview.selection_set(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()))
-
-    def workspace_drag_assist(self, event):
-        selected_item = self.workspace.identify_row(event.y)
-        if selected_item in self.workspace_selection:
-            self.workspace.selection_set(self.workspace_selection)
-
-    def workspace_save_selection(self, event):
-        self.workspace_selection = self.workspace.selection()
+    def initInfoView(self):
+        self.info_view = InfoView(self)
+    
+    def closeEvent(self, event):
+        self.mod_selector_view.close()
         
     def combine_music_mods(self):
         self.sound_handler.kill_sound()
@@ -1077,21 +1553,6 @@ class MainWindow:
                 file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
             self.import_files(file_dict)
 
-    def drop_add_to_workspace(self, event):
-        if self.drag_source_widget is not self.workspace and event.data:
-            dropped_files = event.widget.tk.splitlist(event.data)
-            for file in dropped_files:
-                if os.path.isdir(file):
-                    self.add_new_workspace(file)
-        self.drag_source_widget = None
-
-    def drag_init_workspace(self, event):
-        self.drag_source_widget = self.workspace
-        data = ()
-        if self.workspace.selection():
-            data = tuple([self.workspace.item(i, option="values")[0] for i in self.workspace.selection()])
-        return ((ASK, COPY), (DND_FILES,), data)
-
     def search_bar_on_enter_key(self, event):
         self.search()
         
@@ -1125,139 +1586,6 @@ class MainWindow:
             else:
                 return (MainWindow.light_mode_bg, MainWindow.light_mode_fg)
 
-    def render_workspace(self):
-        """
-        TO-DO: This should be fine grained diffing instead of tearing the entire
-        thing down despite Tkinter already perform some type of rendering and
-        display optimization behind the scene.
-        """
-        self.workspace_inodes.clear()
-
-        for p in sorted(self.app_state.get_workspace_paths()):
-            inode = fileutil.generate_file_tree(p)
-            if inode != None:
-                self.workspace_inodes.append(inode)
-
-        for c in self.workspace.get_children():
-            self.workspace.delete(c)
-
-        for root_inode in self.workspace_inodes:
-            root_id = self.workspace.insert("", "end", 
-                                            text=root_inode.basename,
-                                            values=[root_inode.absolute_path],
-                                            tags="workspace")
-            inode_stack = [root_inode]
-            id_stack = [root_id]
-            while len(inode_stack) > 0:
-                top_inode = inode_stack.pop()
-                top_id = id_stack.pop()
-                for node in top_inode.nodes:
-                    id = self.workspace.insert(top_id, "end", 
-                                               text=node.basename,
-                                               values=[node.absolute_path],
-                                               tags="dir" if node.isdir else "file")
-                    if node.isdir:
-                        inode_stack.append(node)
-                        id_stack.append(id)
-
-    def add_new_workspace(self, workspace_path=""):
-        if workspace_path == "":
-            workspace_path = filedialog.askdirectory(
-                mustexist=True,
-                title="Select a folder to open as workspace"
-            )
-        if self.app_state.add_new_workspace(workspace_path) == 1:
-            return
-        inode = fileutil.generate_file_tree(workspace_path)
-        if inode == None:
-            return
-        self.workspace_inodes.append(inode)
-        idx = sorted(self.app_state.get_workspace_paths()).index(workspace_path)
-        root_id = self.workspace.insert("", idx,
-                                            text=inode.basename,
-                                            values=[inode.absolute_path],
-                                            tags="workspace")
-        inode_stack = [inode]
-        id_stack = [root_id]
-        while len(inode_stack) > 0:
-            top_inode = inode_stack.pop()
-            top_id = id_stack.pop()
-            for node in top_inode.nodes:
-                id = self.workspace.insert(top_id, "end",
-                                           text=node.basename,
-                                           values=[node.absolute_path],
-                                           tags="dir" if node.isdir else "file")
-                if node.isdir:
-                    inode_stack.append(node)
-                    id_stack.append(id)
-                    
-        # I'm too lazy so I'm just going to unschedule and then reschedule all the watches
-        # instead of locating all subfolders and then figuring out which ones to not schedule
-        self.reload_watched_paths()
-            
-    def reload_watched_paths(self):
-        for p in self.watched_paths:
-            self.observer.unschedule(p)
-        self.watched_paths = []
-        # only track top-most folder if subfolders are added:
-        # sort by number of levels
-        paths = [pathlib.Path(p) for p in self.app_state.get_workspace_paths()]
-        paths = sorted(paths, key=cmp_to_key(lambda item1, item2: len(item1.parents) - len(item2.parents)))
-
-        # skip adding a folder if a parent folder has already been added
-        trimmed_paths = []
-        for p in paths:
-            add = True
-            for item in trimmed_paths:
-                if item in p.parents:
-                    add = False
-                    break
-            if add:
-                trimmed_paths.append(p)
-                
-        for path in trimmed_paths:
-            self.watched_paths.append(self.observer.schedule(self.event_handler, path, recursive=True))
-
-    def remove_workspace(self, workspace_item):
-        values = self.workspace.item(workspace_item, option="values")
-        self.app_state.workspace_paths.remove(values[0])
-        self.workspace.delete(workspace_item)
-
-        # I'm too lazy so I'm just going to unschedule and then reschedule all the watches
-        # instead of locating all subfolders and then figuring out which ones to not schedule
-        self.reload_watched_paths()
-
-    def workspace_on_right_click(self, event):
-        self.workspace_popup_menu.delete(0, "end")
-        selects: tuple[str, ...] = self.workspace.selection()
-        if len(selects) == 0:
-            return
-        if len(selects) == 1:
-            select = selects[0]
-            tags = self.workspace.item(select, option="tags")
-            assert(tags != '' and len(tags) == 1)
-            if tags[0] == "workspace":
-                values = self.workspace.item(select, option="values")
-                assert(values != '' and len(values) == 1)
-                self.workspace_popup_menu.add_command(
-                    label="Remove Folder from Workspace",
-                    command=lambda: self.remove_workspace(select),
-                )
-                self.workspace_popup_menu.tk_popup(
-                    event.x_root, event.y_root
-                )
-                self.workspace_popup_menu.grab_release()
-                return
-            elif tags[0] == "dir":
-                return
-        file_dict = {self.workspace.item(i, option="values")[0]: [get_number_prefix(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
-        self.workspace_popup_menu.add_command(
-            label="Import", 
-            command=lambda: self.import_files(file_dict)
-        )
-        self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
-        self.workspace_popup_menu.grab_release()
-        
     def import_audio_files(self):
         
         if os.path.exists(WWISE_CLI):
@@ -1272,27 +1600,6 @@ class MainWindow:
         
     def import_files(self, file_dict):
         self.mod_handler.get_active_mod().import_files(file_dict)
-        self.check_modified()
-        self.show_info_window()
-
-    def init_workspace(self):
-        self.workspace_panel = Frame(self.window)
-        self.window.add(self.workspace_panel)
-        self.workspace = ttk.Treeview(self.workspace_panel, height=WINDOW_HEIGHT - 100)
-        self.workspace.heading("#0", text="Workspace Folders")
-        self.workspace.column("#0", width=256+16)
-        self.workspace_scroll_bar = ttk.Scrollbar(self.workspace_panel, orient=VERTICAL)
-        self.workspace_scroll_bar['command'] = self.workspace.yview
-        self.workspace_scroll_bar.pack(side="right", pady=8, fill="y", padx=(0, 10))
-        self.workspace.pack(side="right", padx=8, pady=8, fill="x", expand=True)
-        self.workspace_inodes: list[fileutil.INode] = []
-        self.workspace_popup_menu = Menu(self.workspace, tearoff=0)
-        self.workspace.configure(yscrollcommand=self.workspace_scroll_bar.set)
-        self.render_workspace()
-        self.event_handler = WorkspaceEventHandler(self.workspace)
-        self.observer = Observer()
-        self.reload_watched_paths()
-        self.observer.start()
 
     def init_archive_search_bar(self):
         if self.name_lookup == None:
@@ -1441,19 +1748,6 @@ class MainWindow:
             if values[0] != "Audio Source":
                 continue
             self.play_audio(int(tags[0]))
-
-    def workspace_on_double_click(self, event):
-        selects = self.workspace.selection()
-        if len(selects) == 1:
-            select = selects[0]
-            values = self.workspace.item(select, option="values")
-            tags = self.workspace.item(select, option="tags")
-            assert(len(values) == 1 and len(tags) == 1)
-            if tags[0] == "file" and os.path.splitext(values[0])[1] in SUPPORTED_AUDIO_TYPES and os.path.exists(values[0]):
-                audio_data = None
-                with open(values[0], "rb") as f:
-                    audio_data = f.read()
-                self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
 
     def set_language(self):
         global language
@@ -1739,79 +2033,22 @@ class MainWindow:
 
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
         if not archive_file:
-            archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
+            archive_file = QFileDialog.getOpenFileName(None, "Select archive", str(initialdir), "All Files (*.*)")
+            archive_file = archive_file[0]
         if not archive_file:
             return
         if ".patch" in archive_file:
             showwarning(title="Invalid archive", message="Cannot open patch files. Use Import Patch to apply a patch file's changes to the loaded archive(s)")
             return
         self.sound_handler.kill_sound()
-        if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
-            self.clear_search()
-            self.update_language_menu()
-            self.update_recent_files(filepath=archive_file)
-            if self.selected_view.get() == "SourceView":
-                self.create_source_view()
-            else:
-                self.create_hierarchy_view()
-            for child in self.entry_info_panel.winfo_children():
-                child.forget()
-        else:
-            for child in self.treeview.get_children():
-                self.treeview.delete(child)
-
+        self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file)
+        self.mod_view.refresh()
+        
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
         if output_folder and os.path.exists(output_folder):
             self.sound_handler.kill_sound()
             self.mod_handler.get_active_mod().save(output_folder)
-
-    def clear_treeview_background(self, item):
-        bg_color, fg_color = self.get_colors()
-        self.treeview.tag_configure(self.treeview.item(item)['tags'][0],
-                                    background=bg_color,
-                                    foreground=fg_color)
-        for child in self.treeview.get_children(item):
-            self.clear_treeview_background(child)
-        
-    """
-    TO-DO:
-    optimization point: small, but noticeable lag if there are many, many 
-    entries in the tree
-    """
-    def check_modified(self): 
-        for child in self.treeview.get_children():
-            self.clear_treeview_background(child)
-        bg: Any
-        fg: Any
-        for bank in self.mod_handler.get_active_mod().wwise_banks.values():
-            bg, fg = self.get_colors(modified=bank.modified)
-            self.treeview.tag_configure(bank.get_id(),
-                                        background=bg,
-                                        foreground=fg)
-            for entry in bank.hierarchy.get_entries():
-                is_modified = entry.modified or entry.has_modified_children()
-                bg, fg = self.get_colors(modified=is_modified)
-                self.treeview.tag_configure(entry.get_id(),
-                                        background=bg,
-                                        foreground=fg)
-        for audio in self.mod_handler.get_active_mod().get_audio_sources().values():
-            is_modified = audio.modified
-            bg, fg = self.get_colors(modified=is_modified)
-            self.treeview.tag_configure(audio.get_id(),
-                                        background=bg,
-                                        foreground=fg)
-                    
-        for text_bank in self.mod_handler.get_active_mod().text_banks.values():
-            bg, fg = self.get_colors(modified=text_bank.modified)
-            self.treeview.tag_configure(text_bank.get_id(), 
-                                            background=bg,
-                                            foreground=fg)
-            for entry in text_bank.entries.values():
-                bg, fg = self.get_colors(modified=entry.modified)
-                self.treeview.tag_configure(entry.get_id(),
-                                        background=bg,
-                                        foreground=fg)
         
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
@@ -1837,8 +2074,6 @@ class MainWindow:
     def revert_all(self):
         self.sound_handler.kill_sound()
         self.mod_handler.get_active_mod().revert_all()
-        self.check_modified()
-        self.show_info_window()
         
     def write_patch(self):
         self.sound_handler.kill_sound()
@@ -1852,9 +2087,33 @@ class MainWindow:
         archive_file = askopenfilename(title="Select patch file")
         if not archive_file:
             return
-        if self.mod_handler.get_active_mod().import_patch(archive_file):
-            self.check_modified()
-            self.show_info_window()
+        self.mod_handler.get_active_mod().import_patch(archive_file)
+            
+def get_dark_mode_palette( app=None ):
+    
+    darkPalette = app.palette()
+    darkPalette.setColor( QPalette.Window, QColor( 53, 53, 53 ) )
+    darkPalette.setColor( QPalette.WindowText, Qt.white )
+    darkPalette.setColor( QPalette.Disabled, QPalette.WindowText, QColor( 127, 127, 127 ) )
+    darkPalette.setColor( QPalette.Base, QColor( 42, 42, 42 ) )
+    darkPalette.setColor( QPalette.AlternateBase, QColor( 66, 66, 66 ) )
+    darkPalette.setColor( QPalette.ToolTipBase, QColor( 53, 53, 53 ) )
+    darkPalette.setColor( QPalette.ToolTipText, Qt.white )
+    darkPalette.setColor( QPalette.Text, Qt.white )
+    darkPalette.setColor( QPalette.Disabled, QPalette.Text, QColor( 127, 127, 127 ) )
+    darkPalette.setColor( QPalette.Dark, QColor( 35, 35, 35 ) )
+    darkPalette.setColor( QPalette.Shadow, QColor( 20, 20, 20 ) )
+    darkPalette.setColor( QPalette.Button, QColor( 53, 53, 53 ) )
+    darkPalette.setColor( QPalette.ButtonText, Qt.white )
+    darkPalette.setColor( QPalette.Disabled, QPalette.ButtonText, QColor( 127, 127, 127 ) )
+    darkPalette.setColor( QPalette.BrightText, Qt.red )
+    darkPalette.setColor( QPalette.Link, QColor( 42, 130, 218 ) )
+    darkPalette.setColor( QPalette.Highlight, QColor( 42, 130, 218 ) )
+    darkPalette.setColor( QPalette.Disabled, QPalette.Highlight, QColor( 80, 80, 80 ) )
+    darkPalette.setColor( QPalette.HighlightedText, Qt.white )
+    darkPalette.setColor( QPalette.Disabled, QPalette.HighlightedText, QColor( 127, 127, 127 ), )
+    
+    return darkPalette
 
 if __name__ == "__main__":
     random.seed()
@@ -1929,7 +2188,19 @@ if __name__ == "__main__":
                 lookup_store = None
         
     language = language_lookup("English (US)")
+    
+    if not os.path.exists(WORKSPACE_FOLDER):
+        os.mkdir(WORKSPACE_FOLDER)
+    
+    app = QApplication([])
+    app.setStyle("Fusion")
+    app.setPalette(get_dark_mode_palette(app))
+    
     window = MainWindow(app_state, lookup_store)
+    
+    window.show()
+    
+    app.exec()
     
     SoundHandler.get_instance().kill_sound()
     app_state.save_config()

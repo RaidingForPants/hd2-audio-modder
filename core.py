@@ -447,6 +447,15 @@ class TextBank:
             self.modified_count-=1
             if self.modified_count == 0:
                 self.modified = False
+                
+    def import_text(self, new_text_bank):
+        for id, entry in self.entries.items():
+            try:
+                new_text = new_text_bank.entries[id].get_text()
+            except:
+                continue
+            if new_text != entry.get_text():
+                entry.set_text(new_text_bank.entries[id].get_text())
 
 class GameArchive:
     
@@ -1365,6 +1374,8 @@ class Mod:
                 self.audio_count[key] += 1
                 for parent in game_archive.audio_sources[key].parents:
                     self.get_audio_sources()[key].parents.add(parent)
+                    if self.get_audio_sources()[key].modified:
+                        parent.raise_modified()
                 game_archive.audio_sources[key] = self.get_audio_sources()[key]
             else:
                 self.audio_count[key] = 1
@@ -1624,6 +1635,7 @@ class ModHandler:
     
     def __init__(self):
         self.mods: dict[str, Mod] = {}
+        self.active_mod = None
         
     @classmethod
     def create_instance(cls):
@@ -1635,7 +1647,7 @@ class ModHandler:
             cls.handler_instance = ModHandler()
         return cls.handler_instance
         
-    def create_new_mod(self, mod_name: str):
+    def create_new_mod(self, mod_name: str, set_active: bool = False):
         """
         @exception
         - KeyError
@@ -1645,8 +1657,16 @@ class ModHandler:
             raise KeyError(f"Mod name '{mod_name}' already exists!")
         new_mod = Mod(mod_name)
         self.mods[mod_name] = new_mod
-        self.active_mod = new_mod
+        if set_active:
+            self.active_mod = new_mod
         return new_mod
+        
+    def rename_mod(self, old_name: str, new_name: str):
+        if not old_name in self.get_mod_names():
+            raise KeyError(f"No matching mod found for name {old_name}")
+        self.mods[new_name] = self.mods[old_name]
+        self.mods[new_name].name = new_name
+        del self.mods[old_name]
         
     def get_active_mod(self) -> Mod:
         """

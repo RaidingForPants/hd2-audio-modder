@@ -64,7 +64,7 @@ class LookupResult:
         
 class FriendlyNameLookup:
     
-    def __init__(self, name_db_path: str = ""):
+    def __init__(self, name_db_path: str = "", custom_name_db_path: str = ""):
         self.conn = sqlite3.connect(name_db_path)
         if self.conn != None:
             self.cursor = self.conn.cursor()
@@ -85,7 +85,6 @@ class FriendlyNameLookup:
             return LookupResult(result[0], result[1], result[2], result[3], result[4])
         else:
             return LookupResult(key, key, key, key, key, success=False)
-            
             
     def query_soundbanks(self, language=""):
         r = []
