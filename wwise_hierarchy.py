@@ -3,7 +3,6 @@ import struct
 from typing import Union
 
 from util import *
-from log import logger
 
 
 class HircEntry:
@@ -653,6 +652,11 @@ class HircEntryFactory:
             return Sound.from_memory_stream(stream)
         elif hierarchy_type == 0x05: # random / sequence container
             return RandomSequenceContainer.from_memory_stream(stream)
+        elif hierarchy_type == 0x06:
+            if os.environ["TEST_SWITCH"] == "1":
+                return SwitchContainer.from_memory_stream(stream)
+            else:
+                return HircEntry.from_memory_stream(stream)
         elif hierarchy_type == 0x07:
             return ActorMixer.from_memory_stream(stream)
         elif hierarchy_type == 0x09:
@@ -1617,6 +1621,11 @@ class ContainerChildren:
         b = struct.pack("<I", self.numChildren)
         for child in self.children:
             b += struct.pack("<I", child)
+        if len(b) != 4 + 4 * self.numChildren:
+            raise AssertionError(
+                "Container children packed data does not have the correct data"
+                " size."
+            )
         return b
 
 
@@ -1689,7 +1698,7 @@ class PlayListItem:
         self.weight = weight
 
     def get_data(self):
-        return struct.pack("<II", self.ulPlayID, self.weight)
+        return struct.pack("<Ii", self.ulPlayID, self.weight)
 
 
 class LayerContainer(HircEntry):
@@ -1902,6 +1911,266 @@ class ActorMixer(HircEntry):
         data += self.baseParam.get_data()
         
         data += self.children.get_data()
+
+        return data
+
+
+class SwitchGroup:
+    """
+    ulSwitchID sid
+    ulNumItems u32
+    nodeList[ulNumItems] tid[]
+    """
+
+    def __init__(self):
+        self.ulSwitchID: int = 0
+        self.ulNumItems: int = 0
+        self.nodeList: list[int] = []
+
+    @staticmethod
+    def from_memory_stream(stream: MemoryStream):
+        group = SwitchGroup()
+
+        group.ulSwitchID = stream.uint32_read()
+        group.ulNumItems = stream.uint32_read()
+        group.nodeList = [stream.uint32_read() for _ in range(group.ulNumItems)]
+
+        if group.ulNumItems != len(group.nodeList):
+            raise AssertionError(
+                "Switch group node items counter does not equal to # of items "
+                "in the node list."
+            )
+
+        return group
+
+    def get_data(self):
+        b = struct.pack("<II", self.ulSwitchID, self.ulNumItems)
+        for nodeId in self.nodeList:
+            b += struct.pack("<I", nodeId)
+        if len(b) != 4 + 4 + 4 * self.ulNumItems:
+            raise AssertionError(
+                "Packed switch group data does not have the correct data size!"
+            )
+        return b
+
+
+class SwitchParam:
+    """
+    ulNodeID tid
+    byBitVectorPlayBack U8x
+    byBitVectorMode U8x
+    fadeOutTime s32
+    fadeInTime s32
+    """
+
+    def __init__(self):
+        self.ulNodeID: int = 0
+        self.byBitVectorPlayBack: int = 0
+        self.byBitVectorMode: int = 0
+        self.fadeOutTime: int = 0
+        self.fadeInTime: int = 0
+
+    @staticmethod
+    def from_memory_stream(stream: MemoryStream):
+        param = SwitchParam()
+
+        param.ulNodeID = stream.uint32_read()
+        param.byBitVectorPlayBack = stream.uint8_read()
+        param.byBitVectorMode = stream.uint8_read()
+        param.fadeOutTime = stream.int32_read()
+        param.fadeInTime = stream.int32_read()
+
+        return param
+
+    def get_data(self):
+        b = struct.pack(
+            "<IBBii",
+            self.ulNodeID,
+            self.byBitVectorPlayBack,
+            self.byBitVectorMode,
+            self.fadeOutTime,
+            self.fadeInTime
+        )
+        if len(b) != 4 + 1 + 1 + 4 + 4:
+            raise AssertionError(
+                "Packed switch param data does not have correct data size!"
+            )
+        return b
+
+
+class SwitchContainer(HircEntry):
+    """
+    baseParam BaseParam
+    eGroupType U8x
+    ulGroupID tid
+    ulDefaultSwitch tid
+    bIsContinuousValidation U8x
+    children ContainerChildren
+    ulNumSwitchGroups u32
+    switchGroups[ulNumSwitchGroups] SwitchGroup[]
+    ulNumSwitchParams u32
+    switchParams[ulNumSwitchParams] SwitchParam[]
+    """
+
+    import_values = [
+        "parent_id",
+        "baseParam",
+        "eGroupType",
+        "ulGroupID",
+        "ulDefaultSwitch",
+        "bIsContinuousValidation",
+        "children",
+        "ulNumSwitchGroups",
+        "switchGroups",
+        "ulNumSwitchParams",
+        "switchParams"
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.baseParam: BaseParam | None = None
+        self.eGroupType: int = 0
+        self.ulGroupID: int = 0
+        self.ulDefaultSwitch: int = 0
+        self.bIsContinuousValidation: int = 0
+        self.children: ContainerChildren = ContainerChildren()
+        self.ulNumSwitchGroups: int = 0
+        self.switchGroups: list[SwitchGroup] = []
+        self.ulNumSwitchParams: int = 0
+        self.switchParms: list[SwitchParam] = []
+        
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = SwitchContainer()
+
+        s.hierarchy_type = stream.uint8_read()
+
+        s.size = stream.uint32_read()
+
+        head = stream.tell()
+
+        s.hierarchy_id = stream.uint32_read()
+
+        s.baseParam = BaseParam.from_memory_stream(stream)
+
+        s.eGroupType = stream.uint8_read()
+        s.ulGroupID = stream.uint32_read()
+        s.ulDefaultSwitch = stream.uint32_read()
+        s.bIsContinuousValidation = stream.uint8_read()
+
+        # [Children]
+        s.children.numChildren = stream.uint32_read()
+        s.children.children = [
+            stream.uint32_read() for _ in range(s.children.numChildren)
+        ]
+
+        # [Switch Container specific parameter]
+        s.ulNumSwitchGroups = stream.uint32_read()
+        s.switchGroups = [
+            SwitchGroup.from_memory_stream(stream) for _ in range(s.ulNumSwitchGroups)
+        ]
+        s.ulNumSwitchParams = stream.uint32_read()
+        s.switchParms = [
+            SwitchParam.from_memory_stream(stream) for _ in range(s.ulNumSwitchParams)
+        ]
+
+        tail = stream.tell()
+
+        if s.size != (tail - head):
+            raise AssertionError(
+                f"Switch container {s.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from read data"
+            )
+        
+        return s
+
+    def get_data(self):
+        data = self._pack()
+
+        if self.size != len(data):
+            raise AssertionError(
+                f"Switch container {self.hierarchy_id} assertion break: "
+                f"data size specified in header != data size from packed data"
+            )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+        return header + data
+
+    def set_data(self, entry: Union['SwitchContainer', None] = None, **data):
+        if self.soundbank == None:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
+
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
+
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
+
+        self.modified = True
+        self.update_size()
+
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
+            self.parent = None
+
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = struct.pack("<I", self.hierarchy_id)
+        
+        if self.baseParam == None:
+            raise AssertionError(
+                "Switch container {self.hierarchy_id} does not has a base "
+                "parameter."
+            )
+
+        data += self.baseParam.get_data()
+
+        data += struct.pack(
+            "<BIIB", 
+            self.eGroupType,
+            self.ulGroupID,
+            self.ulDefaultSwitch,
+            self.bIsContinuousValidation
+        )
+
+        data += self.children.get_data()
+
+        data += struct.pack("<I", self.ulNumSwitchGroups)
+
+        if self.ulNumSwitchGroups != len(self.switchGroups):
+            raise AssertionError(
+                "Unique switch group counter does not match up # of switch group"
+                " in the list"
+            )
+
+        for switchGroup in self.switchGroups:
+            data += switchGroup.get_data()
+
+        data += struct.pack("<I", self.ulNumSwitchParams)
+
+        if self.ulNumSwitchParams != len(self.switchParms):
+            raise AssertionError(
+                "Unique switch parameter counter does not match up # of swith "
+                "parameter in the list."
+            )
+
+        for switchParam in self.switchParms:
+            data += switchParam.get_data()
 
         return data
 
