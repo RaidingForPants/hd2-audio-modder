@@ -53,8 +53,8 @@ class AudioSource:
     def is_modified(self) -> bool:
         return self.modified
 
-    def get_data(self) -> bytearray | Literal[b""]:
-        return self.data
+    def get_data(self):
+        return bytearray() if self.data == b"" else self.data 
         
     def get_resource_id(self) -> int:
         return self.resource_id
@@ -316,10 +316,8 @@ class WwiseStream:
         self.file_id: int = 0
         
     def set_source(self, audio_source: AudioSource):
-        try:
+        if self.audio_source != None:
             self.audio_source.parents.remove(self)
-        except:
-            pass
         self.audio_source = audio_source
         audio_source.parents.add(self)
         
@@ -350,7 +348,7 @@ class StringEntry:
         self.text_old = ""
         self.string_id = 0
         self.modified = False
-        self.parent = None
+        self.parent: TextBank | None = None
         
     def get_id(self) -> int:
         return self.string_id
@@ -361,7 +359,8 @@ class StringEntry:
     def set_text(self, text: str):
         if not self.modified:
             self.text_old = self.text
-            self.parent.raise_modified()
+            if self.parent != None:
+                self.parent.raise_modified()
         self.modified = True
         self.text = text
         
@@ -369,7 +368,8 @@ class StringEntry:
         if self.modified:
             self.text = self.text_old
             self.modified = False
-            self.parent.lower_modified()
+            if self.parent != None:
+                self.parent.lower_modified()
         
 class TextBank:
     
@@ -752,10 +752,11 @@ class GameArchive:
                     try:
                         if source.plugin_id == VORBIS:
                             self.audio_sources[source.source_id].parents.add(entry)
-                        if source.plugin_id == VORBIS and self.audio_sources[source.source_id] not in bank.get_content(): #may be missing streamed audio if the patch didn't change it
+                        if source.plugin_id == VORBIS and self.audio_sources[source.source_id] not in bank.get_content(): # may be missing streamed audio if the patch didn't change it
                             bank.add_content(self.audio_sources[source.source_id])
                     except:
                         continue
+
         
 class SoundHandler:
     
@@ -1052,6 +1053,11 @@ class Mod:
             raise OSError(f"Invalid output folder '{output_folder}'")
 
         for bank in self.get_wwise_banks().values():
+            if bank.dep == None:
+                raise AssertionError(
+                    f"Wwise bank {bank.get_id()} does not have a Wwise "
+                     "dependency."
+                )
             subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
@@ -1070,6 +1076,11 @@ class Mod:
             raise OSError(f"Invalid output folder '{output_folder}'")
 
         for bank in self.get_wwise_banks().values():
+            if bank.dep == None:
+                raise AssertionError(
+                    f"Wwise bank {bank.get_id()} does not have a Wwise "
+                     "dependency."
+                )
             subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
@@ -1405,7 +1416,15 @@ class Mod:
                 len_ms = num_samples * 1000 / sample_rate
                 for item in old_audio.parents:
                     if isinstance(item, MusicTrack):
-                        item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+                        if item.parent == None:
+                            continue
+
+                        item.parent.set_data(
+                            duration=len_ms,
+                            entry_marker=0,
+                            exit_marker=len_ms
+                        )
+
                         tracks = copy.deepcopy(item.track_info)
                         for t in tracks:
                             if t.source_id == old_audio.get_short_id():
@@ -1482,7 +1501,7 @@ class Mod:
                 continue
             have_length = True
             with open(filepath, 'rb') as f:
-                audio_data = f.read()    
+                audio_data = bytearray(f.read())
             if set_duration:
                 try:
                     process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
@@ -1497,23 +1516,34 @@ class Mod:
                     have_length = False
                     length_import_failed = True
             for target in targets:
-                audio: AudioSource | None = self.get_audio_source(target)
-                if audio:
-                    audio.set_data(audio_data)
-                    if have_length:
-                        # find music segment for Audio Source
-                        for item in audio.parents:
-                            if isinstance(item, MusicTrack):
-                                item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
-                                tracks = copy.deepcopy(item.track_info)
-                                for t in tracks:
-                                    if t.source_id == audio.get_short_id():
-                                        t.begin_trim_offset = 0
-                                        t.end_trim_offset = 0
-                                        t.source_duration = len_ms
-                                        t.play_at = 0
-                                        break
-                                item.set_data(track_info=tracks)
+                audio = self.get_audio_source(target)
+                audio.set_data(audio_data)
+                if not have_length:
+                    continue
+
+                # find music segment for Audio Source
+                for item in audio.parents:
+                    if isinstance(item, MusicTrack):
+                        if item.parent == None:
+                            raise AssertionError(
+                                f"Music track {item.hierarchy_id} does not have"
+                                 " a parent!"
+                            )
+
+                        item.parent.set_data(
+                            duration=len_ms, entry_marker=0, exit_marker=len_ms
+                        )
+
+                        tracks = copy.deepcopy(item.track_info)
+
+                        for t in tracks:
+                            if t.source_id == audio.get_short_id():
+                                t.begin_trim_offset = 0
+                                t.end_trim_offset = 0
+                                t.source_duration = len_ms
+                                t.play_at = 0
+                                break
+                        item.set_data(track_info=tracks)
 
         if length_import_failed:
             raise RuntimeError("Failed to set track duration for some audio sources")
