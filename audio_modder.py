@@ -41,7 +41,6 @@ from log import logger
 
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
-VERSION = "2.0.0"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -1905,33 +1904,29 @@ if __name__ == "__main__":
     if not os.path.exists(GAME_FILE_LOCATION):
         showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
             " Audio archive search is disabled.")
-    else:
+    elif os.path.exists("friendlynames.db"):
         try:
-            if os.path.exists("friendlynames.db"):
-                current_version = db.get_db_version("friendlynames.db") + 1
-            else:
-                current_version = -1
-            file, _ = urllib.request.urlretrieve("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
-            with open(file) as f:
-                data = json.loads(f.read())
-                download_url = data["assets"][0]["browser_download_url"]
-                latest_version = int(float(data["tag_name"].replace("v", "")))
-            if current_version < latest_version:
-                urllib.request.urlretrieve(download_url, "friendlynames.db")
-                if not os.path.exists("friendlynames.db"):
-                    logger.error("Failed to fetch audio database. Built-in audio archive search is disabled.")
-                    showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
-                else:
-                    try:
-                        lookup_store = db.FriendlyNameLookup("friendlynames.db")
-                    except Exception as err:
-                        logger.error("Failed to connect to audio archive database", 
-                                     stack_info=True)
-                        lookup_store = None
-        except:
-            pass
-        finally:
-            urllib.request.urlcleanup()
+            lookup_store = db.FriendlyNameLookup("friendlynames.db")
+        except Exception as err:
+            logger.error("Failed to connect to audio archive database", 
+                         stack_info=True)
+            lookup_store = None
+    else:
+        file, _ = urllib.request.urlretrieve("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
+        with open(file) as f:
+            data = json.loads(f.read())
+            download_url = data["assets"][0]["browser_download_url"]
+        urllib.request.urlretrieve(download_url, "friendlynames.db")
+        if not os.path.exists("friendlynames.db"):
+            logger.error("Failed to fetch audio database. Built-in audio archive search is disabled.")
+            showwarning(title="Missing Plugin", message="Audio database not found. Audio archive search is disabled.")
+        else:
+            try:
+                lookup_store = db.FriendlyNameLookup("friendlynames.db")
+            except Exception as err:
+                logger.error("Failed to connect to audio archive database", 
+                             stack_info=True)
+                lookup_store = None
         
     language = language_lookup("English (US)")
     window = MainWindow(app_state, lookup_store)
