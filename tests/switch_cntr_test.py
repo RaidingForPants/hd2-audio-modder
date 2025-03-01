@@ -1,9 +1,7 @@
 import os
-import posixpath
 import unittest
 
 from core import GameArchive
-import env
 from log import logger
 from tests.parser_test_common import test_all_archive_sync
 from wwise_hierarchy import HircEntry, SwitchContainer
