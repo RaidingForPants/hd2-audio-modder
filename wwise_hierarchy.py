@@ -139,7 +139,7 @@ class HircEntry:
         - Must call this after modifying an hierarhcy object
         - Otherwise, get_data will most likely fail due to assertion
         """
-        pass
+        raise NotImplementedError("This interface is not implemented!")
 
     def modifier(self, callback: Callable):
         """
@@ -157,6 +157,84 @@ class HircEntry:
         
     def get_id(self):
         return self.hierarchy_id
+
+
+class Action(HircEntry):
+    """
+    ulActionType U16
+    idExt tid
+    idExt_4 U8x
+    """
+
+    def __init__(self):
+        super().__init__()
+
+        self.ulActionType = 0
+        self.idExt = 0
+        self.idExt_4 = 0
+        self.propBundle: PropBundle = PropBundle()
+        self.rangePropBundle: RangedPropBundle = RangedPropBundle()
+        self.actionParamData: bytearray = bytearray()
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = Action()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        a.hierarchy_id = s.uint32_read()
+
+        a.ulActionType = s.uint16_read()
+
+        a.idExt = s.uint32_read()
+        a.idExt_4 = s.uint8_read()
+
+        a.propBundle = PropBundle.from_memory_stream(s)
+        a.rangePropBundle = RangedPropBundle.from_memory_stream(s)
+
+        a.actionParamData = stream.read(a.size - (s.tell() - head))
+
+        tail = s.tell()
+
+        if a.size != (tail - head):
+            raise AssertionError(
+                f"Action {a.hierarchy_id} header size != read data size"
+            )
+
+        return a
+
+    def get_data(self):
+        data = self._pack()
+
+        if self.size != len(data):
+            raise AssertionError(
+                f"Action {self.hierarchy_id} header size != packed data size"
+            )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def _pack(self):
+        data = struct.pack(
+            "<IHIB",
+            self.hierarchy_id,
+            self.ulActionType,
+            self.idExt,
+            self.idExt_4
+        )
+
+        data += self.propBundle.get_data()
+        data += self.rangePropBundle.get_data()
+
+        data += self.actionParamData
+
+        return data
         
         
 class MusicRandomSequence(HircEntry):
@@ -657,20 +735,19 @@ class HircEntryFactory:
         stream.seek(stream.tell()-1)
         if hierarchy_type == 0x02: # sound
             return Sound.from_memory_stream(stream)
+        elif hierarchy_type == 0x03:
+            return Action.from_memory_stream(stream)
         elif hierarchy_type == 0x05: # random / sequence container
             return RandomSequenceContainer.from_memory_stream(stream)
         elif hierarchy_type == 0x06:
-            if os.environ["TEST_SWITCH"] == "1":
-                return SwitchContainer.from_memory_stream(stream)
-            else:
-                return HircEntry.from_memory_stream(stream)
+            return SwitchContainer.from_memory_stream(stream)
         elif hierarchy_type == 0x07:
             return ActorMixer.from_memory_stream(stream)
         elif hierarchy_type == 0x09:
             return LayerContainer.from_memory_stream(stream)
-        elif hierarchy_type == 0x0A: #music segment
+        elif hierarchy_type == 0x0A: # music segment
             return MusicSegment.from_memory_stream(stream)
-        elif hierarchy_type == 0X0B: #music track
+        elif hierarchy_type == 0X0B: # music track
             return MusicTrack.from_memory_stream(stream)
         else:
             return HircEntry.from_memory_stream(stream)
@@ -878,6 +955,18 @@ class PropBundle:
                 "# of props specified != # of props stored"
             )
 
+    @staticmethod
+    def from_memory_stream(s: MemoryStream):
+        p = PropBundle()
+        p.cProps = s.uint8_read()
+        p.pIDs = [
+            s.uint8_read() for _ in range(p.cProps)
+        ]
+        p.pValues = [
+            s.read(4) for _ in range(p.cProps)
+        ]
+        return p
+
     def assert_prop_count(self, prop_count):
         if self.cProps != prop_count:
             raise AssertionError(
@@ -1019,6 +1108,20 @@ class RangedPropBundle:
             raise AssertionError(
                 "# of range props specified != # of range props stored"
             )
+    
+    @staticmethod
+    def from_memory_stream(s: MemoryStream):
+        r = RangedPropBundle()
+        r.cProps = s.uint8_read()
+        r.pIDs = [
+            s.uint8_read() for _ in range(r.cProps)
+        ]
+        r.rangedValues = [
+            (s.float_read(), s.float_read()) 
+            for _ in range(r.cProps)
+        ]
+        return r
+
 
     def assert_range_prop_count(self, prop_count: int):
         if self.cProps != prop_count:
@@ -1465,23 +1568,10 @@ class BaseParam:
         baseParam.byBitVectorA = stream.uint8_read()
 
         # [Properties - No Modulator]
-        baseParam.propBundle.cProps = stream.uint8_read()
-        baseParam.propBundle.pIDs = [
-            stream.uint8_read() for _ in range(baseParam.propBundle.cProps)
-        ]
-        baseParam.propBundle.pValues = [
-            stream.read(4) for _ in range(baseParam.propBundle.cProps)
-        ]
+        baseParam.propBundle = PropBundle.from_memory_stream(stream)
 
         # [Range Based Properties - No Modulator]
-        baseParam.rangePropBundle.cProps = stream.uint8_read()
-        baseParam.rangePropBundle.pIDs = [
-            stream.uint8_read() for _ in range(baseParam.rangePropBundle.cProps)
-        ]
-        baseParam.rangePropBundle.rangedValues = [
-            (stream.float_read(), stream.float_read()) 
-            for _ in range(baseParam.rangePropBundle.cProps)
-        ]
+        baseParam.rangePropBundle = RangedPropBundle.from_memory_stream(stream)
 
         # [Positioning Param]
         baseParam.positioningParamData = parse_positioning_params(stream)
