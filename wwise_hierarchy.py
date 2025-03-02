@@ -235,6 +235,110 @@ class Action(HircEntry):
         data += self.actionParamData
 
         return data
+
+
+class Event(HircEntry):
+    """
+    ulActionListSize var
+    ulActionIDs[] tid[ulActionListSize]
+    """
+
+    import_values = [
+        "parent_id",
+        "ulActionListSize",
+        "ulActionIDs"
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.ulActionListSize: int = 0
+        self.ulActionIDs: list[int] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        e = Event()
+
+        e.hierarchy_type = s.uint8_read()
+
+        e.size = s.uint32_read()
+
+        head = s.tell()
+
+        e.hierarchy_id = s.uint32_read()
+
+        e.ulActionListSize = s.uint8_read()
+
+        e.ulActionIDs = [s.uint32_read() for _ in range(e.ulActionListSize)]
+
+        tail = s.tell()
+
+        if e.size != (tail - head):
+            raise AssertionError(
+                f"Event {e.hierarchy_id} header size != read data size"
+            )
+
+        return e
+
+    def get_data(self):
+        data = self._pack()
+
+        if self.size != len(data):
+            raise AssertionError(
+                f"Event {self.hierarchy_id} header size != packed data size"
+            )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def set_data(self, entry: Union['Event', None] = None, **data):
+        if self.soundbank == None:
+            raise AssertionError(
+                f"No WwiseBank object is attached to Event {self.hierarchy_id}"
+            )
+
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
+
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
+
+        self.modified = True
+        self.update_size()
+
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
+            self.parent = None
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        if self.ulActionListSize != len(self.ulActionIDs):
+            raise AssertionError(
+                f"Event {self.hierarchy_id} action list size != # of ul action"
+                 "IDs in the list."
+            )
+        data = struct.pack(
+            "<IB",
+            self.hierarchy_id,
+            self.ulActionListSize
+        )
+        for _id in self.ulActionIDs:
+            data += _id.to_bytes(4, "little")
+        return data
         
         
 class MusicRandomSequence(HircEntry):
@@ -737,6 +841,11 @@ class HircEntryFactory:
             return Sound.from_memory_stream(stream)
         elif hierarchy_type == 0x03:
             return Action.from_memory_stream(stream)
+        elif hierarchy_type == 0x04:
+            if os.environ["TEST_EVENT"] == "1":
+                return Event.from_memory_stream(stream)
+            else:
+                return Event.from_memory_stream(stream)
         elif hierarchy_type == 0x05: # random / sequence container
             return RandomSequenceContainer.from_memory_stream(stream)
         elif hierarchy_type == 0x06:
