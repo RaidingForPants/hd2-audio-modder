@@ -205,19 +205,20 @@ class StringEntryWindow:
     def apply_changes(self):
         if self.string_entry is not None:
             self.string_entry.set_text(self.text_box.get("1.0", "end-1c"))
-            self.update_modified()
+            self.update_modified(diff=[self.string_entry])
     
     def revert(self):
         if self.string_entry is not None:
             self.string_entry.revert_modifications()
             self.text_box.delete("1.0", END)
             self.text_box.insert(END, self.string_entry.get_text())
-            self.update_modified()
+            self.update_modified(diff=[self.string_entry])
             
 class MusicTrackWindow:
     
     def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
+        #self.notebook = ttk.Notebook(parent)
         self.selected_track = 0
         self.update_modified = update_modified
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
@@ -229,6 +230,7 @@ class MusicTrackWindow:
         self.end_offset_text_var = tkinter.StringVar(self.frame)
         self.source_selection_listbox = tkinter.Listbox(self.frame)
         self.source_selection_listbox.bind("<Double-Button-1>", self.set_track_info)
+        self.source_selection_listbox.config(width=200)
         
         self.play_at_label = ttk.Label(self.frame,
                                    text="Play At (ms)",
@@ -264,8 +266,10 @@ class MusicTrackWindow:
     def set_track_info(self, event=None, selection=0):
         if not selection:
             selection = self.source_selection_listbox.get(self.source_selection_listbox.curselection()[0])
+        id = selection.split(" ")[1]
+        selection = int(id)
         for t in self.track.track_info:
-            if t.source_id == selection or t.event_id == selection:
+            if t.source_id == selection or murmur64_hash(f"content/audio/{t.source_id}".encode("utf-8")) == selection or t.event_id == selection:
                 track_info_struct = t
                 break
                 
@@ -290,25 +294,38 @@ class MusicTrackWindow:
         self.end_offset_text.pack()
         
         self.revert_button.pack(side="left")
+        self.apply_button.pack(side="left")
         
     def set_track(self, track):
         self.track = track
         self.source_selection_listbox.delete(0, 'end')
         for track_info_struct in self.track.track_info:
             if track_info_struct.source_id != 0:
-                self.source_selection_listbox.insert(END, track_info_struct.source_id)
+                resource_id = murmur64_hash(f"content/audio/{track_info_struct.source_id}".encode("utf-8"))
+                self.source_selection_listbox.insert(END, f"Audio {resource_id}")
             else:
-                self.source_selection_listbox.insert(END, track_info_struct.event_id)
+                self.source_selection_listbox.insert(END, f"Event {track_info_struct.event_id}")
         
         if len(track.track_info) > 0:
             self.source_selection_listbox.pack()
-            self.set_track_info(selection=track.track_info[0].source_id if track.track_info[0].source_id != 0 else track.track_info[0].event_id)
+            self.set_track_info(selection=self.source_selection_listbox.get(0))
+            self.source_selection_listbox.select_set(0)
     def revert(self):
         self.track.revert_modifications()
         self.set_track(self.track)
+        self.update_modified(diff=[self.track])
         
     def apply_changes(self):
-        pass
+        tracks = copy.deepcopy(self.track.track_info)
+        for t in tracks:
+            if (t.source_id != 0 and t.source_id == self.selected_track.source_id) or (t.event_id !=0 and t.event_id == self.selected_track.event_id):
+                t.begin_trim_offset = float(self.start_offset_text_var.get())
+                t.end_trim_offset = float(self.end_offset_text_var.get())
+                t.source_duration = float(self.duration_text_var.get())
+                t.play_at = float(self.play_at_text_var.get())
+                break
+        self.track.set_data(track_info=tracks)
+        self.update_modified(diff=[self.track])
         
         
 class AudioSourceWindow:
@@ -410,13 +427,13 @@ class AudioSourceWindow:
             self.duration_text.insert(END, f"{self.track_info.source_duration}")
             self.start_offset_text.insert(END, f"{self.track_info.begin_trim_offset}")
             self.end_offset_text.insert(END, f"{self.track_info.end_trim_offset}")
-        self.update_modified()
+        self.update_modified([self.audio])
         self.play_original_label.forget()
         self.play_original_button.forget()
         
     def apply_changes(self):
         self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
-        self.update_modified()
+        self.update_modified([self.audio])
         
 class MusicSegmentWindow:
     def __init__(self, parent, update_modified):
@@ -476,11 +493,11 @@ class MusicSegmentWindow:
         self.duration_text.insert(END, f"{self.segment.duration}")
         self.fade_in_text.insert(END, f"{self.segment.entry_marker[1]}")
         self.fade_out_text.insert(END, f"{self.segment.exit_marker[1]}")
-        self.update_modified()
+        self.update_modified([self.segment])
         
     def apply_changes(self):
         self.segment.set_data(duration=float(self.duration_text_var.get()), entry_marker=float(self.fade_in_text_var.get()), exit_marker=float(self.fade_out_text_var.get()))
-        self.update_modified()
+        self.update_modified([self.segment])
  
 class EventWindow:
 
@@ -829,7 +846,7 @@ class MainWindow:
         self.default_fg = "#ffffff"
         
         self.window = PanedWindow(self.root, orient=HORIZONTAL, borderwidth=0, background="white")
-        self.window.config(sashwidth=8, sashrelief="raised")
+        self.window.config(sashwidth=8, sashrelief="raised", opaqueresize=False)
         self.window.pack(fill=BOTH)
 
         
@@ -875,6 +892,7 @@ class MainWindow:
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
+        print(dir(self.root))
         
         self.right_click_menu = Menu(self.treeview, tearoff=0)
         self.right_click_id = 0
@@ -1496,7 +1514,7 @@ class MainWindow:
             item = self.treeview.parent(item)
         bank_id = int(self.treeview.item(item, option="tags")[0])
         for child in self.entry_info_panel.winfo_children():
-            child.forget()
+            child.pack_forget()
         if selection_type == "String":
             self.string_info_panel.set_string_entry(self.mod_handler.get_active_mod().get_string_entry(bank_id, selection_id))
             self.string_info_panel.frame.pack()
@@ -1562,7 +1580,13 @@ class MainWindow:
         if isinstance(entry, GameArchive):
             tree_entry = self.treeview.insert(parent_item, END, tag=entry.name)
         else:
+            if isinstance(entry, HircEntry):
+                modified = entry.modified or entry.has_modified_children()
+            else:
+                modified = entry.modified
             tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
+            bg, fg = self.get_colors(modified=modified)
+            self.treeview.tag_configure(entry.get_id(), background=bg, foreground=fg)
         if isinstance(entry, WwiseBank):
             if self.name_lookup is not None:
                 bank = self.name_lookup.lookup_soundbank(str(entry.get_id()))
@@ -1600,6 +1624,7 @@ class MainWindow:
             name = entry.name
             entry_type = "Archive File"
             self.treeview.item(tree_entry, open=True)
+        
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -1610,15 +1635,19 @@ class MainWindow:
         self.search_label['text'] = ""
         self.search_text_var.set("")
             
-    def create_hierarchy_view(self):
+    def create_hierarchy_view(self, new_game_archive=None):
         self.clear_search()
-        self.treeview.delete(*self.treeview.get_children())
-        bank_dict = self.mod_handler.get_active_mod().get_wwise_banks()
-        game_archives = self.mod_handler.get_active_mod().get_game_archives()
         sequence_sources = set()
-        for archive in game_archives.values():
+        if new_game_archive is not None:
+            archive_list = [new_game_archive]
+        else:
+            game_archives = self.mod_handler.get_active_mod().get_game_archives()
+            self.treeview.delete(*self.treeview.get_children())
+            archive_list = game_archives.values()
+        for archive in archive_list:
             archive_entry = self.create_treeview_entry(archive)
             for bank in archive.wwise_banks.values():
+                sequence_sources.clear()
                 bank_entry = self.create_treeview_entry(bank, archive_entry)
                 for hierarchy_entry in bank.hierarchy.entries.values():
                     if isinstance(hierarchy_entry, MusicSegment):
@@ -1632,9 +1661,9 @@ class MainWindow:
                                         self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
                                     except:
                                         pass
-                            for info in track.track_info:
-                                if info.event_id != 0:
-                                    self.create_treeview_entry(info, track_entry)
+                            #for info in track.track_info:
+                            #    if info.event_id != 0:
+                            #        self.create_treeview_entry(info, track_entry)
                     elif isinstance(hierarchy_entry, RandomSequenceContainer):
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for s_id in hierarchy_entry.contents:
@@ -1657,14 +1686,17 @@ class MainWindow:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
                     for string_entry in text_bank.entries.values():
                         self.create_treeview_entry(string_entry, bank_entry)
-        self.check_modified()
                 
-    def create_source_view(self):
+    def create_source_view(self, new_game_archive=None):
         self.clear_search()
         existing_sources = set()
-        self.treeview.delete(*self.treeview.get_children())
-        game_archives = self.mod_handler.get_active_mod().get_game_archives()
-        for archive in game_archives.values():
+        if new_game_archive is not None:
+            archive_list = [new_game_archive]
+        else:
+            self.treeview.delete(*self.treeview.get_children())
+            game_archives = self.mod_handler.get_active_mod().get_game_archives()
+            archive_list = game_archives.values()
+        for archive in archive_list:
             archive_entry = self.create_treeview_entry(archive)
             for bank in archive.wwise_banks.values():
                 existing_sources.clear()
@@ -1682,7 +1714,6 @@ class MainWindow:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
                     for string_entry in text_bank.entries.values():
                         self.create_treeview_entry(string_entry, bank_entry)
-        self.check_modified()
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":
@@ -1753,13 +1784,14 @@ class MainWindow:
             return
         self.sound_handler.kill_sound()
         if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
+            archive = self.mod_handler.get_active_mod().get_game_archive(os.path.basename(archive_file))
             self.clear_search()
             self.update_language_menu()
             self.update_recent_files(filepath=archive_file)
             if self.selected_view.get() == "SourceView":
-                self.create_source_view()
+                self.create_source_view(new_game_archive=archive)
             else:
-                self.create_hierarchy_view()
+                self.create_hierarchy_view(new_game_archive=archive)
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
         else:
@@ -1785,39 +1817,61 @@ class MainWindow:
     optimization point: small, but noticeable lag if there are many, many 
     entries in the tree
     """
-    def check_modified(self): 
-        for child in self.treeview.get_children():
-            self.clear_treeview_background(child)
-        bg: Any
-        fg: Any
-        for bank in self.mod_handler.get_active_mod().wwise_banks.values():
-            bg, fg = self.get_colors(modified=bank.modified)
-            self.treeview.tag_configure(bank.get_id(),
-                                        background=bg,
-                                        foreground=fg)
-            for entry in bank.hierarchy.get_entries():
-                is_modified = entry.modified or entry.has_modified_children()
-                bg, fg = self.get_colors(modified=is_modified)
-                self.treeview.tag_configure(entry.get_id(),
-                                        background=bg,
-                                        foreground=fg)
-        for audio in self.mod_handler.get_active_mod().get_audio_sources().values():
-            is_modified = audio.modified
-            bg, fg = self.get_colors(modified=is_modified)
-            self.treeview.tag_configure(audio.get_id(),
-                                        background=bg,
-                                        foreground=fg)
-                    
-        for text_bank in self.mod_handler.get_active_mod().text_banks.values():
-            bg, fg = self.get_colors(modified=text_bank.modified)
-            self.treeview.tag_configure(text_bank.get_id(), 
+
+    def check_modified(self, diff = None):
+        if diff is not None:
+            for item in diff:
+                if isinstance(item, HircEntry):
+                    bg, fg = self.get_colors(modified=item.modified or item.has_modified_children())
+                else:
+                    bg, fg = self.get_colors(modified=item.modified)
+                self.treeview.tag_configure(item.get_id(), background=bg, foreground=fg)
+                if isinstance(item, HircEntry):
+                    parent = item.parent if item.parent is not None else item.soundbank
+                    parents = [parent]
+                elif isinstance(item, AudioSource):
+                    parents = item.parents
+                elif isinstance(item, WwiseBank):
+                    parents = []
+                elif isinstance(item, StringEntry):
+                    parents = [item.parent]
+                elif isinstance(item, TextBank):
+                    parents = []
+                for item in parents:
+                    self.check_modified(parents)
+        else:
+            for child in self.treeview.get_children():
+                self.clear_treeview_background(child)
+            bg: Any
+            fg: Any
+            for bank in self.mod_handler.get_active_mod().wwise_banks.values():
+                bg, fg = self.get_colors(modified=bank.modified)
+                self.treeview.tag_configure(bank.get_id(),
                                             background=bg,
                                             foreground=fg)
-            for entry in text_bank.entries.values():
-                bg, fg = self.get_colors(modified=entry.modified)
-                self.treeview.tag_configure(entry.get_id(),
-                                        background=bg,
-                                        foreground=fg)
+                for entry in bank.hierarchy.get_entries():
+                    is_modified = entry.modified or entry.has_modified_children()
+                    bg, fg = self.get_colors(modified=is_modified)
+                    self.treeview.tag_configure(entry.get_id(),
+                                            background=bg,
+                                            foreground=fg)
+            for audio in self.mod_handler.get_active_mod().get_audio_sources().values():
+                is_modified = audio.modified
+                bg, fg = self.get_colors(modified=is_modified)
+                self.treeview.tag_configure(audio.get_id(),
+                                            background=bg,
+                                            foreground=fg)
+                        
+            for text_bank in self.mod_handler.get_active_mod().text_banks.values():
+                bg, fg = self.get_colors(modified=text_bank.modified)
+                self.treeview.tag_configure(text_bank.get_id(), 
+                                                background=bg,
+                                                foreground=fg)
+                for entry in text_bank.entries.values():
+                    bg, fg = self.get_colors(modified=entry.modified)
+                    self.treeview.tag_configure(entry.get_id(),
+                                            background=bg,
+                                            foreground=fg)
         
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
@@ -1843,7 +1897,8 @@ class MainWindow:
     def revert_all(self):
         self.sound_handler.kill_sound()
         self.mod_handler.get_active_mod().revert_all()
-        self.check_modified()
+        for child in self.treeview.get_children():
+            self.clear_treeview_background(child)
         self.show_info_window()
         
     def write_patch(self):
