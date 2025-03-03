@@ -1592,14 +1592,14 @@ class Mod:
             
     def import_files(self, file_dict: dict[str, list[int]]):
         patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
-        wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wem"}
-        wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wav"}
+        wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wem"}
+        wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wav"}
         
         # check other file extensions and call vgmstream to convert to wav, then add to wavs dict
         filetypes = list(SUPPORTED_AUDIO_TYPES)
         filetypes.remove(".wav")
         filetypes.remove(".wem")
-        others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] in filetypes}
+        others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in filetypes}
         temp_files = []
         for file in others.keys():
             subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
