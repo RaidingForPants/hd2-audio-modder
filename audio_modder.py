@@ -892,7 +892,6 @@ class MainWindow:
         
         self.root.title("Helldivers 2 Audio Modder")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
-        print(dir(self.root))
         
         self.right_click_menu = Menu(self.treeview, tearoff=0)
         self.right_click_id = 0
@@ -1542,7 +1541,7 @@ class MainWindow:
 
     def dump_as_wem(self):
         if len(self.treeview.selection()) == 1:
-            output_file = filedialog.asksaveasfile(mode='wb', title="Save As", initialfile=f"{self.right_click_id}.wem", defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
+            output_file = filedialog.asksaveasfilename(mode='wb', title="Save As", initialfile=f"{self.right_click_id}.wem", defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
             if not output_file:
                 return
             self.mod_handler.get_active_mod().dump_as_wem(self.right_click_id, output_file)
@@ -1784,7 +1783,7 @@ class MainWindow:
             return
         self.sound_handler.kill_sound()
         if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
-            archive = self.mod_handler.get_active_mod().get_game_archive(os.path.basename(archive_file))
+            archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
             self.clear_search()
             self.update_language_menu()
             self.update_recent_files(filepath=archive_file)
