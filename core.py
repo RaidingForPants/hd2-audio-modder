@@ -461,6 +461,7 @@ class GameArchive:
         self.wwise_streams: dict[int, WwiseStream] = {}
         self.wwise_banks: dict[int, WwiseBank] = {}
         self.audio_sources: dict[int, AudioSource] = {}
+        self.hierarchy_entries: dict[int, HircEntry] = {}
         self.text_banks = {}
     
     @classmethod
@@ -490,6 +491,9 @@ class GameArchive:
         
     def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
+        
+    def get_hierarchy_entries(self) -> dict[int, HircEntry]:
+        return self.hierarchy_entries
         
         
     def write_type_header(self, toc_file: MemoryStream, entry_type: int, num_entries: int):
@@ -609,6 +613,7 @@ class GameArchive:
         self.wwise_banks.clear()
         self.audio_sources.clear()
         self.text_banks.clear()
+        self.hierarchy_entries.clear()
         
         media_index = MediaIndex()
         
@@ -651,6 +656,15 @@ class GameArchive:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
                     pass
+                replacements = {}
+                for hirc_id, hirc_entry in hirc.entries.items():
+                    if hirc_id in self.hierarchy_entries:
+                        # rearrange stuff
+                        self.hierarchy_entries[hirc_id].soundbanks.append(entry)
+                        replacements[hirc_id] = self.hierarchy_entries[hirc_id]
+                    else:
+                        self.hierarchy_entries[hirc_id] = hirc_entry
+                hirc.entries.update(replacements)
                 entry.hierarchy = hirc
                 #Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
@@ -892,6 +906,8 @@ class Mod:
         self.audio_count: dict[int, int] = {}
         self.text_banks: dict[int, TextBank] = {}
         self.text_count = {}
+        self.hierarchy_entries: dict[int, HircEntry] = {}
+        self.hierarchy_count: dict[int, int] = {}
         self.game_archives: dict[str, GameArchive] = {}
         self.name: str = name
         
@@ -915,17 +931,33 @@ class Mod:
         bank = self.get_wwise_bank(soundbank_id)
         if bank.hierarchy == None:
             raise AssertionError(f"WwiseBank {soundbank_id} with no WwiseHierarchy")
+        if bank in entry.soundbanks:
+            raise Exception(f"Entry {entry.hierarchy_id} already exists in soundbank {soundbank_id}!")
+        if entry.hierarchy_id in self.hierarchy_entries:
+            entry = self.hierarchy_entries[entry.hierarchy_id]
+            self.hierarchy_count[entry_id] = self.hierarchy_count[entry_id] + 1
+        else:
+            self.hierarchy_count[entry.hierarchy_id] = 1
+            self.hierarchy_entries[entry.hierarchy_id] = entry
         bank.hierarchy.add_entry(entry)
         
     def remove_hierarchy_entry(self, soundbank_id: int, entry_id: int):
+        if entry_id not in self.hierarchy_entries:
+            raise AssertionError(f"Hierarchy entry {entry_id} not found")
         bank = self.get_wwise_bank(soundbank_id)
         if bank.hierarchy == None:
             raise AssertionError(f"WwiseBank {soundbank_id} with no WwiseHierarchy")
-        entry = self.get_hierarchy_entry(soundbank_id, entry_id)
+        entry = self.get_hierarchy_entry(entry_id)
         bank.hierarchy.remove_entry(entry)
+        if self.hierarchy_count[entry_id] > 1:
+            self.hierarchy_count[entry_id] = self.hierarchy_count[entry_id] - 1
+        else:
+            del self.hierarchy_count[entry_id]
+            del self.hierarchy_entries[entry_id]
+            
         
     def revert_hierarchy_entry(self, soundbank_id: int, entry_id: int):
-        self.get_hierarchy_entry(soundbank_id, entry_id).revert_modifications()
+        self.get_hierarchy_entry(entry_id).revert_modifications()
         
     def revert_string_entry(self, textbank_id: int, entry_id: int):
         self.get_string_entry(textbank_id, entry_id).revert_modifications()
@@ -1146,27 +1178,21 @@ class Mod:
     def get_string_entries(self, textbank_id: int) -> dict[int, StringEntry]:
         return self.get_text_bank(textbank_id).entries
                 
-    def get_hierarchy_entry(self, soundbank_id: int, hierarchy_id: int) -> HircEntry:
+    def get_hierarchy_entry(self, hierarchy_id: int) -> HircEntry:
         """
         @exception
         - KeyError
-            - Trivial
-        - AssertionError
         """
-        bank = self.get_wwise_bank(soundbank_id)
-        if bank.hierarchy == None:
-            raise AssertionError(f"WwiseBank {soundbank_id} without WwiseHierarchy")
-        try:
-            return bank.hierarchy.get_entry(hierarchy_id)
-        except KeyError:
-            raise KeyError(f"Cannot find wwise hierarchy entry with id {hierarchy_id} in soundbank with id {soundbank_id}")
+        return self.get_hierarchy_entries()[hierarchy_id]
             
-    def get_hierarchy_entries(self, soundbank_id: int):
+    def get_hierarchy_entries(self, soundbank_id: int = 0):
         """
         @exception
         - KeyError (Bubble up)
         - AssertionError
         """
+        if soundbank_id == 0:
+            return self.hierarchy_entries
         bank = self.get_wwise_bank(soundbank_id)
         if bank.hierarchy == None:
             raise AssertionError(f"WwiseBank {soundbank_id} with no WwiseHierarchy")
@@ -1266,7 +1292,7 @@ class Mod:
         
     def remove_game_archive(self, archive_name: str = ""):
         if archive_name not in self.game_archives.keys():
-            return
+            raise AssertionError(f"Archive {archive_name} not in mod!")
             
         game_archive = self.game_archives[archive_name]
             
@@ -1274,13 +1300,20 @@ class Mod:
             if key in self.get_wwise_banks().keys():
                 self.bank_count[key] -= 1
                 if self.bank_count[key] == 0:
+                    for entry in game_archive.get_wwise_banks()[key].hierarchy.entries.values():
+                        entry.soundbanks.remove(game_archive.get_wwise_banks()[key])
                     for audio in self.get_wwise_banks()[key].get_content():
                         parents = [p for p in audio.parents]
                         for parent in parents:
-                            if isinstance(parent, HircEntry) and parent.soundbank.get_id() == key:
+                            if isinstance(parent, HircEntry) and key in [b.get_id() for b in parent.soundbanks]:
                                 audio.parents.remove(parent)
                     del self.get_wwise_banks()[key]
                     del self.bank_count[key]
+        for key, entry in game_archive.get_hierarchy_entries().items():
+            self.hierarchy_count[key] -= 1
+            if self.hierarchy_count[key] == 0:
+                del self.hierarchy_count[key]
+                del self.get_hierarchy_entries()[key]
         for key in game_archive.wwise_streams.keys():
             if key in self.get_wwise_streams().keys():
                 self.stream_count[key] -= 1
@@ -1316,16 +1349,32 @@ class Mod:
             return
 
         self.game_archives[key] = game_archive
+        
+        replacements = {}
+        for key, entry in game_archive.get_hierarchy_entries().items():
+            if key in self.get_hierarchy_entries():
+                self.hierarchy_count[key] += 1
+                existing_entry = self.get_hierarchy_entry(key)
+                replacements[key] = existing_entry
+                for bank in entry.soundbanks:
+                    bank.hierarchy.entries[key] = existing_entry
+                    if bank not in existing_entry.soundbanks:
+                        existing_entry.soundbanks.append(bank)
+            else:
+                self.hierarchy_count[key] = 1
+                self.hierarchy_entries[key] = entry
+        game_archive.get_hierarchy_entries().update(replacements)
+        
         for key in game_archive.wwise_banks.keys():
             if key in self.get_wwise_banks().keys():
                 self.bank_count[key] += 1
                 for audio in game_archive.wwise_banks[key].get_content():
                     parents = [p for p in audio.parents]
                     for parent in parents:
-                        if isinstance(parent, HircEntry) and parent.soundbank.get_id() == key:
+                        if isinstance(parent, HircEntry) and key in [b.get_id() for b in parent.soundbanks]:
                             audio.parents.remove(parent)
                             try:
-                                new_parent = self.get_hierarchy_entry(key, parent.get_id())
+                                new_parent = self.get_hierarchy_entry(parent.get_id())
                             except:
                                 continue # add missing hierarchy entry?
                             audio.parents.add(new_parent)
