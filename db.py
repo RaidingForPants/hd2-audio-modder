@@ -1,5 +1,6 @@
 import sqlite3
 import uuid
+import os
 
 from logging import Logger
 from typing import Callable
@@ -51,6 +52,36 @@ class HelldiverAudioSource:
         self.linked_audio_archive_ids = linked_audio_archive_ids
         self.linked_audio_archive_name_ids = linked_audio_archive_name_ids
         
+class CustomNameStore:
+    
+    def __init__(self, name_db_path: str = ""):
+        if os.path.exists(name_db_path):
+        self.conn = sqlite3.connect(name_db_path)
+        if self.conn != None:
+            self.cursor = self.conn.cursor()
+            
+    def add_soundbank_name(self, soundbank, friendlyname: str):
+        self.cursor.execute("INSERT INTO soundbanks id, name, friendlyname, VALUES (?, ?, ?)", (soundbank.get_id(), soundbank.dep.data, friendlyname))
+        self.conn.commit()
+            
+    def lookup_soundbank(self, key: str):
+        key = str(key)
+        try:
+            t = int(key)
+            is_bank_id = True
+        except ValueError:
+            is_bank_id = False
+        if is_bank_id:
+            results = self.cursor.execute("SELECT id, name, friendlyname, archive, language FROM soundbanks WHERE id=?", (key,))
+        else:
+            results = self.cursor.execute("SELECT id, name, friendlyname, archive, language FROM soundbanks WHERE name=?", (key,))
+        result = results.fetchone()
+        if result:
+            return LookupResult(result[0], result[1], result[2], result[3], result[4])
+        else:
+            return LookupResult(key, key, key, key, key, success=False)
+        
+        
 class LookupResult:
     
     def __init__(self,
@@ -74,8 +105,17 @@ class FriendlyNameLookup:
         self.conn = sqlite3.connect(name_db_path)
         if self.conn != None:
             self.cursor = self.conn.cursor()
+        self.custom_name_store = None
+            
+    def set_custom_name_store(self, custom_name_store):
+        self.custom_name_store = custom_name_store
             
     def lookup_soundbank(self, key: str):
+        if self.custom_name_store:
+            result = self.custom_name_store.lookup_soundbank(key)
+            if result.success:
+                return result
+            
         key = str(key)
         try:
             t = int(key)
@@ -91,6 +131,35 @@ class FriendlyNameLookup:
             return LookupResult(result[0], result[1], result[2], result[3], result[4])
         else:
             return LookupResult(key, key, key, key, key, success=False)
+            
+    def lookup_hierarchy_entry(self, entry_id):
+        
+        entry_id = str(entry_id)
+        
+        if self.custom_name_store:
+            pass
+            
+        results = self.cursor.execute("SELECT id, friendlyname FROM hierarchy_entries WHERE id=?", (entry_id,))
+        result = results.fetchone()
+        if result:
+            return LookupResult(result[0], "", result[1], "", "", "")
+        else:
+            return LookupResult("", "", "", "", "", success=False)
+            
+    def lookup_audio_source(self, source_id):
+        
+        source_id = str(source_id)
+        
+        if self.custom_name_store:
+            pass
+            
+        results = self.cursor.execute("SELECT id, resource_id, friendlyname FROM audio_sources WHERE id=? OR resource_id=?", (source_id, source_id))
+        result = results.fetchone()
+        if result:
+            return LookupResult(result[0], "", result[1], "", "", "")
+        else:
+            return LookupResult("", "", "", "", "", success=False)
+            
             
             
     def query_soundbanks(self, language=""):
