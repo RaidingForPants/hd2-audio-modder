@@ -1526,12 +1526,17 @@ class Mod:
             return
 
         length_import_failed = False
+        wrong_file_format = False
         for filepath, targets in wems.items():
             if not os.path.exists(filepath) or not os.path.isfile(filepath):
                 continue
             have_length = True
             with open(filepath, 'rb') as f:
-                audio_data = f.read()    
+                audio_data = f.read()
+                if audio_data[20:22] != b"\xFF\xFF":
+                    wrong_file_format = True
+                    logger.warning(f"File {filepath} was the incorrect audio format!")
+                    continue
             if set_duration:
                 try:
                     process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
@@ -1543,6 +1548,7 @@ class Mod:
                             total_samples = int(line[22:line.index("(")-1])
                     len_ms = total_samples * 1000 / sample_rate
                 except:
+                    logger.warning(f"Failed to get duration info for {filepath}!")
                     have_length = False
                     length_import_failed = True
             for target in targets:
@@ -1563,9 +1569,15 @@ class Mod:
                                         t.play_at = 0
                                         break
                                 item.set_data(track_info=tracks)
+                                
+        if length_import_failed and wrong_file_format:
+            raise RuntimeError("Failed to set track duration for some audio sources. Some audio was not the correct format.")
 
         if length_import_failed:
-            raise RuntimeError("Failed to set track duration for some audio sources")
+            raise RuntimeError("Failed to set track duration for some audio sources.")
+            
+        if wrong_file_format:
+            raise RuntimeError("Some audio was not the correct format.")
     
     def create_external_sources_list(self, sources: list[str], conversion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
         root = etree.Element("ExternalSourcesList", attrib={

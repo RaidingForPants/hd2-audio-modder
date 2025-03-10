@@ -1272,7 +1272,10 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
-        self.mod_handler.get_active_mod().import_files(file_dict)
+        try:
+            self.mod_handler.get_active_mod().import_files(file_dict)
+        except Exception as e:
+            showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)}. Some imports were skipped.")
         self.check_modified()
         self.show_info_window()
 
