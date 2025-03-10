@@ -1504,13 +1504,13 @@ class MainWindow:
             self.audio_info_panel.set_audio(self.mod_handler.get_active_mod().get_audio_source(selection_id))
             self.audio_info_panel.frame.pack()
         elif selection_type == "Event":
-            self.event_info_panel.set_track_info(self.mod_handler.get_active_mod().get_hierarchy_entry(bank_id, selection_id))
+            self.event_info_panel.set_track_info(self.mod_handler.get_active_mod().get_hierarchy_entry(selection_id))
             self.event_info_panel.frame.pack()
         elif selection_type == "Music Segment":
-            self.segment_info_panel.set_segment_info(self.mod_handler.get_active_mod().get_hierarchy_entry(bank_id, selection_id))
+            self.segment_info_panel.set_segment_info(self.mod_handler.get_active_mod().get_hierarchy_entry(selection_id))
             self.segment_info_panel.frame.pack()
         elif selection_type == "Music Track":
-            self.track_info_panel.set_track(self.mod_handler.get_active_mod().get_hierarchy_entry(bank_id, selection_id))
+            self.track_info_panel.set_track(self.mod_handler.get_active_mod().get_hierarchy_entry(selection_id))
             self.track_info_panel.frame.pack()
         elif selection_type == "Sound Bank":
             pass

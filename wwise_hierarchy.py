@@ -11,7 +11,7 @@ class HircEntry:
         self.hierarchy_id: int = 0
         self.sources = []
         self.track_info = []
-        self.soundbank = None # WwiseBank
+        self.soundbanks = [] # WwiseBank
         self.misc: bytearray = bytearray()
         self.modified_children: int = 0
         self.modified: bool = False
@@ -39,7 +39,7 @@ class HircEntry:
         return self.modified_children != 0
         
     def set_data(self, entry = None, **data):
-        if self.soundbank == None:
+        if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
@@ -49,7 +49,8 @@ class HircEntry:
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified()
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -59,12 +60,12 @@ class HircEntry:
         self.modified = True
         self.size = len(self.get_data())-5
         try:
-            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
+            self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
         except:
             self.parent = None
 
     def revert_modifications(self):
-        if self.soundbank == None:
+        if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
@@ -76,7 +77,8 @@ class HircEntry:
             if self.parent:
                 self.parent.lower_modified()
             else:
-                self.soundbank.lower_modified()
+                for bank in self.soundbanks:
+                    bank.lower_modified()
         
     def import_entry(self, new_entry):
         if (
@@ -90,7 +92,7 @@ class HircEntry:
         return self.hierarchy_id
         
     def raise_modified(self):
-        if self.soundbank == None:
+        if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
@@ -99,10 +101,11 @@ class HircEntry:
         if self.parent:
             self.parent.raise_modified()
         else:
-            self.soundbank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
         
     def lower_modified(self):
-        if self.soundbank == None:
+        if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
@@ -111,7 +114,8 @@ class HircEntry:
         if self.parent:
             self.parent.lower_modified()
         else:
-            self.soundbank.lower_modified()
+            for bank in self.soundbanks:
+                bank.lower_modified()
         
     def get_data(self):
         return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
@@ -257,7 +261,7 @@ class MusicSegment(HircEntry):
         return entry
         
     def set_data(self, entry = None, **data):
-        if self.soundbank == None:
+        if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
@@ -267,7 +271,8 @@ class MusicSegment(HircEntry):
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified()
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -282,7 +287,8 @@ class MusicSegment(HircEntry):
         self.modified = True
         self.size = len(self.get_data()) - 5
         try:
-            self.parent = self.soundbank.hierarchy.get_entry(self.parent_id)
+            self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
+            #potentially problematic, might need better way of getting the parent
         except:
             self.parent = None
         
@@ -447,7 +453,7 @@ class WwiseHierarchy:
         num_items = reader.uint32_read()
         for _ in range(num_items):
             entry = HircEntryFactory.from_memory_stream(reader)
-            entry.soundbank = self.soundbank
+            entry.soundbanks = [self.soundbank]
             self.entries[entry.get_id()] = entry
             try:
                 self.type_lists[entry.hierarchy_type].append(entry)
@@ -504,6 +510,7 @@ class WwiseHierarchy:
             self.type_lists[new_entry.hierarchy_type].append(new_entry)
         except KeyError:
             self.type_lists[new_entry.hierarchy_type] = [new_entry]
+        entry.soundbanks.append(self.soundbank)
             
     def remove_entry(self, entry: HircEntry):
         if self.soundbank == None:
@@ -520,6 +527,7 @@ class WwiseHierarchy:
                 self.soundbank.raise_modified()
             self.type_lists[entry.hierarchy_type].remove(entry)
             del self.entries[entry.hierarchy_id]
+            entry.soundbanks.remove(self.soundbank)
             
     def get_entry(self, entry_id: int):
         return self.entries[entry_id]
