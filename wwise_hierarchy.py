@@ -88,6 +88,9 @@ class HircEntry:
         else:
             self.parent = None
 
+    def get_base_param(self):
+        raise NotImplementedError("This interface does not implemented")
+
     def get_data(self):
         """
         Include header
@@ -434,6 +437,14 @@ class RandomSequenceContainer(HircEntry):
 
         return cntr
 
+    def get_base_param(self):
+        if self.baseParam != None:
+            return self.baseParam
+        raise AssertionError(
+            f"Random / Sequence container {self.hierarchy_id} does not have a "
+             "base parameter."
+        )
+
     def get_data(self):
         data = self._pack()
         if self.size != len(data):
@@ -775,6 +786,14 @@ class Sound(HircEntry):
             )
 
         return sound
+
+    def get_base_param(self):
+        if self.baseParam != None:
+            return self.baseParam
+        raise AssertionError(
+            f"Sound container {self.hierarchy_id} does not have a "
+             "base parameter."
+        )
 
     def get_data(self):
         data = self._pack()
@@ -1959,6 +1978,14 @@ class LayerContainer(HircEntry):
 
         return l
 
+    def get_base_param(self):
+        if self.baseParam != None:
+            return self.baseParam
+        raise AssertionError(
+            f"Layer container {self.hierarchy_id} does not have a "
+            "base parameter."
+        )
+
     def get_data(self):
         data = self._pack() 
 
@@ -2065,11 +2092,19 @@ class ActorMixer(HircEntry):
     def update_size(self):
         self.size = len(self._pack())
 
+    def get_base_param(self):
+        if self.baseParam != None:
+            return self.baseParam
+        raise AssertionError(
+            f"Actor mixer {self.hierarchy_id} does not have a "
+             "base parameter."
+        )
+
     def get_data(self):
         data = self._pack()
         if self.size != len(data):
             raise AssertionError(
-                f"ActorMixer {self.hierarchy_id} assertion break: "
+                f"Actor mixer {self.hierarchy_id} assertion break: "
                 f"data size specified in header != data size from packed data"
             )
 
@@ -2289,6 +2324,14 @@ class SwitchContainer(HircEntry):
             )
         
         return s
+
+    def get_base_param(self):
+        if self.baseParam != None:
+            return self.baseParam
+        raise AssertionError(
+            f"Switch container {self.hierarchy_id} does not have a "
+             "base parameter."
+        )
 
     def get_data(self):
         data = self._pack()
