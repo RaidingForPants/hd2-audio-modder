@@ -41,7 +41,7 @@ from log import logger
 
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
-VERSION = "1.17.0"
+VERSION = "1.1.0"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -1997,7 +1997,7 @@ if __name__ == "__main__":
         r = requests.get("https://api.github.com/repos/raidingforpants/hd2-audio-modder/releases/latest")
         if r.status_code != 200:
             raise Exception("Error fetching update info")
-        print(data)
+        data = r.json()
         if SYSTEM == "Darwin":
             download_url = data["assets"][1]["browser_download_url"]
             updater = "updater"
@@ -2021,17 +2021,17 @@ if __name__ == "__main__":
         elif latest_version[2] > current_version[2]:
             update_available = True
         if update_available:
-            response = askyesnocancel(title="Update", message=f"A new version is available ({data["tag_name"].replace("v", "")}). Would you like to install it?")
+            response = askyesnocancel(title="Update", message=f"A new version is available ({data['tag_name'].replace('v', '')}). Would you like to install it?")
             if response:
-                subprocess.run(
+                subprocess.Popen(
                     [
                         updater,
                         download_url,
-                        os.getpid()
+                        str(os.getpid())
                     ],
                     creationflags=subprocess.DETACHED_PROCESS
                 )
-                exit()
+                sys.exit()
     except Exception as e:
         print(e)
         
