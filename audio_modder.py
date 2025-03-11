@@ -1989,10 +1989,7 @@ if __name__ == "__main__":
         print(e)
         
     try:
-        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-            print('running in a PyInstaller bundle')
-        else:
-            print('running in a normal Python process')
+        if not getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             raise Exception("Automatic updates not supported for python script")
         r = requests.get("https://api.github.com/repos/raidingforpants/hd2-audio-modder/releases/latest")
         if r.status_code != 200:
