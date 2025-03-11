@@ -8,6 +8,7 @@ import zipfile
 import xml.etree.ElementTree as etree
 import requests
 import json
+import logging
 
 from functools import partial
 from functools import cmp_to_key
@@ -36,11 +37,12 @@ from core import *
 from xlocale import *
 from env import *
 from const import *
+from graph import *
 
 from log import logger
 
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
+WINDOW_WIDTH = 1440
+WINDOW_HEIGHT = 900
 VERSION = "2.0.0"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
@@ -231,6 +233,7 @@ class MusicTrackWindow:
         self.source_selection_listbox = tkinter.Listbox(self.frame)
         self.source_selection_listbox.bind("<Double-Button-1>", self.set_track_info)
         self.source_selection_listbox.config(width=200)
+        self.source_selection_listbox.config(height=4)
         
         self.play_at_label = ttk.Label(self.frame,
                                    text="Play At (ms)",
@@ -263,6 +266,8 @@ class MusicTrackWindow:
         
         self.title_label.pack(pady=5)
         
+        self.graph = Graph(self.frame)
+        
     def set_track_info(self, event=None, selection=0):
         if not selection:
             selection = self.source_selection_listbox.get(self.source_selection_listbox.curselection()[0])
@@ -284,19 +289,25 @@ class MusicTrackWindow:
         self.play_at_text.delete(0, 'end')
         self.play_at_text.insert(END, str(track_info_struct.play_at))
         
-        self.play_at_label.pack()
-        self.play_at_text.pack()
-        self.duration_label.pack()
-        self.duration_text.pack()
-        self.start_offset_label.pack()
-        self.start_offset_text.pack()
-        self.end_offset_label.pack()
-        self.end_offset_text.pack()
+        self.revert_button.pack(side="bottom", anchor="w")
+        self.apply_button.pack(side="bottom", anchor="w")
         
-        self.revert_button.pack(side="left")
-        self.apply_button.pack(side="left")
+        self.play_at_label.pack(side="top")
+        self.play_at_text.pack(side="top")
+        self.duration_label.pack(side="top")
+        self.duration_text.pack(side="top")
+        self.start_offset_label.pack(side="top")
+        self.start_offset_text.pack(side="top")
+        self.end_offset_label.pack(side="top")
+        self.end_offset_text.pack(side="top")
+        
+        if len(self.track.clip_automations) == 1:
+            self.graph.pack(side="top")
+        
+        
         
     def set_track(self, track):
+        self.title_label.configure(text=f"Info for Track {track.get_id()}")
         self.track = track
         self.source_selection_listbox.delete(0, 'end')
         for track_info_struct in self.track.track_info:
@@ -306,10 +317,24 @@ class MusicTrackWindow:
             else:
                 self.source_selection_listbox.insert(END, f"Event {track_info_struct.event_id}")
         
+        
+        
         if len(track.track_info) > 0:
             self.source_selection_listbox.pack()
             self.set_track_info(selection=self.source_selection_listbox.get(0))
             self.source_selection_listbox.select_set(0)
+            
+        if len(track.clip_automations) == 1:
+            x = [point[0] for point in track.clip_automations[0].graph_points]
+            y = [point[1] for point in track.clip_automations[0].graph_points]
+            if track.clip_automations[0].auto_type == 0: #VOLUME
+                self.graph.set_xlabel("time (s)")
+                self.graph.set_ylabel("dB")
+                self.graph.set_title("Track Volume")
+            self.graph.set_data(x, y)
+        else:
+            self.graph.pack_forget()
+            
     def revert(self):
         self.track.revert_modifications()
         self.set_track(self.track)
@@ -324,7 +349,11 @@ class MusicTrackWindow:
                 t.source_duration = float(self.duration_text_var.get())
                 t.play_at = float(self.play_at_text_var.get())
                 break
-        self.track.set_data(track_info=tracks)
+        x, y = self.graph.get_data()
+        clip_automations = copy.deepcopy(self.track.clip_automations)
+        clip_automations[0].num_graph_points = len(x)
+        clip_automations[0].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
+        self.track.set_data(track_info=tracks, clip_automations=clip_automations)
         self.update_modified(diff=[self.track])
         
         
@@ -1519,19 +1548,19 @@ class MainWindow:
             child.pack_forget()
         if selection_type == "String":
             self.string_info_panel.set_string_entry(self.mod_handler.get_active_mod().get_string_entry(bank_id, selection_id))
-            self.string_info_panel.frame.pack()
+            self.string_info_panel.frame.pack(side="top", fill="x", padx=8, pady=8)
         elif selection_type == "Audio Source":
             self.audio_info_panel.set_audio(self.mod_handler.get_active_mod().get_audio_source(selection_id))
-            self.audio_info_panel.frame.pack()
+            self.audio_info_panel.frame.pack(side="top", fill="x", padx=8, pady=8)
         elif selection_type == "Event":
             self.event_info_panel.set_track_info(self.mod_handler.get_active_mod().get_hierarchy_entry(selection_id))
-            self.event_info_panel.frame.pack()
+            self.event_info_panel.frame.pack(side="top", fill="x", padx=8, pady=8)
         elif selection_type == "Music Segment":
             self.segment_info_panel.set_segment_info(self.mod_handler.get_active_mod().get_hierarchy_entry(selection_id))
-            self.segment_info_panel.frame.pack()
+            self.segment_info_panel.frame.pack(side="top", fill="x", padx=8, pady=8)
         elif selection_type == "Music Track":
             self.track_info_panel.set_track(self.mod_handler.get_active_mod().get_hierarchy_entry(selection_id))
-            self.track_info_panel.frame.pack()
+            self.track_info_panel.frame.pack(side="top", fill="x", padx=8, pady=8)
         elif selection_type == "Sound Bank":
             pass
         elif selection_type == "Text Bank":
@@ -1919,6 +1948,7 @@ class MainWindow:
             self.show_info_window()
 
 if __name__ == "__main__":
+    logger.setLevel(logging.INFO)
     random.seed()
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
