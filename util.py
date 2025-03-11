@@ -221,3 +221,13 @@ def fnv_30(data: bytes):
     mask = c_uint32(h.value & _FNV_30_MASK.value)
 
     return c_uint32(downshift.value ^ mask.value).value
+
+
+def assert_equal(msg: str, expect, receive):
+    if expect != receive:
+        raise AssertionError(f"{msg}: expecting {expect}, received {receive}")
+
+
+def assert_not_none(msg: str, value):
+    if value == None:
+        raise AssertionError(f"{msg}")
