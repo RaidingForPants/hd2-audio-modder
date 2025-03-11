@@ -1,3 +1,7 @@
+"""
+Bank Version 141
+"""
+
 import struct
 import uuid
 
@@ -62,10 +66,7 @@ class HircEntry:
             self.set_data(new_entry)
         
     def set_data(self, entry = None, **data):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
 
         if not self.modified:
             self.data_old = self.get_data()
@@ -98,10 +99,7 @@ class HircEntry:
         return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
         
     def revert_modifications(self):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
 
         if self.modified:
             self.set_data(self.from_bytes(self.data_old))
@@ -113,10 +111,7 @@ class HircEntry:
                 self.soundbank.lower_modified()
 
     def raise_modified(self):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance wiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
 
         self.modified_children+=1
         if self.parent:
@@ -125,10 +120,7 @@ class HircEntry:
             self.soundbank.raise_modified()
         
     def lower_modified(self):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
 
         self.modified_children-=1
         if self.parent:
@@ -162,12 +154,54 @@ class HircEntry:
         return self.hierarchy_id
 
 
+class ActionException:
+    """
+    ulID tid
+    bIsBus U8x
+    """
+
+    def __init__(self):
+        self.ulID: int = 0
+        self.bIsBus: int = 0
+
+    @staticmethod
+    def from_memory_stream(s: MemoryStream):
+        head = s.tell()
+
+        a = ActionException()
+
+        a.ulID = s.uint32_read()
+        a.bIsBus = s.uint8_read()
+
+        tail = s.tell()
+
+        assert_equal("ActionExceptionList expect 5 bytes of data", 5, tail - head)
+
+        return a
+
+    def get_data(self):
+        return self.ulID.to_bytes(4, byteorder="little", signed=False) + \
+               self.bIsBus.to_bytes(1, byteorder="little", signed=False)
+
+
 class Action(HircEntry):
     """
     ulActionType U16
     idExt tid
     idExt_4 U8x
+    propBundle sizeof(PropBundle)
+    rangePropBundle sizeof(RangedPropBundle)
+    actionParamData sizeof(actionParamData)
     """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "actionParamData"
+    ]
 
     def __init__(self):
         super().__init__()
@@ -190,6 +224,21 @@ class Action(HircEntry):
 
         head = s.tell()
 
+        cls.parse_action_base(a, s)
+
+        a.actionParamData = stream.read(a.size - (s.tell() - head))
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for Action {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    @staticmethod
+    def parse_action_base(a: 'Action', s: MemoryStream):
         a.hierarchy_id = s.uint32_read()
 
         a.ulActionType = s.uint16_read()
@@ -200,30 +249,53 @@ class Action(HircEntry):
         a.propBundle = PropBundle.from_memory_stream(s)
         a.rangePropBundle = RangedPropBundle.from_memory_stream(s)
 
-        a.actionParamData = stream.read(a.size - (s.tell() - head))
-
-        tail = s.tell()
-
-        if a.size != (tail - head):
-            raise AssertionError(
-                f"Action {a.hierarchy_id} header size != read data size"
-            )
-
-        return a
-
     def get_data(self):
         data = self._pack()
 
-        if self.size != len(data):
-            raise AssertionError(
-                f"Action {self.hierarchy_id} header size != packed data size"
-            )
+        assert_equal(
+            f"Header size and packed data size mismatch for Action {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data
 
+    def set_data(self, entry: Union['Action', None] = None, **data):
+        assert_not_none(f"No WwiseBank is attached to Action {self.hierarchy_id}", self.soundbank)
+
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            else:
+                self.soundbank.raise_modified()
+
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
+
+        self.modified = True
+        self.update_size()
+
+        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        if hierarchy.has_entry(self.parent_id):
+            self.parent = hierarchy.get_entry(self.parent_id)
+        else:
+            self.parent = None
+
     def _pack(self):
+        data = self._pack_action_base()
+
+        data += self.actionParamData
+
+        return data
+
+    def _pack_action_base(self):
         data = struct.pack(
             "<IHIB",
             self.hierarchy_id,
@@ -235,14 +307,1047 @@ class Action(HircEntry):
         data += self.propBundle.get_data()
         data += self.rangePropBundle.get_data()
 
-        data += self.actionParamData
+        return data
+
+
+class ActionStop(Action):
+    """
+    fadeCurveBitVector U8x
+    stopBitVector U8x
+    ulExceptionListSize var (assume 8 bits, can be more)
+    actionExceptionList ulExceptionListSize * size(ActionException)
+    """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "stopBitVector",
+        "ulExceptionListSize",
+        "actionExceptionList"
+    ]
+        
+    def __init__(self):
+        super().__init__()
+        self.fadeCurveBitVector = 0
+        self.stopBitVector = 0
+        self.ulExceptionListSize = 0
+        self.actionExceptionList: list[ActionException] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionStop()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        # Active Action Param
+        a.fadeCurveBitVector = s.uint8_read()
+
+        # Stop Action Specific Param
+        a.stopBitVector = s.uint8_read()
+
+        # Action Except Param
+        a.ulExceptionListSize = s.uint8_read()
+
+        a.actionExceptionList = [
+            ActionException.from_memory_stream(s) for _ in range(a.ulExceptionListSize)
+        ]
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionStop {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        assert_equal(
+            f"Unique exception list size does not match up # of action exception "
+            f"in the list for ActionStop {self.hierarchy_id}",
+            self.ulExceptionListSize,
+            self.actionExceptionList
+        )
+
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionStop {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack(
+            "<BBB",
+            self.fadeCurveBitVector,
+            self.stopBitVector,
+            self.ulExceptionListSize
+        )
+
+        for a in self.actionExceptionList:
+            data += a.get_data()
 
         return data
 
 
+class ActionPause(Action):
+    """
+    fadeCurveBitVector U8x
+    pauseBitVector U8x
+    ulExceptionListSize var (assume 8 bits, can be more)
+    actionExceptionList ulExceptionListSize * size(ActionException)
+    """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "pauseBitVector",
+        "ulExceptionListSize",
+        "actionExceptionList"
+    ]
+        
+    def __init__(self):
+        super().__init__()
+        self.fadeCurveBitVector = 0
+        self.pauseBitVector = 0
+        self.ulExceptionListSize = 0
+        self.actionExceptionList: list[ActionException] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionPause()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        # Active Action Param
+        a.fadeCurveBitVector = s.uint8_read()
+
+        # Action Pause Specific Param
+        a.pauseBitVector = s.uint8_read()
+
+        # Action Except Param
+        a.ulExceptionListSize = s.uint8_read()
+
+        a.actionExceptionList = [
+            ActionException.from_memory_stream(s) for _ in range(a.ulExceptionListSize)
+        ]
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionPause {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        assert_equal(
+            f"Unique exception list size does not match up # of action exception "
+            f"in the list for ActionPause {self.hierarchy_id}",
+            self.ulExceptionListSize,
+            self.actionExceptionList
+        )
+
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionPause {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack(
+            "<BBB",
+            self.fadeCurveBitVector,
+            self.pauseBitVector,
+            self.ulExceptionListSize
+        )
+
+        for a in self.actionExceptionList:
+            data += a.get_data()
+
+        return data
+
+
+class ActionResume(Action):
+    """
+    fadeCurveBitVector U8x
+    resumeBitVector U8x
+    ulExceptionListSize var (assume 8 bits, can be more)
+    actionExceptionList ulExceptionListSize * size(ActionException)
+    """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "resumeBitVector",
+        "ulExceptionListSize",
+        "actionExceptionList"
+    ]
+        
+    def __init__(self):
+        super().__init__()
+        self.fadeCurveBitVector = 0
+        self.resumeBitVector = 0
+        self.ulExceptionListSize = 0
+        self.actionExceptionList: list[ActionException] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionResume()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        # Active Action Param
+        a.fadeCurveBitVector = s.uint8_read()
+
+        # Action Resume Specific Param
+        a.resumeBitVector = s.uint8_read()
+
+        # Action Except Param
+        a.ulExceptionListSize = s.uint8_read()
+
+        a.actionExceptionList = [
+            ActionException.from_memory_stream(s) for _ in range(a.ulExceptionListSize)
+        ]
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionResume {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        assert_equal(
+            f"Unique exception list size does not match up # of action exception "
+            f"in the list for ActionResume {self.hierarchy_id}",
+            self.ulExceptionListSize,
+            self.actionExceptionList
+        )
+
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionResume {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack(
+            "<BBB",
+            self.fadeCurveBitVector,
+            self.resumeBitVector,
+            self.ulExceptionListSize
+        )
+
+        for a in self.actionExceptionList:
+            data += a.get_data()
+
+        return data
+
+
+class ActionPlay(Action):
+    """
+    fadeCurveBitVector U8x
+    bankID tid
+    """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "bankID"
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.fadeCurveBitVector: int = 0
+        self.bankID: int = 0
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionPlay()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        # Active Action Param
+        a.fadeCurveBitVector = s.uint8_read()
+
+        # Bank ID
+        a.bankID = s.uint32_read()
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionPlay {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionPlay {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack("<BI", self.fadeCurveBitVector, self.bankID)
+
+        return data
+
+
+class ActionPlayAndContinue(ActionPlay):
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "bankID"
+    ]
+
+    def __init__(self):
+        super().__init__()
+
+
+class ActionSetSimpleValue(Action):
+    """
+    fadeCurveBitVector U8x
+    ulExceptionListSize var (assume 8 bits, can be more)
+    actionExceptionList ulExceptionListSize * size(ActionException)
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.fadeCurveBitVector: int = 0
+        self.ulExceptionListSize = 0
+        self.actionExceptionList: list[ActionException] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionSetSimpleValue()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        # Active Action Param
+        a.fadeCurveBitVector = s.uint8_read()
+
+        # Action Except Param
+        a.ulExceptionListSize = s.uint8_read()
+
+        a.actionExceptionList = [
+            ActionException.from_memory_stream(s) for _ in range(a.ulExceptionListSize)
+        ]
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionSetSimpleValue "
+            f"(type: {a.ulActionType}) {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        assert_equal(
+            f"Unique exception list size does not match up # of action exception "
+            f"in the list for ActionSetSimpleValue (type: {self.ulActionType}) "
+            f"{self.hierarchy_id}",
+            self.ulExceptionListSize,
+            self.actionExceptionList
+        )
+
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionSetSimpleValue "
+            f"(type: {self.ulActionType}) {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack(
+            "<BB", self.fadeCurveBitVector, self.ulExceptionListSize
+        )
+
+        for a in self.actionExceptionList:
+            data += a.get_data()
+
+        return data
+
+
+class RandomModifier:
+    """
+    base f32
+    min f32
+    max f32
+    """
+
+    def __init__(self):
+        self.base: float = 0
+        self.min: float = 0
+        self.max: float = 0
+
+    @staticmethod
+    def from_memory_stream(s: MemoryStream):
+        r = RandomModifier()
+
+        r.base = s.float_read()
+        r.min = s.float_read()
+        r.max = s.float_read()
+
+        return r
+
+    def get_data(self):
+        return struct.pack("<fff", self.base, self.min, self.max)
+
+
+class ActionSetProp(Action):
+    """
+    fadeCurveBitVector U8x
+    eValueMeaning U8x
+    ulExceptionListSize var (assume 8 bits, can be more)
+    actionExceptionList ulExceptionListSize * size(ActionException)
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.fadeCurveBitVector: int = 0
+        self.eValueMeaning: int = 0
+        self.randomModifier: RandomModifier = RandomModifier()
+        self.ulExceptionListSize = 0
+        self.actionExceptionList: list[ActionException] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionSetProp()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        # Active Action Param
+        a.fadeCurveBitVector = s.uint8_read()
+
+        # ActionSetProp Specific
+        a.eValueMeaning = s.uint8_read()
+        a.randomModifier = RandomModifier.from_memory_stream(s)
+
+        # Action Except Param
+        a.ulExceptionListSize = s.uint8_read()
+
+        a.actionExceptionList = [
+            ActionException.from_memory_stream(s) for _ in range(a.ulExceptionListSize)
+        ]
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionSetProp {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        assert_equal(
+            f"Unique exception list size does not match up # of action exception "
+            f"in the list for ActionSetProp {self.hierarchy_id}",
+            self.ulExceptionListSize,
+            self.actionExceptionList
+        )
+
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionSetProp "
+            f"{self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack("<BB", self.fadeCurveBitVector, self.eValueMeaning)
+        data += self.randomModifier.get_data()
+        data += self.ulExceptionListSize.to_bytes(1, byteorder="little", signed=False)
+
+        for a in self.actionExceptionList:
+            data += a.get_data()
+
+        return data
+
+
+class ActionUseState(Action): 
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle"
+    ]
+
+    def __init__(self):
+        super().__init__()
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionUseState()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionUseState {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionUseState "
+            f"{self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+        
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        return self._pack_action_base()
+
+
+class ActionSetState(Action):
+    """
+    ulStateGroupID tid
+    ulTargetStateID tid
+    """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle"
+        "ulStateGroupID",
+        "ulTargetStateID"
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.ulStateGroupID: int = 0
+        self.ulTargetStateID: int = 0
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionSetState()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        a.ulStateGroupID = s.uint32_read()
+        a.ulTargetStateID = s.uint32_read()
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionSetState {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        data = self._pack()
+        
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionSetState {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack(
+            "<II", self.ulStateGroupID, self.ulTargetStateID,
+        )
+
+        return data
+
+
+class ActionSetSwitch(Action):
+    """
+    ulSwitchGroupID - tid
+    ulSwitchStateID - tid
+    """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "ulSwitchGroupID",
+        "ulSwitchStateID"
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.ulSwitchGroupID: int = 0
+        self.ulSwitchStateID: int = 0
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionSetSwitch()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        a.ulSwitchGroupID = s.uint32_read()
+        a.ulSwitchStateID = s.uint32_read()
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionSetSwitch {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        data = self._pack()
+        
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionSetSwitch {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack(
+            "<II", self.ulSwitchGroupID, self.ulSwitchStateID,
+        )
+
+        return data
+
+
+class ActionSeek(Action):
+    """
+    bIsSeekRelativeToDuration U8x
+    randomModifier sizeof(RandomModifier)
+    bSnapToNearestMarker U8x
+    ulExceptionListSize var (assume 8 bits, can be more)
+    actionExceptionList ulExceptionListSize * size(ActionException)
+    """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "bIsSeekRelativeToDuration",
+        "randomModifier",
+        "bSnapToNearestMarker",
+        "ulExceptionListSize",
+        "actionExceptionList"
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.bIsSeekRelativeToDuration: int = 0
+        self.randomModifier = RandomModifier()
+        self.bSnapToNearestMarker: int = 0
+        self.ulExceptionListSize: int = 0
+        self.actionExceptionList: list[ActionException] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionSeek()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        a.bIsSeekRelativeToDuration = s.uint8_read()
+
+        a.randomModifier = RandomModifier.from_memory_stream(s)
+
+        a.bSnapToNearestMarker = s.uint8_read()
+
+        a.ulExceptionListSize = s.uint8_read()
+
+        a.actionExceptionList = [
+            ActionException.from_memory_stream(s) for _ in range(a.ulExceptionListSize)
+        ]
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionSeek {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        assert_equal(
+            f"Unique exception list size does not match up # of action exception "
+            f"in the list for ActionSeek {self.hierarchy_id}",
+            self.ulExceptionListSize,
+            self.actionExceptionList
+        )
+
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionSeek "
+            f"{self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += self.bIsSeekRelativeToDuration.to_bytes(1, byteorder="little", signed=False)
+
+        data += self.randomModifier.get_data()
+
+        data += self.bSnapToNearestMarker.to_bytes(1, byteorder="little", signed=False)
+
+        data += self.ulExceptionListSize.to_bytes(1, byteorder="little", signed=False)
+
+        for a in self.actionExceptionList:
+            data += a.get_data()
+
+        return data
+
+
+class ActionResetPlaylist(Action):
+    """
+    fadeCurveBitVector U8x
+    ulExceptionListSize var (assume 8 bits, can be more)
+    actionExceptionList ulExceptionListSize * size(ActionException)
+    """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "ulExceptionListSize",
+        "actionExceptionList"
+    ]
+        
+    def __init__(self):
+        super().__init__()
+        self.fadeCurveBitVector = 0
+        self.ulExceptionListSize = 0
+        self.actionExceptionList: list[ActionException] = []
+
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        s = stream
+
+        a = ActionResetPlaylist()
+
+        a.hierarchy_type = s.uint8_read()
+        a.size = s.uint32_read()
+
+        head = s.tell()
+
+        cls.parse_action_base(a, s)
+
+        # Active Action Param
+        a.fadeCurveBitVector = s.uint8_read()
+
+        # Action Except Param
+        a.ulExceptionListSize = s.uint8_read()
+
+        a.actionExceptionList = [
+            ActionException.from_memory_stream(s) for _ in range(a.ulExceptionListSize)
+        ]
+
+        tail = s.tell()
+
+        assert_equal(
+            f"Header size and read data size mismatch for ActionResetPlaylist {a.hierarchy_id}",
+            a.size, tail - head
+        )
+
+        return a
+
+    def get_data(self):
+        assert_equal(
+            f"Unique exception list size does not match up # of action exception "
+            f"in the list for ActionResetPlaylist {self.hierarchy_id}",
+            self.ulExceptionListSize,
+            self.actionExceptionList
+        )
+
+        data = self._pack()
+
+        assert_equal(
+            f"Header size and packed data size mismatch for ActionResetPlaylist {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
+
+        header = struct.pack("<BI", self.hierarchy_type, self.size)
+
+        return header + data
+
+    def update_size(self):
+        self.size = len(self._pack())
+
+    def _pack(self):
+        data = self._pack_action_base()
+
+        data += struct.pack(
+            "<BB",
+            self.fadeCurveBitVector,
+            self.ulExceptionListSize
+        )
+
+        for a in self.actionExceptionList:
+            data += a.get_data()
+
+        return data
+
+
+ActionType: dict[int, object] = {
+    0x0100: ActionStop,
+    0x0200: ActionPause,
+    0x0300: ActionResume,
+    0x0400: ActionPlay,
+    0x0500: ActionPlayAndContinue, #early (removed in later versions)
+    0x0600: ActionSetSimpleValue,
+    0x0700: ActionSetSimpleValue,
+    0x0800: ActionSetProp, #AkPropID_Pitch
+    0x0900: ActionSetProp, #AkPropID_Pitch
+    0x0A00: ActionSetProp, #(none) / AkPropID_Volume (~v145) / AkPropID_FirstRtpc (v150) 
+    0x0B00: ActionSetProp, #(none) / AkPropID_Volume (~v145) / AkPropID_FirstRtpc (v150)
+    0x0C00: ActionSetProp, #AkPropID_BusVolume
+    0x0D00: ActionSetProp, #AkPropID_BusVolume
+    0x0E00: ActionSetProp, #AkPropID_LPF
+    0x0F00: ActionSetProp, #AkPropID_LPF
+    0x1000: ActionUseState,
+    0x1100: ActionUseState,
+    0x1200: ActionSetState,
+    # 0x1500: ActionEvent, #not in v150
+    # 0x1600: ActionEvent, #not in v150
+    # 0x1700: ActionEvent, #not in v150
+    0x1900: ActionSetSwitch,
+    # 0x1A00: ActionBypassFX,
+    # 0x1B00: ActionBypassFX,
+    # 0x1C00: ActionBreak,
+    # 0x1D00: ActionTrigger,
+    0x1E00: ActionSeek,
+    # 0x1F00: ActionRelease,
+    0x2000: ActionSetProp, #AkPropID_HPF
+    # 0x2100: ActionPlayEvent,
+    0x2200: ActionResetPlaylist,
+    # 0x2300: ActionPlayEventUnknown, #normally not defined
+    0x3000: ActionSetProp, #AkPropID_HPF
+    # 0x3100: ActionSetFX,
+    # 0x3200: ActionSetFX,
+    # 0x3300: ActionBypassFX,
+    # 0x3400: ActionBypassFX,
+    # 0x3500: ActionBypassFX,
+    # 0x3600: ActionBypassFX,
+    # 0x3700: ActionBypassFX,
+}
+
+
 class Event(HircEntry):
     """
-    ulActionListSize var
+    ulActionListSize var (assume 8 bits, can be more)
     ulActionIDs[] tid[ulActionListSize]
     """
 
@@ -277,30 +1382,31 @@ class Event(HircEntry):
 
         tail = s.tell()
 
-        if e.size != (tail - head):
-            raise AssertionError(
-                f"Event {e.hierarchy_id} header size != read data size"
-            )
+        assert_equal(
+            f"Header size and read data size mismatch for Event {e.hierarchy_id}",
+            e.size, tail - head
+        )
 
         return e
 
     def get_data(self):
         data = self._pack()
 
-        if self.size != len(data):
-            raise AssertionError(
-                f"Event {self.hierarchy_id} header size != packed data size"
-            )
+        assert_equal(
+            f"Header size and packed data size mismatch for Event {self.hierarchy_id}",
+            self.size,
+            len(data)
+        )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data
 
     def set_data(self, entry: Union['Event', None] = None, **data):
-        if self.soundbank == None:
-            raise AssertionError(
-                f"No WwiseBank object is attached to Event {self.hierarchy_id}"
-            )
+        assert_not_none(
+            f"No WwiseBank is attached to Event {self.hierarchy_id}",
+            self.soundbank
+        )
 
         if not self.modified:
             self.data_old = self.get_data()
@@ -329,11 +1435,13 @@ class Event(HircEntry):
         self.size = len(self._pack())
 
     def _pack(self):
-        if self.ulActionListSize != len(self.ulActionIDs):
-            raise AssertionError(
-                f"Event {self.hierarchy_id} action list size != # of ul action"
-                 "IDs in the list."
-            )
+        assert_equal(
+            f"Action list size mismatch with # of unique action IDs in the list"
+            f" for Event {self.hierarchy_id}",
+            self.ulActionListSize,
+            len(self.ulActionIDs)
+        )
+
         data = struct.pack(
             "<IB",
             self.hierarchy_id,
@@ -429,11 +1537,10 @@ class RandomSequenceContainer(HircEntry):
 
         tail = stream.tell()
 
-        if cntr.size != (tail - head):
-            raise AssertionError(
-                f"Random Sequence container {cntr.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from read data"
-            )
+        assert_equal(
+            f"Header size and read data size mismatch for RandomSequenceContainer {cntr.hierarchy_id}",
+            cntr.size, tail - head
+        )
 
         return cntr
 
@@ -447,21 +1554,17 @@ class RandomSequenceContainer(HircEntry):
 
     def get_data(self):
         data = self._pack()
-        if self.size != len(data):
-            raise AssertionError(
-                f"Random Sequence container {self.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from packed data"
-            )
+        assert_equal(
+            f"Header size and packed data size mismatch for RandomSequenceContainer {self.hierarchy_id}",
+            self.size, len(data) 
+        )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data 
 
     def set_data(self, entry: Union['RandomSequenceContainer', None] = None, **data):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to RandomSequenceContainer {self.hierarchy_id}", self.soundbank)
 
         if not self.modified:
             self.data_old = self.get_data()
@@ -497,18 +1600,19 @@ class RandomSequenceContainer(HircEntry):
                 f"Random Sequence container {self.hierarchy_id} does not has a "
                  "base parameter."
             )
+
         data += self.baseParam.get_data()
 
         data += self.playListSetting.get_data()
 
         data += self.containerChildren.get_data()
 
-        if self.ulPlayListItem != len(self.playListItems):
-            raise AssertionError(
-                f"Random Sequence container {self.hierarchy_id} assertion break: "
-                f" # of playlist item != # of item in the playlist item in the "
-                f" array"
-            )
+        assert_equal(
+            "# of playlist item mismatch # of item in the playlist item array",
+            self.ulPlayListItem,
+            len(self.playListItems)
+        )
+
         data += struct.pack("<H", self.ulPlayListItem)
         for playListItem in self.playListItems:
             data += playListItem.get_data()
@@ -671,10 +1775,11 @@ class BankSourceStruct:
             if self.plugin_id:
                 b += struct.pack(f"<I", self.plugin_size)
                 if self.plugin_size > 0:
-                    if self.plugin_size != len(self.plugin_data):
-                        raise AssertionError(
-                            "plugin size != size of plugin data"
-                        )
+                    assert_equal(
+                        "Plugin size mismatch size of plugin data",
+                        self.plugin_size,
+                        len(self.plugin_data)
+                    )
                     b += struct.pack(f"<{len(self.plugin_data)}s", self.plugin_data)
         return b
         
@@ -779,11 +1884,10 @@ class Sound(HircEntry):
 
         tail = stream.tell()
 
-        if sound.size != (tail - head):
-            raise AssertionError(
-                f"Sound {sound.hierarchy_id} assertion break: "
-                 "data size specified in header != data size from read data"
-            )
+        assert_equal(
+            f"Header size and read data size mismatch for Sound {sound.hierarchy_id}",
+            sound.size, tail - head
+        )
 
         return sound
 
@@ -797,21 +1901,16 @@ class Sound(HircEntry):
 
     def get_data(self):
         data = self._pack()
-        if self.size != len(data):
-            raise AssertionError(
-                f"Sound {self.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from packed data"
-            )
+        assert_equal(
+            f"Header size and packed data size mismatch for Sound {self.hierarchy_id}",
+            self.size, len(data) 
+        )
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data
 
     def set_data(self, entry: Union['Sound', None] = None, **data):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
-
+        assert_not_none(f"No WwiseBank is attached to Sound {self.hierarchy_id}", self.soundbank)
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:
@@ -859,13 +1958,16 @@ class HircEntryFactory:
         if hierarchy_type == 0x02: # sound
             return Sound.from_memory_stream(stream)
         elif hierarchy_type == 0x03:
-            return Action.from_memory_stream(stream)
-        elif hierarchy_type == 0x04:
-            if os.environ["TEST_EVENT"] == "1":
-                return Event.from_memory_stream(stream)
+            stream.advance(1 + 4 + 4)
+            action_type: int = stream.uint16_read()
+            stream.seek(stream.tell() - 2 - 1 - 4 - 4)
+            if action_type in ActionType:
+                return ActionType[action_type].from_memory_stream(stream) # type: ignore
             else:
-                return Event.from_memory_stream(stream)
-        elif hierarchy_type == 0x05: # random / sequence container
+                return Action.from_memory_stream(stream)
+        elif hierarchy_type == 0x04:
+            return Event.from_memory_stream(stream)
+        elif hierarchy_type == 0x05:
             return RandomSequenceContainer.from_memory_stream(stream)
         elif hierarchy_type == 0x06:
             return SwitchContainer.from_memory_stream(stream)
@@ -924,31 +2026,25 @@ class WwiseHierarchy:
                     self.type_lists[entry.hierarchy_type] = [entry]
                 
     def revert_modifications(self, entry_id: int = 0):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
 
         if entry_id:
             self.get_entry(entry_id).revert_modifications()
         else:
             for entry in self.removed_entries:
                 self.entries[entry.hierarchy_id] = entry
-                self.soundbank.lower_modified()
+                self.soundbank.lower_modified() # type: ignore
             self.removed_entries.clear()
             for entry in self.added_entries:
                 self.remove_entry(entry.hierarchy_id)
-                self.soundbank.lower_modified()
+                self.soundbank.lower_modified() # type: ignore
             for entry in self.get_entries():
                 entry.revert_modifications()
                 
     def add_entry(self, new_entry: HircEntry):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
 
-        self.soundbank.raise_modified()
+        self.soundbank.raise_modified() # type: ignore
         self.added_entries[new_entry.hierarchy_id] = new_entry
         self.entries[new_entry.hierarchy_id] = new_entry
         try:
@@ -957,18 +2053,15 @@ class WwiseHierarchy:
             self.type_lists[new_entry.hierarchy_type] = [new_entry]
             
     def remove_entry(self, entry: HircEntry):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
 
         if entry.hierarchy_id in self.entries:
             if entry.hierarchy_id in self.added_entries:
                 del self.added_entries[entry.hierarchy_id]
-                self.soundbank.lower_modified()
+                self.soundbank.lower_modified() # type: ignore
             else:
                 self.removed_entries[entry.hierarchy_id] = entry
-                self.soundbank.raise_modified()
+                self.soundbank.raise_modified() # type: ignore
             self.type_lists[entry.hierarchy_type].remove(entry)
             del self.entries[entry.hierarchy_id]
     
@@ -1078,10 +2171,9 @@ class PropBundle:
         self.cProps = cProps
         self.pIDs = pIDs
         self.pValues = pValues
-        if self.cProps != len(self.pIDs) != len(self.pValues):
-            raise AssertionError(
-                "# of props specified != # of props stored"
-            )
+        assert_equal("# of props != # of prop. IDs", self.cProps, len(self.pIDs))
+        assert_equal("# of props != # of prop. values", self.cProps, len(self.pValues))
+        assert_equal("# of prop. IDs != # of prop. values", len(self.pIDs), len(self.pValues))
 
     @staticmethod
     def from_memory_stream(s: MemoryStream):
@@ -1204,10 +2296,9 @@ class PropBundle:
         raise AssertionError("Assertion failed. Reached invalid code path.")
 
     def get_data(self):
-        if self.cProps != len(self.pIDs) != len(self.pValues):
-            raise AssertionError(
-                "# of props specified != # of props stored"
-            )
+        assert_equal("# of props != # of prop. IDs", self.cProps, len(self.pIDs))
+        assert_equal("# of props != # of prop. values", self.cProps, len(self.pValues))
+        assert_equal("# of prop. IDs != # of prop. values", len(self.pIDs), len(self.pValues))
         b = struct.pack("<B", self.cProps)
         for pID in self.pIDs:
             b += struct.pack("<B", pID)
@@ -1232,10 +2323,9 @@ class RangedPropBundle:
         self.cProps = cProps
         self.pIDs = pIDs
         self.rangedValues = rangedValues
-        if self.cProps != len(self.pIDs) != len(self.rangedValues):
-            raise AssertionError(
-                "# of range props specified != # of range props stored"
-            )
+        assert_equal("# of props != # of prop. IDs", self.cProps, len(self.pIDs))
+        assert_equal("# of props != # of prop. values", self.cProps, len(self.rangedValues))
+        assert_equal("# of prop. IDs != # of prop. values", len(self.pIDs), len(self.rangedValues))
     
     @staticmethod
     def from_memory_stream(s: MemoryStream):
@@ -1363,10 +2453,9 @@ class RangedPropBundle:
         raise AssertionError(f"Provided property ID {new_pid} cannot be added.")
 
     def get_data(self):
-        if self.cProps != len(self.pIDs) != len(self.rangedValues):
-            raise AssertionError(
-                "# of range props specified != # of range props stored"
-            )
+        assert_equal("# of props != # of prop. IDs", self.cProps, len(self.pIDs))
+        assert_equal("# of props != # of prop. values", self.cProps, len(self.rangedValues))
+        assert_equal("# of prop. IDs != # of prop. values", len(self.pIDs), len(self.rangedValues))
         b = struct.pack("<B", self.cProps)
         for pID in self.pIDs:
             b += struct.pack("<B", pID)
@@ -1446,7 +2535,7 @@ class AdvSetting:
 
 class StateProp:
     """
-    propertyId var (8 bits)
+    propertyId var (assume 8 bits, can be more)
     accumType U8x
     inDb bool U8x 
     """
@@ -1478,7 +2567,7 @@ class StateGroup:
     """
     ulStateGroupID tid
     eStateSyncType U8x
-    ulNumStates var (8 bits)
+    ulNumStates var (assume 8 bits, can be more)
     """
 
     def __init__(
@@ -1492,16 +2581,18 @@ class StateGroup:
         self.eStateSyncType = eStateSyncType
         self.ulNumStates = ulNumStates
         self.states = states
-        if self.ulNumStates != len(self.states):
-            raise AssertionError(
-                "# of states specified in state group != # of states stored in state group"
-            )
+        assert_equal(
+            "# of states != # of states in the array",
+            self.ulNumStates,
+            len(self.states)
+        )
 
     def get_data(self):
-        if self.ulNumStates != len(self.states):
-            raise AssertionError(
-                "# of states specified in state group != # of states stored in state group"
-            )
+        assert_equal(
+            "# of states != # of states in the array",
+            self.ulNumStates,
+            len(self.states)
+        )
         b = struct.pack(
             "<IBB", self.ulStateGroupID, self.eStateSyncType, self.ulNumStates
         )
@@ -1512,9 +2603,9 @@ class StateGroup:
 
 class StateParams:
     """
-    ulNumStatesProps var (8 bits)
+    ulNumStatesProps var (assume 8 bits, can be more)
     stateProps ulNumStateProps * sizeof(StateProp)
-    ulNumStateGroups var (8 bits)
+    ulNumStateGroups var (assume 8 bits, can be more)
     stateGroups
     """
 
@@ -1529,24 +2620,28 @@ class StateParams:
         self.stateProps = stateProps
         self.ulNumStateGroups = ulNumStateGroups
         self.stateGroups = stateGroups
-        if self.ulNumStateProps != len(self.stateProps):
-            raise AssertionError(
-                "# of state props sepcified != # of state props stored"
-            )
-        if self.ulNumStateGroups != len(self.stateGroups):
-            raise AssertionError(
-                "# of state groups specified != # of state groups stored"
-            )
+        assert_equal(
+            "# of state props != # of state props in the array",
+            self.ulNumStateProps,
+            len(self.stateProps)
+        )
+        assert_equal(
+            "# of state groups != # of state groups in the array",
+            self.ulNumStateGroups,
+            len(self.stateGroups)
+        )
 
     def get_data(self):
-        if self.ulNumStateProps != len(self.stateProps):
-            raise AssertionError(
-                "# of state props sepcified != # of state props stored"
-            )
-        if self.ulNumStateGroups != len(self.stateGroups):
-            raise AssertionError(
-                "# of state groups specified != # of state groups stored"
-            )
+        assert_equal(
+            "# of state props != # of state props in the array",
+            self.ulNumStateProps,
+            len(self.stateProps)
+        )
+        assert_equal(
+            "# of state groups != # of state groups in the array",
+            self.ulNumStateGroups,
+            len(self.stateGroups)
+        )
         b = struct.pack("<B", self.ulNumStateProps)
         for stateProp in self.stateProps:
             b += stateProp.to_bytes()
@@ -1577,7 +2672,7 @@ class RTPC:
     rtpcID tid
     rtpcType U8x
     rtpcAccum U8x
-    paramID var (8 bits)
+    paramID var (assume 8 bits, can be more)
     rtpcCurveID sid
     eScaling  U8x
     ulSize u16
@@ -1603,16 +2698,18 @@ class RTPC:
         self.eScaling = eScaling
         self.ulSize = ulSize
         self.rtpcGraphPoints = rtpcGraphPoints
-        if self.ulSize != len(self.rtpcGraphPoints):
-            raise AssertionError(
-                "# of RTPC graph points specified != # of RTPC graph points stored"
-            )
+        assert_equal(
+            "# RTPC graph pts != # of RTPC graph ptr in the aray",
+            self.ulSize,
+            len(self.rtpcGraphPoints)
+        )
 
     def get_data(self):
-        if self.ulSize != len(self.rtpcGraphPoints):
-            raise AssertionError(
-                "# of RTPC graph points specified != # of RTPC graph points stored"
-            )
+        assert_equal(
+            "# RTPC graph pts != # of RTPC graph ptr in the aray",
+            self.ulSize,
+            len(self.rtpcGraphPoints)
+        )
         b = struct.pack(
             "<IBBBIBH",
             self.rtpcID, self.rtpcType, self.rtpcAccum, self.paramID, 
@@ -1778,20 +2875,21 @@ class BaseParam:
         b = struct.pack("<BB", self.bIsOverrideParentFx, self.uNumFx)
 
         # [Fx]
-        if self.uNumFx != len(self.fxChunks):
-            raise AssertionError(
-                "# of FX specified != # of FX stored"
-            )
+        assert_equal(
+            "# of FX != # of FX in the array",
+            self.uNumFx, len(self.fxChunks)
+        )
         if self.uNumFx > 0:
             b += struct.pack("<B", self.bitsFxBypass)
             for fxChunk in self.fxChunks:
                 b += fxChunk.get_data()
 
         # [Metadata Fx]
-        if self.uNumFxMetadata != len(self.fxChunksMetadata):
-            raise AssertionError(
-                "# of metadata FX specified != # of metadata FX stored"
-            )
+        assert_equal(
+            "# of metadata FX != # of metadata FX in the array",
+            self.uNumFxMetadata, len(self.fxChunksMetadata)
+        )
+
         b += struct.pack("<BB", self.bIsOverrideParentMetadata, self.uNumFxMetadata)
         if self.uNumFxMetadata > 0:
             for fxChunkMetadata in self.fxChunksMetadata:
@@ -1818,10 +2916,10 @@ class BaseParam:
         b += self.stateParams.get_data()
 
         b += struct.pack("<H", self.ulNumRTPC)
-        if self.ulNumRTPC != len(self.rtpcs):
-            raise AssertionError(
-                "# of RTPC sepcified != # of RTPC stored"
-            )
+        assert_equal(
+            "# of RTPC != # of RTPC in the array",
+            self.ulNumRTPC, len(self.rtpcs)
+        )
         for rtpc in self.rtpcs:
             b += rtpc.get_data()
 
@@ -1839,18 +2937,19 @@ class ContainerChildren:
         self.children: list[int] = []
 
     def get_data(self):
-        if self.numChildren != len(self.children):
-            raise AssertionError(
-                "# of children specified != # of children stored"
-            )
+        assert_equal(
+            "# of children != # of children in the array",
+            self.numChildren,
+            len(self.children)
+        )
         b = struct.pack("<I", self.numChildren)
         for child in self.children:
             b += struct.pack("<I", child)
-        if len(b) != 4 + 4 * self.numChildren:
-            raise AssertionError(
-                "Container children packed data does not have the correct data"
-                " size."
-            )
+        assert_equal(
+            "Packed data does not have the correct data size",
+            4 + 4 * self.numChildren,
+            len(b),
+        )
         return b
 
 
@@ -1970,11 +3069,10 @@ class LayerContainer(HircEntry):
 
         tail = stream.tell()
 
-        if l.size != (tail - head):
-            raise AssertionError(
-                f"Layer container {l.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from read data"
-            )
+        assert_equal(
+            f"Header size and read data size mismatch for LayerContainer {l.hierarchy_id}",
+            l.size, tail - head
+        )
 
         return l
 
@@ -1989,21 +3087,17 @@ class LayerContainer(HircEntry):
     def get_data(self):
         data = self._pack() 
 
-        if self.size != len(data):
-            raise AssertionError(
-                f"Layer container {self.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from packed data"
-            )
+        assert_equal(
+            f"Header size and packed data size mismatch for LayerContainer {self.hierarchy_id}",
+            self.size, len(data) 
+        )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data
 
     def set_data(self, entry: Union['LayerContainer', None] = None, **data):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to Sound {self.hierarchy_id}", self.soundbank)
 
         if not self.modified:
             self.data_old = self.get_data()
@@ -2081,11 +3175,10 @@ class ActorMixer(HircEntry):
 
         tail = stream.tell()
 
-        if mixer.size != (tail - head):
-            raise AssertionError(
-                f"ActorMixer {mixer.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from packed data"
-            )
+        assert_equal(
+            f"Header size and read data size mismatch for ActorMixer {mixer.hierarchy_id}",
+            mixer.size, tail - head
+        )
 
         return mixer
 
@@ -2096,27 +3189,22 @@ class ActorMixer(HircEntry):
         if self.baseParam != None:
             return self.baseParam
         raise AssertionError(
-            f"Actor mixer {self.hierarchy_id} does not have a "
-             "base parameter."
+            f"ActorMixer {self.hierarchy_id} does not have a base parameter."
         )
 
     def get_data(self):
         data = self._pack()
-        if self.size != len(data):
-            raise AssertionError(
-                f"Actor mixer {self.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from packed data"
-            )
+        assert_equal(
+            f"Header size and packed data size mismatch for ActorMixer {self.hierarchy_id}",
+            self.size, len(data) 
+        )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
         return header + data
 
     def set_data(self, entry: Union['ActorMixer', None] = None, **data):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to Sound {self.hierarchy_id}", self.soundbank)
 
         if not self.modified:
             self.data_old = self.get_data()
@@ -2176,11 +3264,11 @@ class SwitchGroup:
         group.ulNumItems = stream.uint32_read()
         group.nodeList = [stream.uint32_read() for _ in range(group.ulNumItems)]
 
-        if group.ulNumItems != len(group.nodeList):
-            raise AssertionError(
-                "Switch group node items counter does not equal to # of items "
-                "in the node list."
-            )
+        assert_equal(
+            "# of SwitchGroup nodes mismatch # of SwitchGroup nodes in the list",
+            group.ulNumItems,
+            len(group.nodeList)
+        )
 
         return group
 
@@ -2188,10 +3276,11 @@ class SwitchGroup:
         b = struct.pack("<II", self.ulSwitchID, self.ulNumItems)
         for nodeId in self.nodeList:
             b += struct.pack("<I", nodeId)
-        if len(b) != 4 + 4 + 4 * self.ulNumItems:
-            raise AssertionError(
-                "Packed switch group data does not have the correct data size!"
-            )
+        assert_equal(
+            "Packed SwitchGroup data does not have the correct data size!",
+            len(b),
+            4 + 4 + 4 * self.ulNumItems
+        )
         return b
 
 
@@ -2232,10 +3321,11 @@ class SwitchParam:
             self.fadeOutTime,
             self.fadeInTime
         )
-        if len(b) != 4 + 1 + 1 + 4 + 4:
-            raise AssertionError(
-                "Packed switch param data does not have correct data size!"
-            )
+        assert_equal(
+            "Packed SwitchParam data does not have the correct data size!",
+            len(b),
+            4 + 1 + 1 + 4 + 4
+        )
         return b
 
 
@@ -2317,39 +3407,33 @@ class SwitchContainer(HircEntry):
 
         tail = stream.tell()
 
-        if s.size != (tail - head):
-            raise AssertionError(
-                f"Switch container {s.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from read data"
-            )
-        
+        assert_equal(
+            f"Header size and read data size mismatch for SwitchContainer {s.hierarchy_id}",
+            s.size, tail - head
+        )
+
         return s
 
     def get_base_param(self):
         if self.baseParam != None:
             return self.baseParam
         raise AssertionError(
-            f"Switch container {self.hierarchy_id} does not have a "
-             "base parameter."
+            f"SwitchContainer {self.hierarchy_id} does not have a base parameter."
         )
 
     def get_data(self):
         data = self._pack()
 
-        if self.size != len(data):
-            raise AssertionError(
-                f"Switch container {self.hierarchy_id} assertion break: "
-                f"data size specified in header != data size from packed data"
-            )
+        assert_equal(
+            f"Header size and packed data size mismatch for SwitchContainer {self.hierarchy_id}",
+            self.size, len(data) 
+        )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
         return header + data
 
     def set_data(self, entry: Union['SwitchContainer', None] = None, **data):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
+        assert_not_none(f"No WwiseBank is attached to SwitchContainer {self.hierarchy_id}", self.soundbank)
 
         if not self.modified:
             self.data_old = self.get_data()
@@ -2401,22 +3485,23 @@ class SwitchContainer(HircEntry):
 
         data += struct.pack("<I", self.ulNumSwitchGroups)
 
-        if self.ulNumSwitchGroups != len(self.switchGroups):
-            raise AssertionError(
-                "Unique switch group counter does not match up # of switch group"
-                " in the list"
-            )
+        assert_equal(
+            "# of unique SwitchGroup mismatch # of SwitchGroup in the list",
+            self.ulNumSwitchGroups,
+            len(self.switchGroups)
+        )
 
         for switchGroup in self.switchGroups:
             data += switchGroup.get_data()
 
         data += struct.pack("<I", self.ulNumSwitchParams)
 
-        if self.ulNumSwitchParams != len(self.switchParms):
-            raise AssertionError(
-                "Unique switch parameter counter does not match up # of swith "
-                "parameter in the list."
-            )
+        assert_equal(
+            "# of SwitchParameter counter mismatch # of SwitchParameter in the "
+            "list",
+            self.ulNumSwitchParams,
+            len(self.switchParms)
+        )
 
         for switchParam in self.switchParms:
             data += switchParam.get_data()
@@ -2438,7 +3523,7 @@ def parse_positioning_params(stream: MemoryStream):
         has_3d = (uBitsPositioning >> 1) & 1
 
     if has_positioning and has_3d:
-        uBits3d = stream.uint8_read() # U8x
+        uBits3d = stream.uint8_read() # U8x type: ignore
         eType = 0
 
         e3DPositionType = (uBitsPositioning >> 5) & 3
