@@ -41,8 +41,8 @@ from graph import *
 
 from log import logger
 
-WINDOW_WIDTH = 1440
-WINDOW_HEIGHT = 900
+WINDOW_WIDTH = 1480
+WINDOW_HEIGHT = 848
 VERSION = "2.0.0"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
@@ -218,65 +218,103 @@ class StringEntryWindow:
             
 class MusicTrackWindow:
     
-    def __init__(self, parent, update_modified):
+    def __init__(self, parent, update_modified, play):
         self.frame = Frame(parent)
-        #self.notebook = ttk.Notebook(parent)
+        self.frame.grid_columnconfigure(0, weight=1)
+        self.frame.grid_columnconfigure(1, weight=1)
+        self.frame.grid_rowconfigure(10, weight=1)
+        self.button_container = Frame(self.frame)
+        self.listbox_container = Frame(self.frame)
+        self.listbox_scrollbar = ttk.Scrollbar(self.listbox_container, orient=VERTICAL)
+        self.graph_notebook = ttk.Notebook(self.frame)
+        self.graphs = []
         self.selected_track = 0
         self.update_modified = update_modified
+        self.play = play
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), width=50, anchor="center")
-        self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
+        self.revert_button = ttk.Button(self.button_container, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
+        self.play_button = ttk.Button(self.button_container, text="\u23f5", image=self.fake_image, compound="c", width=2, command=self.play_audio)
         self.play_at_text_var = tkinter.StringVar(self.frame)
         self.duration_text_var = tkinter.StringVar(self.frame)
         self.start_offset_text_var = tkinter.StringVar(self.frame)
         self.end_offset_text_var = tkinter.StringVar(self.frame)
-        self.source_selection_listbox = tkinter.Listbox(self.frame)
-        self.source_selection_listbox.bind("<Double-Button-1>", self.set_track_info)
-        self.source_selection_listbox.config(width=200)
+        self.source_selection_listbox = tkinter.Listbox(self.listbox_container, exportselection=False)
+        self.source_selection_listbox.bind("<<ListboxSelect>>", self.set_track_info)
+        self.source_selection_listbox.config(width=50)
         self.source_selection_listbox.config(height=4)
+        self.source_selection_listbox.configure(yscrollcommand=self.listbox_scrollbar.set)
+        self.listbox_scrollbar['command'] = self.source_selection_listbox.yview
         
         self.play_at_label = ttk.Label(self.frame,
                                    text="Play At (ms)",
                                    font=('Segoe UI', 12),
                                    anchor="center")
-        self.play_at_text = ttk.Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=54)
+        self.play_at_text = ttk.Entry(self.frame, textvariable=self.play_at_text_var, font=('Segoe UI', 12), width=25)
         
         
         self.duration_label = ttk.Label(self.frame,
                                     text="Duration (ms)",
                                     font=('Segoe UI', 12),
                                     anchor="center")
-        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=54)
+        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=25)
         
         
         self.start_offset_label = ttk.Label(self.frame,
                                         text="Start Trim (ms)",
                                         font=('Segoe UI', 12),
                                         anchor="center")
-        self.start_offset_text = ttk.Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=54)
+        self.start_offset_text = ttk.Entry(self.frame, textvariable=self.start_offset_text_var, font=('Segoe UI', 12), width=25)
         
         
         self.end_offset_label = ttk.Label(self.frame,
                                       text="End Trim (ms)",
                                       font=('Segoe UI', 12),
                                       anchor="center")
-        self.end_offset_text = ttk.Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=54)
+        self.end_offset_text = ttk.Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=25)
 
-        self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
+        self.apply_button = ttk.Button(self.button_container, text="Apply", command=self.apply_changes)
         
-        self.title_label.pack(pady=5)
+        self.title_label.grid(row=0, column=0, pady=2, columnspan=2, sticky="news")
         
-        self.graph = Graph(self.frame)
+        self.button_container.grid(row=9, column=0, sticky="w", pady=2)
+        self.revert_button.pack(side="left")
+        self.apply_button.pack(side="left")
+        
+        #self.title_label.pack(pady=5)
+        
+        #self.graph_notebook.pack(side="bottom")
+        self.graph_notebook.grid(row=10, column=0, sticky="news", pady=2, columnspan=2)
+        self.listbox_container.grid(row=1, column=0, columnspan=2, pady=2, sticky="news")
+        
+        #self.graph = Graph(self.frame)
+        
+    def play_audio(self):
+        selection = self.source_selection_listbox.get(self.source_selection_listbox.curselection()[0])
+        id = selection.split(" ")[1]
+        selection = int(id)
+        for t in self.track.track_info:
+            if t.source_id == selection or murmur64_hash(f"content/audio/{t.source_id}".encode("utf-8")) == selection:
+                self.play(selection)
+                break
         
     def set_track_info(self, event=None, selection=0):
         if not selection:
-            selection = self.source_selection_listbox.get(self.source_selection_listbox.curselection()[0])
+            try:
+                selection = self.source_selection_listbox.get(self.source_selection_listbox.curselection()[0])
+            except:
+                return
+        if selection.split(" ")[0] == "Audio":
+            self.play_button.pack(side="left")
+        else:
+            self.play_button.pack_forget()
         id = selection.split(" ")[1]
         selection = int(id)
         for t in self.track.track_info:
             if t.source_id == selection or murmur64_hash(f"content/audio/{t.source_id}".encode("utf-8")) == selection or t.event_id == selection:
                 track_info_struct = t
                 break
+                
                 
         self.selected_track = track_info_struct
                 
@@ -289,20 +327,17 @@ class MusicTrackWindow:
         self.play_at_text.delete(0, 'end')
         self.play_at_text.insert(END, str(track_info_struct.play_at))
         
-        self.revert_button.pack(side="bottom", anchor="w")
-        self.apply_button.pack(side="bottom", anchor="w")
+        self.play_at_label.grid(row=5, column=0, sticky="news")
+        self.play_at_text.grid(row=6, column=0, sticky="news")
+        self.duration_label.grid(row=5, column=1, sticky="news")
+        self.duration_text.grid(row=6, column=1, sticky="news")
+        self.start_offset_label.grid(row=7, column=0, sticky="news")
+        self.start_offset_text.grid(row=8, column=0, sticky="news")
+        self.end_offset_label.grid(row=7, column=1, sticky="news")
+        self.end_offset_text.grid(row=8, column=1, sticky="news")
         
-        self.play_at_label.pack(side="top")
-        self.play_at_text.pack(side="top")
-        self.duration_label.pack(side="top")
-        self.duration_text.pack(side="top")
-        self.start_offset_label.pack(side="top")
-        self.start_offset_text.pack(side="top")
-        self.end_offset_label.pack(side="top")
-        self.end_offset_text.pack(side="top")
-        
-        if len(self.track.clip_automations) == 1:
-            self.graph.pack(side="top")
+        #if len(self.track.clip_automations) == 1:
+        #    self.graph.pack(side="top")
         
         
         
@@ -320,20 +355,50 @@ class MusicTrackWindow:
         
         
         if len(track.track_info) > 0:
-            self.source_selection_listbox.pack()
+            self.source_selection_listbox.pack(side=tkinter.LEFT, fill=tkinter.BOTH, expand=True)
             self.set_track_info(selection=self.source_selection_listbox.get(0))
             self.source_selection_listbox.select_set(0)
-            
-        if len(track.clip_automations) == 1:
-            x = [point[0] for point in track.clip_automations[0].graph_points]
-            y = [point[1] for point in track.clip_automations[0].graph_points]
-            if track.clip_automations[0].auto_type == 0: #VOLUME
-                self.graph.set_xlabel("time (s)")
-                self.graph.set_ylabel("dB")
-                self.graph.set_title("Track Volume")
-            self.graph.set_data(x, y)
+        if len(track.track_info) > 4:
+            self.listbox_scrollbar.pack(side="right", fill='y')
         else:
-            self.graph.pack_forget()
+            self.listbox_scrollbar.pack_forget()
+            
+        self.graphs.clear()
+        
+        for child in self.graph_notebook.winfo_children():
+            child.destroy()
+            
+        
+        info = [x for x in self.track.track_info if x.source_id != 0]
+        
+        for i in range(len(track.clip_automations)):
+            x = [point[0] for point in track.clip_automations[i].graph_points]
+            y = [point[1] for point in track.clip_automations[i].graph_points]
+            g = Graph(self.graph_notebook)
+            g.set_data(x, y)
+            source_id = info[self.track.clip_automations[i].clip_index].source_id
+            source = next(x for x in self.track.sources if x.source_id == source_id)
+            if source.stream_type == BANK:
+                pass
+            else:
+                source_id = murmur64_hash(f"content/audio/{source_id}".encode("utf-8"))
+            if track.clip_automations[i].auto_type == 0: #VOLUME
+                g.set_xlabel("time (s)")
+                g.set_ylabel("dB")
+                g.set_title(f"Volume for Audio {source_id}")
+            elif track.clip_automations[i].auto_type == 3: #FADE-IN
+                g.set_xlabel("time (s)")
+                g.set_ylabel("dB")
+                g.set_title(f"Fade-In for Audio {source_id}")
+            elif track.clip_automations[i].auto_type == 4: #FADE-OUT
+                g.set_xlabel("time (s)")
+                g.set_ylabel("dB")
+                g.set_title(f"Fade-Out for Audio {source_id}")
+            else:
+                g.set_xlabel("")
+                g.set_ylabel("")
+                g.set_title(f"Unknown Graph")
+            self.graph_notebook.add(g, text=f"RTPC {i+1}")
             
     def revert(self):
         self.track.revert_modifications()
@@ -349,10 +414,12 @@ class MusicTrackWindow:
                 t.source_duration = float(self.duration_text_var.get())
                 t.play_at = float(self.play_at_text_var.get())
                 break
-        x, y = self.graph.get_data()
         clip_automations = copy.deepcopy(self.track.clip_automations)
-        clip_automations[0].num_graph_points = len(x)
-        clip_automations[0].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
+        for index, tab in enumerate(self.graph_notebook.tabs()):
+            graph = self.graph_notebook.nametowidget(tab)
+            x, y = self.graph.get_data()
+            clip_automations[index].num_graph_points = len(x)
+            clip_automations[index].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
         self.track.set_data(track_info=tracks, clip_automations=clip_automations)
         self.update_modified(diff=[self.track])
         
@@ -914,7 +981,7 @@ class MainWindow:
         self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
                                                      self.check_modified)
                                                      
-        self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified)
+        self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified, self.play_audio)
                                                      
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
