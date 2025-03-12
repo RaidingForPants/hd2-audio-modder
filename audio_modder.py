@@ -158,6 +158,117 @@ class ProgressWindow:
     def destroy(self):
         self.root.destroy()
         
+class VerticalScrolledFrame(ttk.Frame):
+    """A pure Tkinter scrollable frame that actually works!
+    * Use the 'interior' attribute to place widgets inside the scrollable frame.
+    * Construct and pack/place/grid normally.
+    * This frame only allows vertical scrolling.
+    """
+    def __init__(self, parent, *args, **kw):
+        ttk.Frame.__init__(self, parent, *args, **kw)
+
+        # Create a canvas object and a vertical scrollbar for scrolling it.
+        vscrollbar = ttk.Scrollbar(self, orient=VERTICAL)
+        vscrollbar.pack(fill=Y, side=RIGHT, expand=FALSE)
+        canvas = Canvas(self, bd=0, highlightthickness=0,
+                           yscrollcommand=vscrollbar.set)
+        canvas.pack(side=LEFT, fill=BOTH, expand=TRUE)
+        vscrollbar.config(command=canvas.yview)
+
+        # Reset the view
+        canvas.xview_moveto(0)
+        canvas.yview_moveto(0)
+
+        # Create a frame inside the canvas which will be scrolled with it.
+        self.interior = interior = ttk.Frame(canvas)
+        interior_id = canvas.create_window(0, 0, window=interior,
+                                           anchor=NW)
+
+        # Track changes to the canvas and frame width and sync them,
+        # also updating the scrollbar.
+        def _configure_interior(event):
+            # Update the scrollbars to match the size of the inner frame.
+            size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
+            canvas.config(scrollregion="0 0 %s %s" % size)
+            if interior.winfo_reqwidth() != canvas.winfo_width():
+                # Update the canvas's width to fit the inner frame.
+                canvas.config(width=interior.winfo_reqwidth())
+        interior.bind('<Configure>', _configure_interior)
+
+        def _configure_canvas(event):
+            if interior.winfo_reqwidth() != canvas.winfo_width():
+                # Update the inner frame's width to fill the canvas.
+                canvas.itemconfigure(interior_id, width=canvas.winfo_width())
+        canvas.bind('<Configure>', _configure_canvas)
+        
+class PendingFile(Frame):
+    
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.filepath = ""
+        self.button = ttk.Button(self, text="X", command=self.button_press)
+        self.label = ttk.Label(self, text=self.filepath, font=('Segoe UI', 12),
+                                      justify="center")
+        self.button.pack(side="right", anchor="e")
+        self.label.pack(side='left', expand=True, fill='x', anchor="w")
+        
+    def set_filepath(self, new_path):
+        self.filepath = new_path
+        self.label.config(text=new_path)
+    
+    def get_filepath(self):
+        return self.filepath
+    
+    def button_press(self):
+        self.destroy()
+
+class FileUploadWindow:
+    
+    def __init__(self, callback=None):
+        self.root = TkinterDnD.Tk()
+        self.root.geometry("500x500")
+        self.root.attributes('-topmost', True)
+        if os.path.exists("icon.ico"):
+            self.root.iconbitmap("icon.ico")
+        self.root.title("Helldivers 2 Audio Modder")
+        self.scrollframe = VerticalScrolledFrame(self.root)
+        self.drop_frame = Frame(self.root, width=500, height=500, borderwidth=3, highlightbackground="gray", highlightthickness=2)
+        self.drop_frame.drop_target_register(DND_FILES)
+        self.label = Label(self.drop_frame, text="Drop Files Here or ", height=10, font=('Segoe UI', 12), justify="right")
+        self.label.pack(side="left")
+        self.drop_frame.pack(side="top", padx=4, pady=4, expand=True, fill="both")
+        self.drop_frame.dnd_bind("<<Drop>>", self.drop_add_files)
+        self.upload_button = ttk.Button(self.drop_frame, text="Add file", command=self.add_files)
+        self.accept_button = ttk.Button(self.root, text="Accept", command=self.return_files)
+        self.accept_button.pack(side="bottom", anchor="w")
+        self.upload_button.pack(side="left", anchor="w")
+        self.scrollframe.pack(side="top", expand=True, fill='both', anchor="w")
+        self.callback = callback
+        
+    def drop_add_files(self, event):
+        if event.data:
+            dropped_files = event.widget.tk.splitlist(event.data)
+            dropped_files = [file for file in dropped_files if os.path.splitext(file)[1].lower() == ".zip" or ".patch_" in os.path.splitext(file)[1]]
+            for file in dropped_files:
+                pending_file = PendingFile(self.scrollframe.interior)
+                pending_file.set_filepath(file)
+                pending_file.pack(side="top", expand=True, fill="x", pady=2)
+        
+    def add_files(self):
+        filenames = filedialog.askopenfilenames(title="Choose mod files to combine", filetypes=[("Zip Archive", "*.zip"), ("Patch File", "*.patch*")])
+        for name in filenames:
+            pending_file = PendingFile(self.scrollframe.interior)
+            pending_file.set_filepath(name)
+            pending_file.pack(side="top", expand=True, fill="x")
+        
+    def return_files(self):
+        if self.callback is not None:
+            files = [file.get_filepath() for file in self.scrollframe.interior.winfo_children() if isinstance(file, PendingFile)]
+            self.callback(files)
+        self.root.destroy()
+        
+    
+
 class PopupWindow:
     def __init__(self, message, title="Missing Data!"):
         self.message = message
@@ -808,6 +919,8 @@ class MainWindow:
         self.drag_source_widget = None
         self.workspace_selection = []
         
+        self.file_upload_window = None
+        
         try:
             self.root.tk.call("source", "azure.tcl")
         except Exception as e:
@@ -964,6 +1077,8 @@ class MainWindow:
         
         self.file_menu.add_command(label="Combine Music Mods", command=self.combine_music_mods)
         
+        self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
+        
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         
@@ -1016,6 +1131,29 @@ class MainWindow:
 
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
+        
+    def combine_mods(self):
+        if self.file_upload_window is None:
+            self.sound_handler.kill_sound()
+            self.file_upload_window = FileUploadWindow(callback=self.combine_mods_callback)
+            try:
+                self.file_upload_window.root.tk.call("source", "azure.tcl")
+            except Exception as e:
+                logger.critical("Error occurred when loading themes:")
+                logger.critical(e)
+                logger.critical("Ensure azure.tcl and the themes folder are in the same folder as the executable")
+            theme = self.selected_theme.get()
+            try:
+                if theme == "dark_mode":
+                    self.file_upload_window.root.tk.call("set_theme", "dark")
+                elif theme == "light_mode":
+                    self.file_upload_window.root.tk.call("set_theme", "light")
+            except:
+                pass
+        
+    def combine_mods_callback(self, files):
+        print(files)
+        self.file_upload_window = None
         
     def combine_music_mods(self):
         self.sound_handler.kill_sound()
@@ -1118,10 +1256,15 @@ class MainWindow:
         try:
             if theme == "dark_mode":
                 self.root.tk.call("set_theme", "dark")
+                if self.file_upload_window is not None:
+                    self.file_upload_window.root.tk.call("set_theme", "light")
                 self.window.configure(background="white")
             elif theme == "light_mode":
                 self.root.tk.call("set_theme", "light")
+                if self.file_upload_window is not None:
+                    self.file_upload_window.root.tk.call("set_theme", "light")
                 self.window.configure(background="black")
+            
         except Exception as e:
             logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
         self.app_state.theme = theme
