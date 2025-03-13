@@ -23,6 +23,7 @@ def test_all_archive_multi_process(func: Callable[[str], None], func_name: str):
                 continue
 
             archive, ext = os.path.splitext(file.path)
+            
             if ext != ".stream":
                 continue
 
@@ -45,7 +46,8 @@ def test_all_archive_multi_process(func: Callable[[str], None], func_name: str):
             for failed_test in failed_tests:
                 logger.critical(f"{failed_test[0]}: {failed_test[1]}")
 
-def test_all_archive_sync(func: Callable[[str], None]):
+
+def test_all_archive_sync(func: Callable[[str], None], exclude: list[str] = []):
     os.environ["TEST_ACTOR_MIXER"] = "0"
     os.environ["TEST_LAYER"] = "0"
     os.environ["TEST_RAND"] = "0"
@@ -58,6 +60,11 @@ def test_all_archive_sync(func: Callable[[str], None]):
             continue
 
         archive, ext = os.path.splitext(file.path)
+
+        if os.path.basename(archive) in exclude:
+            logger.critical(f"Excluding archive {archive}")
+            continue
+
         if ext != ".stream":
             continue
 
