@@ -13,6 +13,32 @@ from log import logger
 from util import *
 
 
+HircType = {
+    0x01: "State",
+    0x02: "Sound",
+    0x03: "Action",
+    0x04: "Event",
+    0x05: "Random/Sequence Container",
+    0x06: "Switch Container",
+    0x07: "Actor-Mixer",
+    0x08: "Audio Bus",
+    0x09: "Layer Container",
+    0x0a: "Music Segment",
+    0x0b: "Music Track",
+    0x0c: "Music Switch",
+    0x0d: "Music Random Sequence",
+    0x0e: "Attenuation",
+    0x0f: "Dialogue Event",
+    0x10: "Fx Share Set",
+    0x11: "Fx Custom",
+    0x12: "Auxiliary Bus",
+    0x13: "LFO",
+    0x14: "Envelope",
+    0x15: "Audio Device",
+    0x16: "Time Mod",
+}
+
+
 class HircEntry:
     """
     Must Have:
@@ -21,22 +47,23 @@ class HircEntry:
     hierarchy_id - tid
     """
     
-    import_values = ["misc", "parent_id"]
+    import_values = ["misc"]
     
     def __init__(self):
+        # Trasnlation of hierarchy binary data
         self.size: int = 0
         self.hierarchy_type: int = 0
         self.hierarchy_id: int = 0
-        self.sources: list[BankSourceStruct] = []
-        self.track_info = []
-        self.soundbank: Any = None # WwiseBank
+        self.baseParam: BaseParam | None = None
         self.misc: bytearray = bytearray()
+        self.unused_sections = []
+
+        # Bookkeeping data - external from hierarchy binary data 
+        self.soundbank: Any = None # WwiseBank
         self.modified_children: int = 0
         self.modified: bool = False
-        self.parent_id: int = 0
         self.parent: HircEntry | None = None
         self.data_old: bytes | bytearray = b""
-        self.unused_sections = []
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -53,11 +80,28 @@ class HircEntry:
         stream.write(data)
         stream.seek(0)
         return cls.from_memory_stream(stream)
-        
+
+    def get_base_param(self):
+        """
+        This interface is used for getting base parameter with exception raising
+        """
+        raise NotImplementedError("This interface is not implemented")
+
+    def get_data(self):
+        """
+        Include header
+        """
+        return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
+
+    def get_parent_id(self):
+        if self.baseParam != None:
+            return self.baseParam.directParentID
+        return None
+
     def has_modified_children(self):
         return self.modified_children != 0
 
-    def import_entry(self, new_entry):
+    def import_entry(self, new_entry: 'HircEntry'):
         if (
             (self.modified and new_entry.get_data() != self.data_old)
             or
@@ -84,20 +128,12 @@ class HircEntry:
         self.size = len(self.get_data())-5
 
         hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
+        parent_id = self.get_parent_id()
+        if parent_id != None and hierarchy.has_entry(parent_id):
+            self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
-    def get_base_param(self):
-        raise NotImplementedError("This interface does not implemented")
-
-    def get_data(self):
-        """
-        Include header
-        """
-        return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
-        
     def revert_modifications(self):
         assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
 
@@ -283,8 +319,9 @@ class Action(HircEntry):
         self.update_size()
 
         hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
+        parent_id = self.get_parent_id()
+        if parent_id != None and hierarchy.has_entry(parent_id):
+            self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
@@ -329,7 +366,7 @@ class ActionStop(Action):
         "ulExceptionListSize",
         "actionExceptionList"
     ]
-        
+       
     def __init__(self):
         super().__init__()
         self.fadeCurveBitVector = 0
@@ -709,6 +746,17 @@ class ActionSetSimpleValue(Action):
     actionExceptionList ulExceptionListSize * size(ActionException)
     """
 
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "ulExceptionListSize",
+        "actionExceptionList"
+    ]
+
     def __init__(self):
         super().__init__()
         self.fadeCurveBitVector: int = 0
@@ -816,9 +864,23 @@ class ActionSetProp(Action):
     """
     fadeCurveBitVector U8x
     eValueMeaning U8x
+    randomModifier sizeof(RandomModifier)
     ulExceptionListSize var (assume 8 bits, can be more)
     actionExceptionList ulExceptionListSize * size(ActionException)
     """
+
+    import_values = [
+        "ulActionType",
+        "idExt",
+        "idExt_4",
+        "propBundle",
+        "rangePropBundle",
+        "fadeCurveBitVector",
+        "eValueMeaning",
+        "randomModifier",
+        "ulExceptionListSize",
+        "actionExceptionList"
+    ]
 
     def __init__(self):
         super().__init__()
@@ -869,7 +931,7 @@ class ActionSetProp(Action):
             f"Unique exception list size does not match up # of action exception "
             f"in the list for ActionSetProp {self.hierarchy_id}",
             self.ulExceptionListSize,
-            self.actionExceptionList
+            len(self.actionExceptionList)
         )
 
         data = self._pack()
@@ -1301,48 +1363,38 @@ class ActionResetPlaylist(Action):
         return data
 
 
-ActionType: dict[int, object] = {
-    0x0100: ActionStop,
-    0x0200: ActionPause,
-    0x0300: ActionResume,
-    0x0400: ActionPlay,
-    0x0500: ActionPlayAndContinue, #early (removed in later versions)
-    0x0600: ActionSetSimpleValue,
-    0x0700: ActionSetSimpleValue,
-    0x0800: ActionSetProp, #AkPropID_Pitch
-    0x0900: ActionSetProp, #AkPropID_Pitch
-    0x0A00: ActionSetProp, #(none) / AkPropID_Volume (~v145) / AkPropID_FirstRtpc (v150) 
-    0x0B00: ActionSetProp, #(none) / AkPropID_Volume (~v145) / AkPropID_FirstRtpc (v150)
-    0x0C00: ActionSetProp, #AkPropID_BusVolume
-    0x0D00: ActionSetProp, #AkPropID_BusVolume
-    0x0E00: ActionSetProp, #AkPropID_LPF
-    0x0F00: ActionSetProp, #AkPropID_LPF
-    0x1000: ActionUseState,
-    0x1100: ActionUseState,
-    0x1200: ActionSetState,
-    # 0x1500: ActionEvent, #not in v150
-    # 0x1600: ActionEvent, #not in v150
-    # 0x1700: ActionEvent, #not in v150
-    0x1900: ActionSetSwitch,
-    # 0x1A00: ActionBypassFX,
-    # 0x1B00: ActionBypassFX,
-    # 0x1C00: ActionBreak,
-    # 0x1D00: ActionTrigger,
-    0x1E00: ActionSeek,
-    # 0x1F00: ActionRelease,
-    0x2000: ActionSetProp, #AkPropID_HPF
-    # 0x2100: ActionPlayEvent,
-    0x2200: ActionResetPlaylist,
-    # 0x2300: ActionPlayEventUnknown, #normally not defined
-    0x3000: ActionSetProp, #AkPropID_HPF
-    # 0x3100: ActionSetFX,
-    # 0x3200: ActionSetFX,
-    # 0x3300: ActionBypassFX,
-    # 0x3400: ActionBypassFX,
-    # 0x3500: ActionBypassFX,
-    # 0x3600: ActionBypassFX,
-    # 0x3700: ActionBypassFX,
-}
+def action_factory(t: int, s: MemoryStream) -> Action:
+    match t:
+        case 0x0100:
+            return ActionStop.from_memory_stream(s)
+        case 0x0200:
+            return ActionPause.from_memory_stream(s)
+        case 0x0300:
+            return ActionResume.from_memory_stream(s)
+        case 0x0400:
+            return ActionPlay.from_memory_stream(s)
+        case 0x0500:
+            return ActionPlayAndContinue.from_memory_stream(s)
+        case 0x0600 | 0x0700:
+            return ActionSetSimpleValue.from_memory_stream(s)
+        case t if 0x0800 <= t and t <= 0x0F00:
+            return ActionSetProp.from_memory_stream(s)
+        case 0x1000 | 0x1100:
+            return ActionUseState.from_memory_stream(s)
+        case 0x1200:
+            return ActionSetState.from_memory_stream(s)
+        case 0x1900:
+            return ActionSetSwitch.from_memory_stream(s)
+        case 0x1E00:
+            return ActionSeek.from_memory_stream(s)
+        case 0x2000:
+            return ActionSetProp.from_memory_stream(s)
+        case 0x2200:
+            return ActionResetPlaylist.from_memory_stream(s)
+        case 0x3000:
+            return ActionSetProp.from_memory_stream(s)
+        case _:
+            return Action.from_memory_stream(s)
 
 
 class Event(HircEntry):
@@ -1352,7 +1404,6 @@ class Event(HircEntry):
     """
 
     import_values = [
-        "parent_id",
         "ulActionListSize",
         "ulActionIDs"
     ]
@@ -1426,8 +1477,9 @@ class Event(HircEntry):
         self.update_size()
 
         hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
+        parent_id = self.get_parent_id()
+        if parent_id != None and hierarchy.has_entry(parent_id):
+            self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
@@ -1479,7 +1531,6 @@ class RandomSequenceContainer(HircEntry):
         playListItem ulPlayListItem * sizeof(PlayListItem)
     """
     import_values = [
-        "parent_id",
         "baseParam",
         "children",
         "containerChildren",
@@ -1489,7 +1540,6 @@ class RandomSequenceContainer(HircEntry):
     ]
     def __init__(self):
         super().__init__()
-        self.baseParam: BaseParam | None = None
         self.children: list[int] = []
         self.containerChildren: ContainerChildren = ContainerChildren()
         self.playListSetting = PlayListSetting()
@@ -1584,8 +1634,9 @@ class RandomSequenceContainer(HircEntry):
         self.update_size()
 
         hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
+        parent_id = self.get_parent_id()
+        if parent_id != None and hierarchy.has_entry(parent_id):
+            self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
@@ -1812,6 +1863,8 @@ class MusicTrack(HircEntry):
     def __init__(self):
         super().__init__()
         self.bit_flags = 0
+        self.sources: list[BankSourceStruct] = []
+        self.track_info: list[TrackInfoStruct] = []
         self.unused_sections = []
         
     @classmethod
@@ -1863,7 +1916,7 @@ class Sound(HircEntry):
     
     def __init__(self):
         super().__init__()
-
+        self.sources: list[BankSourceStruct] = []
         self.baseParam: BaseParam | None = None 
 
     @classmethod
@@ -1929,8 +1982,9 @@ class Sound(HircEntry):
         self.update_size()
 
         hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
+        parent_id = self.get_parent_id()
+        if parent_id != None and hierarchy.has_entry(parent_id):
+            self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
@@ -1955,39 +2009,49 @@ class HircEntryFactory:
     def from_memory_stream(cls, stream: MemoryStream):
         hierarchy_type = stream.uint8_read()
         stream.seek(stream.tell()-1)
-        if hierarchy_type == 0x02: # sound
-            return Sound.from_memory_stream(stream)
-        elif hierarchy_type == 0x03:
-            stream.advance(1 + 4 + 4)
-            action_type: int = stream.uint16_read()
-            stream.seek(stream.tell() - 2 - 1 - 4 - 4)
-            if action_type in ActionType:
-                return ActionType[action_type].from_memory_stream(stream) # type: ignore
-            else:
-                return Action.from_memory_stream(stream)
-        elif hierarchy_type == 0x04:
-            return Event.from_memory_stream(stream)
-        elif hierarchy_type == 0x05:
-            return RandomSequenceContainer.from_memory_stream(stream)
-        elif hierarchy_type == 0x06:
-            return SwitchContainer.from_memory_stream(stream)
-        elif hierarchy_type == 0x07:
-            return ActorMixer.from_memory_stream(stream)
-        elif hierarchy_type == 0x09:
-            return LayerContainer.from_memory_stream(stream)
-        elif hierarchy_type == 0x0A: # music segment
-            return MusicSegment.from_memory_stream(stream)
-        elif hierarchy_type == 0X0B: # music track
-            return MusicTrack.from_memory_stream(stream)
-        else:
-            return HircEntry.from_memory_stream(stream)
-            
+        match hierarchy_type:
+            case 0x02: # sound
+                entry = Sound.from_memory_stream(stream)
+            case 0x03:
+                stream.advance(1 + 4 + 4)
+                action_type: int = stream.uint16_read()
+                stream.seek(stream.tell() - 2 - 1 - 4 - 4)
+                entry = action_factory(action_type, stream)
+            case 0x04:
+                entry = Event.from_memory_stream(stream)
+            case 0x05:
+                entry = RandomSequenceContainer.from_memory_stream(stream)
+            case 0x06:
+                entry = SwitchContainer.from_memory_stream(stream)
+            case 0x07:
+                entry = ActorMixer.from_memory_stream(stream)
+            case 0x09:
+                entry = LayerContainer.from_memory_stream(stream)
+            case 0x0A: # music segment
+                entry = MusicSegment.from_memory_stream(stream)
+            case 0X0B: # music track
+                entry = MusicTrack.from_memory_stream(stream)
+            case _:
+                entry = HircEntry.from_memory_stream(stream)
+        return entry
 
+            
 class WwiseHierarchy:
     
     def __init__(self, soundbank = None):
         self.entries: dict[int, HircEntry] = {}
-        self.type_lists: dict[int, list[HircEntry]] = {}
+
+        self.actions: list[Action] = []
+        self.actor_mixers: list[ActorMixer] = []
+        self.events: list[Event] = []
+        self.layer_container: list[LayerContainer] = []
+        self.music_segments: list[MusicSegment] = []
+        self.music_tracks: list[MusicTrack] = []
+        self.random_sequence_containers: list[RandomSequenceContainer] = []
+        self.sounds: list[Sound] = []
+        self.switch_containers: list[SwitchContainer] = []
+        self.uncategorized: list[HircEntry] = []
+
         self.soundbank = soundbank # WwiseBank
         self.added_entries = {}
         self.removed_entries = {}
@@ -2002,28 +2066,23 @@ class WwiseHierarchy:
             entry = HircEntryFactory.from_memory_stream(reader)
             entry.soundbank = self.soundbank
             self.entries[entry.get_id()] = entry
-            try:
-                self.type_lists[entry.hierarchy_type].append(entry)
-            except:
-                self.type_lists[entry.hierarchy_type] = [entry]
+
+            self._categorized_entry(entry)
+
         for entry in self.get_entries():
-            try:
-                entry.parent = self.get_entry(entry.parent_id)
-            except:
-                pass
+            parent_id = entry.get_parent_id()
+            if parent_id != None and parent_id in self.entries:
+                entry.parent = self.entries[parent_id]
                 
-    def import_hierarchy(self, new_hierarchy):
+    def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy'):
         for entry in new_hierarchy.get_entries():
-            try:
-                self.get_entry(entry.get_id()).import_entry(entry)
-            except KeyError:
-                pass
-                self.entries[entry.get_id()] = entry
-                self.added_entries[entry.get_id()] = entry
-                try:
-                    self.type_lists[entry.hierarchy_type].append(entry)
-                except KeyError:
-                    self.type_lists[entry.hierarchy_type] = [entry]
+            if entry.hierarchy_id in self.entries:
+                self.entries[entry.hierarchy_id].import_entry(entry)
+
+            self.entries[entry.hierarchy_id] = entry
+            self.added_entries[entry.hierarchy_id] = entry
+
+            self._categorized_entry(entry)
                 
     def revert_modifications(self, entry_id: int = 0):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
@@ -2047,10 +2106,7 @@ class WwiseHierarchy:
         self.soundbank.raise_modified() # type: ignore
         self.added_entries[new_entry.hierarchy_id] = new_entry
         self.entries[new_entry.hierarchy_id] = new_entry
-        try:
-            self.type_lists[new_entry.hierarchy_type].append(new_entry)
-        except KeyError:
-            self.type_lists[new_entry.hierarchy_type] = [new_entry]
+        self._categorized_entry(new_entry)
             
     def remove_entry(self, entry: HircEntry):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
@@ -2062,7 +2118,9 @@ class WwiseHierarchy:
             else:
                 self.removed_entries[entry.hierarchy_id] = entry
                 self.soundbank.raise_modified() # type: ignore
-            self.type_lists[entry.hierarchy_type].remove(entry)
+
+            self._remove_categorized_entry(entry)
+            
             del self.entries[entry.hierarchy_id]
     
     def has_entry(self, entry_id: int):
@@ -2070,6 +2128,12 @@ class WwiseHierarchy:
             
     def get_entry(self, entry_id: int):
         return self.entries[entry_id]
+
+    def get_actions(self):
+        return self.actions
+
+    def get_actor_mixers(self):
+        return self.actor_mixers
 
     def get_actor_mixer_by_id(self, _id: int):
         entry = self.entries[_id]
@@ -2079,6 +2143,12 @@ class WwiseHierarchy:
             )
         return entry
 
+    def get_events(self):
+        return self.events
+
+    def get_layer_containers(self):
+        return self.layer_container
+
     def get_layer_container_by_id(self, _id: int):
         entry = self.entries[_id]
         if not isinstance(entry, LayerContainer):
@@ -2086,6 +2156,15 @@ class WwiseHierarchy:
                 f"Hierarchy entry {_id} is not an layer container"
             )
         return entry
+
+    def get_music_segment(self):
+        return self.music_segments
+
+    def get_music_tracks(self):
+        return self.music_tracks
+
+    def get_random_sequence_containers(self):
+        return self.random_sequence_containers
 
     def get_rand_seq_cntr_by_id(self, _id: int):
         entry = self.entries[_id]
@@ -2095,6 +2174,9 @@ class WwiseHierarchy:
             )
         return entry
 
+    def get_sounds(self):
+        return self.sounds
+
     def get_sound_by_id(self, _id: int):
         entry = self.entries[_id]
         if not isinstance(entry, Sound):
@@ -2102,20 +2184,80 @@ class WwiseHierarchy:
                 f"Hierarchy entry {_id} is not a Sound."
             )
         return entry
-        
+
+    def get_switches_container(self):
+        return self.switch_containers
+
     def get_entries(self):
         return self.entries.values()
         
-    def get_type(self, hirc_type: int):
-        try:
-            return self.type_lists[hirc_type]
-        except KeyError:
-            return []
-            
     def get_data(self):
         arr = [entry.get_data() for entry in self.entries.values()]
         return len(arr).to_bytes(4, byteorder="little") + b"".join(arr)
 
+    def _categorized_entry(self, entry: HircEntry):
+        match entry.hierarchy_type:
+            case 0x02:
+                assert(isinstance(entry, Sound))
+                self.sounds.append(entry)
+            case 0x03:
+                assert(isinstance(entry, Action))
+                self.actions.append(entry)
+            case 0x04:
+                assert(isinstance(entry, Event))
+                self.events.append(entry)
+            case 0x05:
+                assert(isinstance(entry, RandomSequenceContainer))
+                self.random_sequence_containers.append(entry)
+            case 0x06:
+                assert(isinstance(entry, SwitchContainer))
+                self.switch_containers.append(entry)
+            case 0x07:
+                assert(isinstance(entry, ActorMixer))
+                self.actor_mixers.append(entry)
+            case 0x09:
+                assert(isinstance(entry, LayerContainer))
+                self.layer_container.append(entry)
+            case 0x0A:
+                assert(isinstance(entry, MusicSegment))
+                self.music_segments.append(entry)
+            case 0x0B:
+                assert(isinstance(entry, MusicTrack))
+                self.music_tracks.append(entry)
+            case _:
+                self.uncategorized.append(entry)
+
+    def _remove_categorized_entry(self, entry: HircEntry):
+        match entry.hierarchy_type:
+            case 0x02:
+                assert(isinstance(entry, Sound))
+                self.sounds.remove(entry)
+            case 0x03:
+                assert(isinstance(entry, Action))
+                self.actions.remove(entry)
+            case 0x04:
+                assert(isinstance(entry, Event))
+                self.events.remove(entry)
+            case 0x05:
+                assert(isinstance(entry, RandomSequenceContainer))
+                self.random_sequence_containers.remove(entry)
+            case 0x06:
+                assert(isinstance(entry, SwitchContainer))
+                self.switch_containers.remove(entry)
+            case 0x07:
+                assert(isinstance(entry, ActorMixer))
+                self.actor_mixers.remove(entry)
+            case 0x09:
+                assert(isinstance(entry, LayerContainer))
+                self.layer_container.remove(entry)
+            case 0x0A:
+                assert(isinstance(entry, MusicSegment))
+                self.music_segments.remove(entry)
+            case 0x0B:
+                assert(isinstance(entry, MusicTrack))
+                self.music_tracks.remove(entry)
+            case _:
+                self.uncategorized.remove(entry)
 
 class FxChunk:
     """
@@ -3117,8 +3259,9 @@ class LayerContainer(HircEntry):
         self.update_size()
 
         hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
+        parent_id = self.get_parent_id()
+        if parent_id != None and hierarchy.has_entry(parent_id):
+            self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
@@ -3224,8 +3367,9 @@ class ActorMixer(HircEntry):
         self.update_size()
 
         hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
+        parent_id = self.get_parent_id()
+        if parent_id != None and hierarchy.has_entry(parent_id):
+            self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
@@ -3453,8 +3597,9 @@ class SwitchContainer(HircEntry):
         self.update_size()
 
         hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
+        parent_id = self.get_parent_id()
+        if parent_id != None and hierarchy.has_entry(parent_id):
+            self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
