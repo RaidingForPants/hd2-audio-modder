@@ -2,7 +2,6 @@ import copy
 import locale
 import numpy
 import os
-import posixpath as xpath
 import pyaudio
 import random
 import subprocess
@@ -11,8 +10,6 @@ import xml.etree.ElementTree as etree
 import wave
 
 from typing import Callable, Literal, Union
-
-import fileutil
 
 from const import *
 from env import *
@@ -265,8 +262,9 @@ class WwiseBank:
         data_array = []
         
         added_sources = set()
-        
-        for entry in self.hierarchy.get_type(SOUND) + self.hierarchy.get_type(MUSIC_TRACK):
+
+        entries: list[Sound | MusicTrack] = self.hierarchy.get_sounds() + self.hierarchy.get_music_tracks()
+        for entry in entries:
             for source in entry.sources:
                 if source.plugin_id == VORBIS:
                     try:
@@ -686,7 +684,9 @@ class GameArchive:
                 logger.error(f"WwiseBank {bank.file_id} has no WwiseHierarchy")
                 continue
 
-            for entry in bank.hierarchy.get_entries():
+            entries: list[Sound | MusicTrack] = bank.hierarchy.get_sounds() + \
+                                                bank.hierarchy.get_music_tracks()
+            for entry in entries:
                 for source in entry.sources:
                     if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
                         if source.source_id not in media_index.data:
@@ -743,7 +743,8 @@ class GameArchive:
                 logger.error(f"WwiseBank {bank.file_id} has no WwiseHierarchy")
                 continue
 
-            for entry in bank.hierarchy.entries.values():
+            music_tracks = bank.hierarchy.music_tracks
+            for entry in music_tracks:
                 for info in entry.track_info:
                     try:
                         if info.source_id != 0:
@@ -1356,7 +1357,16 @@ class Mod:
             if key in self.get_wwise_streams().keys():
                 self.stream_count[key] -= 1
                 if self.stream_count[key] == 0:
-                    self.get_wwise_streams()[key].audio_source.parents.remove(self.get_wwise_streams()[key])
+                    stream = self.wwise_streams[key]
+
+                    if stream.audio_source == None:
+                        logger.warning(
+                            f"Wwise stream {stream.get_id()} does not have an "
+                             "audio source!"
+                        )
+                        continue
+                    stream.audio_source.parents.remove(self.get_wwise_streams()[key])
+
                     del self.get_wwise_streams()[key]
                     del self.stream_count[key]
         for key in game_archive.text_banks.keys():
