@@ -228,6 +228,10 @@ def assert_equal(msg: str, expect, receive):
         raise AssertionError(f"{msg}: expecting {expect}, received {receive}")
 
 
+def assert_true(msg: str, cond):
+    if not cond:
+        raise AssertionError(f"{msg}")
+
 def assert_not_none(msg: str, value):
     if value == None:
         raise AssertionError(f"{msg}")
