@@ -43,7 +43,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "2.0.0"
+VERSION = "1.17.0"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -2309,6 +2309,7 @@ if __name__ == "__main__":
             raise Exception("Error fetching latest database")
         data = r.json()
         download_url = data["assets"][0]["browser_download_url"]
+        print(download_url)
         latest_version = int(float(data["tag_name"].replace("v", "")))
         if current_version < latest_version:
             r = requests.get(download_url)
@@ -2320,6 +2321,48 @@ if __name__ == "__main__":
     except Exception as e:
         print(e)
         
+    try:
+        if not getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            raise Exception("Automatic updates not supported for python script")
+        r = requests.get("https://api.github.com/repos/raidingforpants/hd2-audio-modder/releases/latest")
+        if r.status_code != 200:
+            raise Exception("Error fetching update info")
+        data = r.json()
+        if SYSTEM == "Darwin":
+            download_url = data["assets"][1]["browser_download_url"]
+            updater = "updater"
+        elif SYSTEM == "Windows":
+            download_url = data["assets"][2]["browser_download_url"]
+            updater = "updater.exe"
+        elif SYSTEM == "Linux":
+            download_url = data["assets"][0]["browser_download_url"]
+            updater = "updater"
+        latest_version = [int(i) for i in data["tag_name"].replace("v", "").split(".")]
+        current_version = [int(i) for i in VERSION.split(".")]
+        while len(latest_version) < 3:
+            latest_version.append(0)
+        update_available = False
+        if latest_version[0] > current_version[0]:
+            update_available = True
+        elif latest_version[1] > current_version[1]:
+            update_available = True
+        elif latest_version[2] > current_version[2]:
+            update_available = True
+        if update_available:
+            response = askyesnocancel(title="Update", message=f"A new version is available ({data['tag_name'].replace('v', '')}). Would you like to install it?")
+            if response:
+                subprocess.Popen(
+                    [
+                        updater,
+                        download_url,
+                        str(os.getpid())
+                    ],
+                    creationflags=subprocess.DETACHED_PROCESS
+                )
+                sys.exit()
+    except Exception as e:
+        print(e)
+
     if os.path.exists(FRIENDLYNAMES_DB):
         try:
             lookup_store = db.FriendlyNameLookup(FRIENDLYNAMES_DB)
