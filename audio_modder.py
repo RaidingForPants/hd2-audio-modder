@@ -2203,8 +2203,8 @@ if __name__ == "__main__":
         showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
             " Audio archive search is disabled.")
     try:
-        if os.path.exists("friendlynames.db"):
-            current_version = db.get_db_version("friendlynames.db") + 1
+        if os.path.exists(FRIENDLYNAMES_DB):
+            current_version = db.get_db_version(FRIENDLYNAMES_DB) + 1
         else:
             current_version = -1
         r = requests.get("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
@@ -2217,17 +2217,20 @@ if __name__ == "__main__":
             r = requests.get(download_url)
             if r.status_code != 200:
                 raise Exception("Error fetching latest database")
-            with open("friendlynames.db", "wb") as f:
+            with open(FRIENDLYNAMES_DB, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
     except Exception as e:
         print(e)
         
-    try:
-        lookup_store = db.FriendlyNameLookup("friendlynames.db")
-    except Exception as err:
-        logger.error("Failed to connect to audio archive database", 
-                     stack_info=True)
+    if os.path.exists(FRIENDLYNAMES_DB):
+        try:
+            lookup_store = db.FriendlyNameLookup(FRIENDLYNAMES_DB)
+        except Exception as err:
+            logger.error("Failed to connect to audio archive database", 
+                         stack_info=True)
+            lookup_store = None
+    else:
         lookup_store = None
         
     language = language_lookup("English (US)")
