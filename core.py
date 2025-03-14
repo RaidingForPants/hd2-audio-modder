@@ -679,86 +679,230 @@ class GameArchive:
                 self.text_banks[text_bank.get_id()] = text_bank
         
         # Create all AudioSource objects
+        self._create_all_audio_source_objects(media_index)
+
+        # Construct list of audio sources in each bank
+        self._book_keep_audio_sources_per_bank()
+
+    def _create_all_audio_source_objects(self, media_index: MediaIndex):
+       for bank in self.wwise_banks.values():
+           self._create_all_audio_source_objects_from_bank(bank, media_index)
+
+    def _create_all_audio_source_objects_from_bank(
+        self, bank: WwiseBank, media_index: MediaIndex
+    ):
+        if bank.hierarchy == None:
+            raise AssertionError(f"WwiseBank {bank.file_id} has no WwiseHierarchy")
+        if bank.dep == None:
+            raise AssertionError(f"WwiseBank {bank.file_id} has no WwiseDep")
+
+        hirc = bank.hierarchy
+        dep = bank.dep
+
+        entries_with_audio_sources = hirc.get_sounds() + hirc.get_music_tracks()
+        for entry_with_audio_source in entries_with_audio_sources:
+            for source_struct in entry_with_audio_source.sources:
+                audio_source = self._create_audio_source(
+                    source_struct, media_index, hirc, dep
+                )
+                if audio_source == None:
+                    continue
+                self.audio_sources[audio_source.short_id] = audio_source
+
+
+    def _create_audio_source(
+        self, 
+        source: BankSourceStruct,
+        media_index: MediaIndex,
+        hirc: WwiseHierarchy,
+        dep: WwiseDep
+    ) -> AudioSource | None:
+        """
+        Question: for REV_AUDIO, it uses media index ID. Should we use source 
+        ID to check for duplication again?
+        """
+        source_id = source.source_id
+        if source_id in self.audio_sources:
+            logger.info(
+                f"Audio source {source_id} already registered. Skipping audio "
+                f"source {source_id}..."
+            )
+            return None
+
+        plugin_id = source.plugin_id
+        if plugin_id != VORBIS or plugin_id != REV_AUDIO:
+            logger.info(
+               f"Audio source {source_id} has plugin ID {plugin_id}. Audio "
+                "tool currently can only unpack audio source with plugin_id of "
+               f"{VORBIS} or {REV_AUDIO}"
+            )
+            return None
+
+        stream_type = source.stream_type
+        if stream_type != BANK or stream_type not in [STREAM, PREFETCH_STREAM]:
+            logger.warning(
+                f"Audio source {source_id} has stream type: {stream_type}. Audio"
+                 "tool currently can only unpack audio source with stream type  "
+                f"{BANK}, {STREAM}, or {PREFETCH_STREAM}."
+            )
+            return None
+
+        if stream_type == BANK and plugin_id == REV_AUDIO:
+            if hirc.has_entry(source_id):
+                logger.error(
+                    f"There's no custom FX hierarchy entry associated with audio"
+                    f" source {source_id}!"
+                )
+                return None
+            return self._create_audio_source_type_rev_audio(
+                hirc.get_entry(source_id), media_index
+            )
+        if stream_type == BANK:
+            if source_id not in media_index.data:
+                logger.error(
+                    "There is no media index data associated with audio source ID "
+                   f"{source_id}"
+                )
+                return None
+            return self._create_audio_source_type_bank(source, media_index)
+        if stream_type in [STREAM, PREFETCH_STREAM]:
+            return self._create_audio_source_type_stream(source, dep)
+
+        raise AssertionError("Invalid code path!")
+    
+    @staticmethod
+    def _create_audio_source_type_bank(
+        source: BankSourceStruct, media_index: MediaIndex
+    ) -> AudioSource:
+        audio = AudioSource()
+        audio.stream_type = BANK
+        audio.short_id = source.source_id
+        audio.set_data(
+            media_index.data[source.source_id],
+            set_modified=False,
+            notify_subscribers=False
+        )
+
+        return audio
+
+    def _create_audio_source_type_rev_audio(
+        self, 
+        custom_fx_entry: HircEntry,
+        media_index: MediaIndex,
+    ) -> AudioSource | None:
+        # TODO: This should be parsed and organized in the parsing phase
+        data = custom_fx_entry.get_data()
+        plugin_param_size = int.from_bytes(data[13:17], byteorder="little")
+
+        plugin_data_start = 19 + plugin_param_size
+        plugin_data_end = 23 + plugin_param_size
+
+        media_index_id = int.from_bytes(
+            data[plugin_data_start:plugin_data_end], byteorder="little"
+        )
+        if media_index_id not in media_index.data:
+            logger.error(
+                f"There is no media index data associated with {media_index_id}"
+            )
+            return None
+
+        audio = AudioSource()
+        audio.stream_type = BANK
+        audio.short_id = media_index_id
+        audio.set_data(
+            media_index.data[media_index_id],
+            set_modified=False,
+            notify_subscribers=False
+        )
+
+        return audio
+
+    def _create_audio_source_type_stream(
+        self,
+        source: BankSourceStruct,
+        dep: WwiseDep
+    ) -> AudioSource | None:
+        stream_resource_id = murmur64_hash(
+            (os.path.dirname(dep.data) + "/" + str(source.source_id)).encode('utf-8')
+        )
+        if stream_resource_id not in self.wwise_streams:
+            logger.error(
+                "There is no WwiseStream associated with stream resource ID"
+               f"{stream_resource_id}"
+            )
+            return None
+
+        audio = self.wwise_streams[stream_resource_id].audio_source
+        if audio == None:
+            logger.error(
+                f"WwiseStream {stream_resource_id} has no audio source."
+            )
+            return None
+        audio.short_id = source.source_id
+        return audio
+
+    def _book_keep_audio_sources_per_bank(self):
         for bank in self.wwise_banks.values():
             if bank.hierarchy == None:
-                logger.error(f"WwiseBank {bank.file_id} has no WwiseHierarchy")
-                continue
+                raise AssertionError(
+                    f"WwiseBank {bank.file_id} has no WwiseHierarchy"
+                )
 
-            entries: list[Sound | MusicTrack] = bank.hierarchy.get_sounds() + \
-                                                bank.hierarchy.get_music_tracks()
-            for entry in entries:
-                for source in entry.sources:
-                    if source.plugin_id == VORBIS and source.stream_type == BANK and source.source_id not in self.audio_sources:
-                        if source.source_id not in media_index.data:
-                            logger.error(
-                                f"Source ID {source.source_id} has no entry in "
-                                " media index."
-                            )
-                            continue
-
-                        audio = AudioSource()
-                        audio.stream_type = BANK
-                        audio.short_id = source.source_id
-                        audio.set_data(media_index.data[source.source_id], set_modified=False, notify_subscribers=False)
-                        self.audio_sources[source.source_id] = audio
-                    elif source.plugin_id == VORBIS and source.stream_type in [STREAM, PREFETCH_STREAM] and source.source_id not in self.audio_sources:
-                        if bank.dep == None:
-                            raise AssertionError(
-                                f"WwiseBank {bank.file_id} has no WwiseDep"
-                            )
-                        stream_resource_id = murmur64_hash((os.path.dirname(bank.dep.data) + "/" + str(source.source_id)).encode('utf-8'))
-                        if stream_resource_id not in self.wwise_streams:
-                            logger.error(
-                                f"Stream {stream_resource_id} corresponds to no WwiseStream object"
-                            )
-                            continue
-
-                        audio = self.wwise_streams[stream_resource_id].audio_source
-                        if audio == None:
-                            logger.error(
-                                f"WwiseStream {stream_resource_id} has no "
-                                "audio source"
-                            )
-                            continue
-                        audio.short_id = source.source_id
-                        self.audio_sources[source.source_id] = audio
-                    elif source.plugin_id == REV_AUDIO and source.stream_type == BANK and source.source_id not in self.audio_sources:
-                        try:
-                            custom_fx = bank.hierarchy.entries[source.source_id]
-                            data = custom_fx.get_data()
-                            plugin_param_size = int.from_bytes(data[13:17], byteorder="little")
-                            media_index_id = int.from_bytes(data[19+plugin_param_size:23+plugin_param_size], byteorder="little")
-                            audio = AudioSource()
-                            audio.stream_type = BANK
-                            audio.short_id = media_index_id
-                            audio.set_data(media_index.data[media_index_id], set_modified=False, notify_subscribers=False)
-                            self.audio_sources[media_index_id] = audio
-                        except KeyError:
-                            pass
-
-        #construct list of audio sources in each bank
-        #add track_info to audio sources?
-        for bank in self.wwise_banks.values():
-            if bank.hierarchy == None:
-                logger.error(f"WwiseBank {bank.file_id} has no WwiseHierarchy")
-                continue
-
-            music_tracks = bank.hierarchy.music_tracks
-            for entry in music_tracks:
-                for info in entry.track_info:
-                    try:
-                        if info.source_id != 0:
-                            self.audio_sources[info.source_id].set_track_info(info, notify_subscribers=False, set_modified=False)
-                    except:
+            bank_audio_sources = bank.get_content()
+            music_tracks = bank.hierarchy.get_music_tracks()
+            for music_track in music_tracks:
+                for info in music_track.track_info:
+                    source_id = info.source_id
+                    if source_id == 0:
                         continue
-                for source in entry.sources:
-                    try:
-                        if source.plugin_id == VORBIS:
-                            self.audio_sources[source.source_id].parents.add(entry)
-                        if source.plugin_id == VORBIS and self.audio_sources[source.source_id] not in bank.get_content(): # may be missing streamed audio if the patch didn't change it
-                            bank.add_content(self.audio_sources[source.source_id])
-                    except:
+                    if source_id not in self.audio_sources:
+                        logger.error(
+                             "There is no audio source associated with audio "
+                            f"source ID {source_id}."
+                        )
                         continue
+                    """
+                    TODO: determine whether if adding TrackInfoStruct into 
+                    audio source
+                    """
+                for source in music_track.sources:
+                    if source.plugin_id != VORBIS:
+                        continue
+                    source_id = source.source_id
+                    if source_id not in self.audio_sources:
+                        logger.error(
+                            f"Audio source {source_id} is not tracked and registered "
+                            f"in the list of all audio sources!",
+                        )
+                        continue
+                    self.audio_sources[source_id].parents.add(music_track)
+                    if self.audio_sources[source_id] not in bank_audio_sources:
+                        bank.add_content(self.audio_sources[source_id])
+
+            sounds = bank.hierarchy.get_sounds()
+            for sound in sounds:
+                assert_equal(
+                    "Sound object should only one single audio source but Sound "
+                   f" {sound.hierarchy_id} does not.",
+                    1,
+                    len(sound.sources),
+                )
+
+                source = sound.sources[0]
+                source_id = source.source_id
+                if source_id not in self.audio_sources:
+                    logger.error(
+                        f"Audio source {source_id} is not tracked and registered "
+                        f"in the list of all audio sources!",
+                    )
+                    continue
+                
+                if source.plugin_id != VORBIS:
+                    continue
+                audio_source = self.audio_sources[source_id]
+                audio_source.parents.add(sound)
+                if audio_source not in bank_audio_sources:
+                    bank.add_content(audio_source)
 
         
 class SoundHandler:
