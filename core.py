@@ -2,6 +2,7 @@ import copy
 import locale
 import numpy
 import os
+import posixpath as xpath
 import pyaudio
 import random
 import subprocess
