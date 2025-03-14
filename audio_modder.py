@@ -2322,7 +2322,7 @@ if __name__ == "__main__":
         print(e)
         
     try:
-        if not getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        if not (getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')):
             raise Exception("Automatic updates not supported for python script")
         r = requests.get("https://api.github.com/repos/raidingforpants/hd2-audio-modder/releases/latest")
         if r.status_code != 200:
@@ -2344,9 +2344,9 @@ if __name__ == "__main__":
         update_available = False
         if latest_version[0] > current_version[0]:
             update_available = True
-        elif latest_version[1] > current_version[1]:
+        elif latest_version[0] == current_version[0] and latest_version[1] > current_version[1]:
             update_available = True
-        elif latest_version[2] > current_version[2]:
+        elif latest_version[0] == current_version[0] and latest_version[1] == current_version[1] and latest_version[2] > current_version[2]:
             update_available = True
         if update_available:
             response = askyesnocancel(title="Update", message=f"A new version is available ({data['tag_name'].replace('v', '')}). Would you like to install it?")
