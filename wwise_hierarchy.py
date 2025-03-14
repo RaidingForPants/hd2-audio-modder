@@ -349,14 +349,33 @@ class TrackInfoStruct:
         return struct.pack("<IIIdddd", self.track_id, self.source_id, self.event_id, self.play_at, self.begin_trim_offset, self.end_trim_offset, self.source_duration)
             
 
+class ClipAutomationStruct:
+    
+    def __init__(self):
+        self.graph_points = []
+        self.clip_index = self.auto_type = self.num_graph_points = 0
+        
+    @classmethod
+    def from_memory_stream(cls, stream):
+        s = ClipAutomationStruct()
+        s.clip_index, s.auto_type, s.num_graph_points = struct.unpack("<III", stream.read(12))
+        for _ in range(s.num_graph_points):
+            s.graph_points.append(struct.unpack("<fff", stream.read(12)))
+        return s
+            
+    def get_data(self):
+        return struct.pack("<III", self.clip_index, self.auto_type, self.num_graph_points) + b"".join([struct.pack("<fff", point[0], point[1], point[2]) for point in self.graph_points])
+        
+
 class MusicTrack(HircEntry):
     
-    import_values = ["bit_flags", "unused_sections", "parent_id", "sources", "track_info", "misc"]
+    import_values = ["bit_flags", "unused_sections", "parent_id", "sources", "track_info", "clip_automations", "misc"]
     
     def __init__(self):
         super().__init__()
         self.bit_flags = 0
         self.unused_sections = []
+        self.clip_automations = []
         
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -374,18 +393,11 @@ class MusicTrack(HircEntry):
         for _ in range(num_track_info):
             track = TrackInfoStruct.from_bytes(stream.read(44))
             entry.track_info.append(track)
-        start = stream.tell()
-        _ = stream.uint32_read()
+        entry.unused_sections.append(stream.read(4))
         num_clip_automations = stream.uint32_read()
         for _ in range(num_clip_automations):
-            stream.advance(8)
-            num_graph_points = stream.uint32_read()
-            for _ in range(num_graph_points):
-                stream.advance(12)
-        stream.advance(5)
-        end_position = stream.tell()
-        stream.seek(start)
-        entry.unused_sections.append(stream.read(end_position - start))
+            entry.clip_automations.append(ClipAutomationStruct.from_memory_stream(stream))
+        entry.unused_sections.append(stream.read(5))
         entry.override_bus_id = stream.uint32_read()
         entry.parent_id = stream.uint32_read()
         entry.misc = stream.read(entry.size - (stream.tell()-start_position))
@@ -394,7 +406,10 @@ class MusicTrack(HircEntry):
     def get_data(self):
         b = b"".join([source.get_data() for source in self.sources])
         t = b"".join([track.get_data() for track in self.track_info])
-        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
+        clips = b"".join([clip.get_data() for clip in self.clip_automations])
+        payload = b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unused_sections[1] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
+        self.size = 9 + len(payload)
+        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + payload
 
     
 class Sound(HircEntry):
@@ -470,13 +485,14 @@ class WwiseHierarchy:
             try:
                 self.get_entry(entry.get_id()).import_entry(entry)
             except KeyError:
-                pass
-                self.entries[entry.get_id()] = entry
-                self.added_entries[entry.get_id()] = entry
-                try:
-                    self.type_lists[entry.hierarchy_type].append(entry)
-                except KeyError:
-                    self.type_lists[entry.hierarchy_type] = [entry]
+                self.add_entry(entry)
+                #pass
+                #self.entries[entry.get_id()] = entry
+                #self.added_entries[entry.get_id()] = entry
+                #try:
+                #    self.type_lists[entry.hierarchy_type].append(entry)
+                #except KeyError:
+                #    self.type_lists[entry.hierarchy_type] = [entry]
                 
     def revert_modifications(self, entry_id: int = 0):
         if self.soundbank == None:
@@ -487,12 +503,12 @@ class WwiseHierarchy:
         if entry_id:
             self.get_entry(entry_id).revert_modifications()
         else:
-            for entry in self.removed_entries:
+            for entry in self.removed_entries.values():
                 self.entries[entry.hierarchy_id] = entry
                 self.soundbank.lower_modified()
             self.removed_entries.clear()
-            for entry in self.added_entries:
-                self.remove_entry(entry.hierarchy_id)
+            for entry in list(self.added_entries.values()):
+                self.remove_entry(entry)
                 self.soundbank.lower_modified()
             for entry in self.get_entries():
                 entry.revert_modifications()
@@ -510,7 +526,7 @@ class WwiseHierarchy:
             self.type_lists[new_entry.hierarchy_type].append(new_entry)
         except KeyError:
             self.type_lists[new_entry.hierarchy_type] = [new_entry]
-        entry.soundbanks.append(self.soundbank)
+        new_entry.soundbanks.append(self.soundbank)
             
     def remove_entry(self, entry: HircEntry):
         if self.soundbank == None:
