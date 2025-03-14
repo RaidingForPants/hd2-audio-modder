@@ -2003,9 +2003,6 @@ class MainWindow:
                 self.create_hierarchy_view(new_game_archive=archive)
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
-        else:
-            for child in self.treeview.get_children():
-                self.treeview.delete(child)
 
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
@@ -2071,6 +2068,8 @@ class MainWindow:
                                             foreground=fg)
                         
             for text_bank in self.mod_handler.get_active_mod().text_banks.values():
+                if text_bank.get_language() != language:
+                    continue
                 bg, fg = self.get_colors(modified=text_bank.modified)
                 self.treeview.tag_configure(text_bank.get_id(), 
                                                 background=bg,
@@ -2125,8 +2124,11 @@ class MainWindow:
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         new_archive = GameArchive.from_file(archive_file)
+        
         missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
         if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+            if len(new_archive.text_banks) > 0:
+                self.load_archive(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
             archives = set()
             for soundbank_id in missing_soundbank_ids:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)

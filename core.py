@@ -417,6 +417,17 @@ class TextBank:
     def is_modified(self) -> bool:
         return self.modified
         
+    def import_text(self, text_bank: "TextBank"):
+        for new_string_entry in text_bank.entries.values():
+            try:
+                old_string_entry = self.entries[new_string_entry.string_id]
+            except:
+                continue
+            if (old_string_entry.modified and new_string_entry.get_text() != old_string_entry.text_old
+                or (not old_string_entry.modified and new_string_entry.get_text() != old_string_entry.get_text())
+            ):
+                old_string_entry.set_text(new_string_entry.get_text())
+        
     def generate(self) -> bytearray:
         stream = MemoryStream()
         stream.write(b'\xae\xf3\x85\x3e\x01\x00\x00\x00')
@@ -1271,6 +1282,11 @@ class Mod:
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         new_archive = GameArchive.from_file(archive_file)
+        
+        key = new_archive.name
+        if key in self.game_archives.keys():
+            return False
+        
         self.add_game_archive(new_archive)
 
         return True
