@@ -1081,9 +1081,8 @@ class MainWindow:
             label="Import"
         )
         
-        self.file_menu.add_command(label="Combine Music Mods", command=self.combine_music_mods)
-        
-        self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
+        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+            self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
         
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
