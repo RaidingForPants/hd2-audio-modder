@@ -265,7 +265,7 @@ class FileUploadWindow:
                 pending_file.pack(side="top", expand=True, fill="x", pady=2)
         
     def add_files(self):
-        filenames = filedialog.askopenfilenames(parent=self.root, title="Choose mod files to combine", filetypes=[("Zip Archive", "*.zip"), ("Patch File", "*.patch*")])
+        filenames = filedialog.askopenfilenames(parent=self.root, title="Choose mod files to combine", filetypes=[("Mod Files", "*.zip *.patch*")])
         for name in filenames:
             pending_file = PendingFile(self.scrollframe.interior)
             pending_file.set_filepath(name)
