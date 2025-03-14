@@ -1324,7 +1324,7 @@ class MainWindow:
             if theme == "dark_mode":
                 self.root.tk.call("set_theme", "dark")
                 if self.file_upload_window is not None:
-                    self.file_upload_window.root.tk.call("set_theme", "light")
+                    self.file_upload_window.root.tk.call("set_theme", "dark")
                 self.window.configure(background="white")
             elif theme == "light_mode":
                 self.root.tk.call("set_theme", "light")
