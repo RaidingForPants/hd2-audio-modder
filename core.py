@@ -730,7 +730,7 @@ class GameArchive:
             return None
 
         plugin_id = source.plugin_id
-        if plugin_id != VORBIS or plugin_id != REV_AUDIO:
+        if plugin_id != VORBIS and plugin_id != REV_AUDIO:
             logger.info(
                f"Audio source {source_id} has plugin ID {plugin_id}. Audio "
                 "tool currently can only unpack audio source with plugin_id of "
@@ -739,7 +739,7 @@ class GameArchive:
             return None
 
         stream_type = source.stream_type
-        if stream_type != BANK or stream_type not in [STREAM, PREFETCH_STREAM]:
+        if stream_type != BANK and stream_type not in [STREAM, PREFETCH_STREAM]:
             logger.warning(
                 f"Audio source {source_id} has stream type: {stream_type}. Audio"
                  "tool currently can only unpack audio source with stream type  "
