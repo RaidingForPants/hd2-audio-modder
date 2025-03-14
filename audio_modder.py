@@ -231,6 +231,7 @@ class FileUploadWindow:
         if os.path.exists("icon.ico"):
             self.root.iconbitmap("icon.ico")
         self.root.title("Helldivers 2 Audio Modder")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.scrollframe = VerticalScrolledFrame(self.root)
         self.drop_frame = Frame(self.root, width=500, height=500, borderwidth=3, highlightbackground="gray", highlightthickness=2)
         self.drop_frame.drop_target_register(DND_FILES)
@@ -265,6 +266,11 @@ class FileUploadWindow:
         if self.callback is not None:
             files = [file.get_filepath() for file in self.scrollframe.interior.winfo_children() if isinstance(file, PendingFile)]
             self.callback(files)
+        self.root.destroy()
+        
+    def on_close(self):
+        if self.callback is not None:
+            self.callback([])
         self.root.destroy()
         
     
@@ -1154,6 +1160,62 @@ class MainWindow:
     def combine_mods_callback(self, files):
         print(files)
         self.file_upload_window = None
+        if len(files) > 1:
+            current_mod = self.mod_handler.get_active_mod()
+            combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
+            zip_files = []
+            patch_files = []
+            
+            for mod in zip_files:
+                zip = zipfile.ZipFile(mod)
+                zip.extractall(path=CACHE)
+            patch_files.extend([os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]])
+            
+            for file in patch_files:
+                new_archive = GameArchive.from_file(file)
+                missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
+                archives = set()
+                for soundbank_id in missing_soundbank_ids:
+                    r = self.name_lookup.lookup_soundbank(soundbank_id)
+                    if r.success:
+                        archives.add(r.archive)
+                for archive in archives:
+                    self.load_archive(archive_file=os.path.join(self.app_state.game_data_path, archive))
+                missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
+                missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
+                if missing_soundbanks:
+                    newline = "\n"
+                    showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
+                combined_mod.import_patch(file)
+                
+            output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
+            if output_file:
+                combined_mod.write_patch(CACHE)
+                zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
+                with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"), 'rb') as patch_file:
+                    zip.writestr("9ba626afa44a3aa3.patch_0", patch_file.read())
+                if os.path.exists(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream")):
+                    with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"), 'rb') as stream_file:
+                        zip.writestr("9ba626afa44a3aa3.patch_0.stream", stream_file.read())
+                zip.close()
+                try:
+                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"))
+                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"))
+                except:
+                    pass
+            self.mod_handler.delete_mod("combined_mods_temp")
+            self.mod_handler.set_active_mod(current_mod.name)
+            
+            for file in os.listdir(CACHE):
+                file = os.path.join(CACHE, file)
+                try:
+                    if os.path.isfile(file):
+                        os.remove(file)
+                    elif os.path.isdir(file):
+                        shutil.rmtree(file)
+                except:
+                    pass
+            
         
     def combine_music_mods(self):
         self.sound_handler.kill_sound()
@@ -1207,10 +1269,13 @@ class MainWindow:
             dropped_files = event.widget.tk.splitlist(event.data)
             for file in dropped_files:
                 import_files.extend(list_files_recursive(file))
+            patch_files = [file for file in import_files if ".patch_" in os.path.basename(file)]
+            for file in patch_files:
+                self.import_patch(file)
             if os.path.exists(WWISE_CLI):
-                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES or ".patch_" in os.path.basename(file)]
+                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
             else:
-                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem" or ".patch_" in os.path.basename(file)]
+                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
             if (
                 len(import_files) == 1 
                 and os.path.splitext(import_files[0])[1] in SUPPORTED_AUDIO_TYPES
@@ -1924,8 +1989,8 @@ class MainWindow:
             archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
         if not archive_file:
             return
-        if ".patch" in archive_file:
-            showwarning(title="Invalid archive", message="Cannot open patch files. Use Import Patch to apply a patch file's changes to the loaded archive(s)")
+        if ".patch" in os.path.basename(archive_file):
+            self.import_patch(archive_file)
             return
         self.sound_handler.kill_sound()
         if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
@@ -2052,11 +2117,29 @@ class MainWindow:
             return
         self.mod_handler.get_active_mod().write_patch(output_folder)
         
-    def import_patch(self):
+    def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
-        archive_file = askopenfilename(title="Select patch file")
+        if archive_file == "":
+            archive_file = askopenfilename(title="Select patch file", filetypes=[("Patch File", "*.patch_*")])
         if not archive_file:
             return
+        if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
+            archive_file = os.path.splitext(archive_file)[0]
+        new_archive = GameArchive.from_file(archive_file)
+        missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+            archives = set()
+            for soundbank_id in missing_soundbank_ids:
+                r = self.name_lookup.lookup_soundbank(soundbank_id)
+                if r.success:
+                    archives.add(r.archive)
+            for archive in archives:
+                self.load_archive(archive_file=os.path.join(self.app_state.game_data_path, archive))
+            missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+        missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
+        if missing_soundbanks:
+            newline = "\n"
+            showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
         if self.mod_handler.get_active_mod().import_patch(archive_file):
             self.check_modified()
             self.show_info_window()

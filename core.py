@@ -1470,11 +1470,16 @@ class Mod:
                 raise AssertionError(
                     f"WwiseBank {bank.file_id} has no WwiseHierarchy"
                 )
-
-            self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+            try:
+                self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+            except:
+                logger.warning(f"Unable to import heirarchy information for {bank.dep.data}")
 
         for text_bank in patch_game_archive.get_text_banks().values():
-            self.get_text_banks()[text_bank.get_id()].import_text(text_bank)
+            try:
+                self.get_text_banks()[text_bank.get_id()].import_text(text_bank)
+            except:
+                logger.warning("Unable to import some text data")
         
         return True
 
