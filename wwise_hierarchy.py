@@ -1910,7 +1910,6 @@ class Sound(HircEntry):
     
     import_values = [
         "sources",
-        "parent_id",
         "baseParam",
     ]
     
@@ -3173,7 +3172,6 @@ class LayerContainer(HircEntry):
     """
 
     import_values = [
-        "parent_id",
         "baseParam",
         "children",
         "ulNumLayers",
@@ -3287,7 +3285,6 @@ class LayerContainer(HircEntry):
 class ActorMixer(HircEntry):
 
     import_values = [
-        "parent_id",
         "baseParam",
         "children"
     ]
@@ -3488,7 +3485,6 @@ class SwitchContainer(HircEntry):
     """
 
     import_values = [
-        "parent_id",
         "baseParam",
         "eGroupType",
         "ulGroupID",
