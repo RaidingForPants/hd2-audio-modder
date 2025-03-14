@@ -1270,7 +1270,7 @@ class Mod:
     def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
         
-    def load_archive_file(self, archive_file: str = ""):
+    async def load_archive_file(self, archive_file: str = ""):
         """
         @exception
         - OSError
