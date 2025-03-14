@@ -235,14 +235,16 @@ class FileUploadWindow:
         self.scrollframe = VerticalScrolledFrame(self.root)
         self.drop_frame = Frame(self.root, width=500, height=500, borderwidth=3, highlightbackground="gray", highlightthickness=2)
         self.drop_frame.drop_target_register(DND_FILES)
+        self.drop_frame.grid_columnconfigure(0, weight=1)
+        self.drop_frame.grid_columnconfigure(1, weight=1)
         self.label = Label(self.drop_frame, text="Drop Files Here or ", height=10, font=('Segoe UI', 12), justify="right")
-        self.label.pack(side="left")
+        self.label.grid(row=0, column=0, sticky="e")
         self.drop_frame.pack(side="top", padx=4, pady=4, expand=True, fill="both")
         self.drop_frame.dnd_bind("<<Drop>>", self.drop_add_files)
         self.upload_button = ttk.Button(self.drop_frame, text="Add file", command=self.add_files)
         self.accept_button = ttk.Button(self.root, text="Accept", command=self.return_files)
         self.accept_button.pack(side="bottom", anchor="w")
-        self.upload_button.pack(side="left", anchor="w")
+        self.upload_button.grid(row=0, column=1, sticky="w")
         self.scrollframe.pack(side="top", expand=True, fill='both', anchor="w")
         self.callback = callback
         
@@ -1157,7 +1159,6 @@ class MainWindow:
                 pass
         
     def combine_mods_callback(self, files):
-        print(files)
         self.file_upload_window = None
         if len(files) > 1:
             current_mod = self.mod_handler.get_active_mod()
@@ -1872,9 +1873,6 @@ class MainWindow:
                                         self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
                                     except:
                                         pass
-                            #for info in track.track_info:
-                            #    if info.event_id != 0:
-                            #        self.create_treeview_entry(info, track_entry)
                     elif isinstance(hierarchy_entry, RandomSequenceContainer):
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for s_id in hierarchy_entry.contents:
