@@ -263,16 +263,16 @@ class FileUploadWindow:
             pending_file.pack(side="top", expand=True, fill="x")
         
     def return_files(self):
-        if self.callback is not None:
-            files = [file.get_filepath() for file in self.scrollframe.interior.winfo_children() if isinstance(file, PendingFile)]
-            self.callback(files)
+        files = [file.get_filepath() for file in self.scrollframe.interior.winfo_children() if isinstance(file, PendingFile)]
         self.root.destroy()
+        if self.callback is not None:
+            self.callback(files)
+        
         
     def on_close(self):
+        self.root.destroy()
         if self.callback is not None:
             self.callback([])
-        self.root.destroy()
-        
     
 
 class PopupWindow:
@@ -1162,8 +1162,8 @@ class MainWindow:
         if len(files) > 1:
             current_mod = self.mod_handler.get_active_mod()
             combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
-            zip_files = []
-            patch_files = []
+            zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
+            patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
             
             for mod in zip_files:
                 zip = zipfile.ZipFile(mod)
@@ -1172,14 +1172,16 @@ class MainWindow:
             
             for file in patch_files:
                 new_archive = GameArchive.from_file(file)
-                missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
                 archives = set()
+                if len(new_archive.text_banks) > 0:
+                    archives.add("9ba626afa44a3aa3")
+                missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
                 for soundbank_id in missing_soundbank_ids:
                     r = self.name_lookup.lookup_soundbank(soundbank_id)
                     if r.success:
                         archives.add(r.archive)
                 for archive in archives:
-                    self.load_archive(archive_file=os.path.join(self.app_state.game_data_path, archive))
+                    combined_mod.load_archive_file(archive_file=os.path.join(self.app_state.game_data_path, archive))
                 missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
                 missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
                 if missing_soundbanks:
