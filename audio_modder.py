@@ -227,7 +227,6 @@ class FileUploadWindow:
     def __init__(self, callback=None):
         self.root = TkinterDnD.Tk()
         self.root.geometry("500x500")
-        self.root.attributes('-topmost', True)
         if os.path.exists("icon.ico"):
             self.root.iconbitmap("icon.ico")
         self.root.title("Select Mods to Combine")
@@ -266,7 +265,7 @@ class FileUploadWindow:
                 pending_file.pack(side="top", expand=True, fill="x", pady=2)
         
     def add_files(self):
-        filenames = filedialog.askopenfilenames(title="Choose mod files to combine", filetypes=[("Zip Archive", "*.zip"), ("Patch File", "*.patch*")])
+        filenames = filedialog.askopenfilenames(parent=self.root, title="Choose mod files to combine", filetypes=[("Zip Archive", "*.zip"), ("Patch File", "*.patch*")])
         for name in filenames:
             pending_file = PendingFile(self.scrollframe.interior)
             pending_file.set_filepath(name)
