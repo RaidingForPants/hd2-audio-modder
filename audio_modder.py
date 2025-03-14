@@ -230,22 +230,30 @@ class FileUploadWindow:
         self.root.attributes('-topmost', True)
         if os.path.exists("icon.ico"):
             self.root.iconbitmap("icon.ico")
-        self.root.title("Helldivers 2 Audio Modder")
+        self.root.title("Select Mods to Combine")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.scrollframe = VerticalScrolledFrame(self.root)
         self.drop_frame = Frame(self.root, width=500, height=500, borderwidth=3, highlightbackground="gray", highlightthickness=2)
         self.drop_frame.drop_target_register(DND_FILES)
         self.drop_frame.grid_columnconfigure(0, weight=1)
         self.drop_frame.grid_columnconfigure(1, weight=1)
-        self.label = Label(self.drop_frame, text="Drop Files Here or ", height=10, font=('Segoe UI', 12), justify="right")
-        self.label.grid(row=0, column=0, sticky="e")
-        self.drop_frame.pack(side="top", padx=4, pady=4, expand=True, fill="both")
+        self.drop_frame.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_rowconfigure(2, weight=0)
+        self.label = Label(self.drop_frame, text="Drop Files Here or ", font=('Segoe UI', 12), justify="right")
+        self.label.grid(row=0, column=0, sticky="nse")
+        self.drop_frame.grid(row=0, column=0, columnspan=2, sticky="news")
         self.drop_frame.dnd_bind("<<Drop>>", self.drop_add_files)
         self.upload_button = ttk.Button(self.drop_frame, text="Add file", command=self.add_files)
         self.accept_button = ttk.Button(self.root, text="Accept", command=self.return_files)
-        self.accept_button.pack(side="bottom", anchor="w")
+        self.accept_button.grid(row=2, column=0, sticky="w")
+        self.cancel_button = ttk.Button(self.root, text="Cancel", command=self.on_close)
+        self.cancel_button.grid(row=2, column=1, sticky="e")
         self.upload_button.grid(row=0, column=1, sticky="w")
-        self.scrollframe.pack(side="top", expand=True, fill='both', anchor="w")
+        self.scrollframe.grid(row=1, column=0, columnspan=2, sticky="news")
         self.callback = callback
         
     def drop_add_files(self, event):
@@ -1160,7 +1168,9 @@ class MainWindow:
         
     def combine_mods_callback(self, files):
         self.file_upload_window = None
-        if len(files) > 1:
+        if len(files) == 1:
+            tkinter.messagebox.showinfo("You cannot combine only 1 mod!")
+        elif len(files) > 1:
             current_mod = self.mod_handler.get_active_mod()
             combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
             zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
