@@ -1598,7 +1598,7 @@ class Mod:
             raise RuntimeError("Failed to set track duration for some audio sources.")
             
         if wrong_file_format:
-            raise RuntimeError("Some audio was not the correct format.")
+            raise RuntimeError("Some audio was not the correct format. If using Wwise, ensure your Conversion Setting format is set to Vorbis.")
     
     def create_external_sources_list(self, sources: list[str], conversion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
