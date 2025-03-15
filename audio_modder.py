@@ -1859,7 +1859,7 @@ class MainWindow:
 
     def dump_as_wem(self):
         if len(self.treeview.selection()) == 1:
-            output_file = filedialog.asksaveasfilename(mode='wb', title="Save As", initialfile=f"{self.right_click_id}.wem", defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
+            output_file = filedialog.asksaveasfilename(title="Save As", initialfile=f"{self.right_click_id}.wem", defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
             if not output_file:
                 return
             self.mod_handler.get_active_mod().dump_as_wem(self.right_click_id, output_file)
