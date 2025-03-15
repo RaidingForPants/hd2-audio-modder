@@ -2137,6 +2137,7 @@ class MainWindow:
                 else:
                     bg, fg = self.get_colors(modified=item.modified)
                 self.treeview.tag_configure(item.get_id(), background=bg, foreground=fg)
+                parents = []
                 if isinstance(item, HircEntry):
                     parents = [item.parent] if item.parent is not None else item.soundbanks
                 elif isinstance(item, AudioSource):
@@ -2147,8 +2148,7 @@ class MainWindow:
                     parents = [item.parent]
                 elif isinstance(item, TextBank):
                     parents = []
-                for item in parents:
-                    self.check_modified(parents)
+                self.check_modified(parents)
         else:
             for child in self.treeview.get_children():
                 self.clear_treeview_background(child)
