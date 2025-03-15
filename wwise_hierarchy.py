@@ -414,23 +414,44 @@ class MusicTrack(HircEntry):
     
 class Sound(HircEntry):
     
-    import_values = ["misc", "sources", "parent_id"]
+    import_values = ["misc", "sources", "parent_id", "unused_sections"]
     
     def __init__(self):
         super().__init__()
+        self.unused_sections = []
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         entry = Sound()
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
+        start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
         entry.sources.append(BankSourceStruct.from_bytes(stream.read(14)))
-        entry.misc = stream.read(entry.size - 18)
+        section_start = stream.tell()
+        override_parent_fx = stream.uint8_read()
+        num_fx = stream.uint8_read()
+        if num_fx != 0:
+            stream.advance(1)
+        for _ in range(num_fx):
+            stream.advance(7)
+        override_parent_metadata = stream.uint8_read()
+        num_fx = stream.uint8_read()
+        if num_fx != 0:
+            stream.advance(1)
+        for _ in range(num_fx):
+            stream.advance(7)
+        stream.advance(1)
+        section_end = stream.tell()
+        stream.seek(section_start)
+        entry.unused_sections.append(stream.read(section_end-section_start))
+        entry.override_bus_id = stream.uint32_read()
+        entry.parent_id = stream.uint32_read()
+        entry.misc = stream.read(entry.size - (stream.tell()-start_position))
         return entry
 
     def get_data(self):
-        return struct.pack(f"<BII14s{len(self.misc)}s", self.hierarchy_type, self.size, self.hierarchy_id, self.sources[0].get_data(), self.misc)
+        return struct.pack(f"<BII14s", self.hierarchy_type, self.size, self.hierarchy_id, self.sources[0].get_data()) + self.unused_sections[0] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
         
         
 class HircEntryFactory:
