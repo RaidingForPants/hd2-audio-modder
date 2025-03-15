@@ -1640,12 +1640,21 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
+        self.start_async_task(self.loop, self.import_files_async, file_dict=file_dict)
+        
+    async def import_files_async(self, file_dict):
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Importing Files")
         try:
-            self.mod_handler.get_active_mod().import_files(file_dict)
+            await self.mod_handler.get_active_mod().import_files(file_dict)
         except Exception as e:
-            showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)}. Some imports were skipped.")
-        self.check_modified()
-        self.show_info_window()
+            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+            self.progress_frame.set_text("Done")
+            showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)} Some imports may have been skipped.")
+        self.root.after_idle(self.check_modified)
+        self.root.after_idle(self.show_info_window)
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text("Done")
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
