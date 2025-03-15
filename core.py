@@ -1654,7 +1654,8 @@ class Mod:
         stdout, stderr = await process.communicate()
         
         if process.returncode != 0:
-            print(process.returncode)
+            if stdout:
+                logger.error(stdout.decode(locale.getpreferredencoding()))
             raise Exception("Non-zero return code in Wwise project migration")
         
         convert_dest = os.path.join(TMP, SYSTEM)
@@ -1674,7 +1675,8 @@ class Mod:
         stdout, stderr = await process.communicate()
         
         if process.returncode != 0:
-            print(process.returncode)
+            if stdout:
+                logger.error(stdout.decode(locale.getpreferredencoding()))
             raise Exception("Non-zero return code in Wwise source conversion")
         
         wems = {os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"): targets for filepath, targets in wavs.items()}
