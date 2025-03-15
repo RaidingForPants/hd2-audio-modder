@@ -1905,7 +1905,6 @@ class MainWindow:
                 tree_entry = self.treeview.insert(parent_item, END, tags=(entry.get_id(), entry.parent.get_id()))
             else:
                 tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
-            tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
             bg, fg = self.get_colors(modified=modified)
             self.treeview.tag_configure(entry.get_id(), background=bg, foreground=fg)
         if isinstance(entry, WwiseBank):
