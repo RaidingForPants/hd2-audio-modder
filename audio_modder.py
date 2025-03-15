@@ -1901,6 +1901,10 @@ class MainWindow:
                 modified = entry.modified or entry.has_modified_children()
             else:
                 modified = entry.modified
+            if isinstance(entry, StringEntry):
+                tree_entry = self.treeview.insert(parent_item, END, tags=(entry.get_id(), entry.parent.get_id()))
+            else:
+                tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
             tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
             bg, fg = self.get_colors(modified=modified)
             self.treeview.tag_configure(entry.get_id(), background=bg, foreground=fg)
@@ -2031,7 +2035,7 @@ class MainWindow:
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":
-            string_entry = self.mod_handler.get_active_mod().get_string_entry(int(self.treeview.item(item, option="tags")[0]))
+            string_entry = self.mod_handler.get_active_mod().get_string_entry(textbank_id=int(self.treeview.item(item, option="tags")[1]), entry_id=int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
             s = self.treeview.item(item, option="text")
