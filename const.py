@@ -14,6 +14,10 @@ SOUND = 2
 STREAM = 2
 # [End]
 
+# File Paths
+FRIENDLYNAMES_DB = "friendlynames.db"
+CUSTOM_DB = "customnames.db"
+
 # [Plugin IDs]
 VORBIS = 0x00040001
 REV_AUDIO = 0x01A01052

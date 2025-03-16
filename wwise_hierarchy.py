@@ -59,7 +59,7 @@ class HircEntry:
         self.unused_sections = []
 
         # Bookkeeping data - external from hierarchy binary data 
-        self.soundbank: Any = None # WwiseBank
+        self.soundbanks: list[WwiseBank] = None # WwiseBank
         self.modified_children: int = 0
         self.modified: bool = False
         self.parent: HircEntry | None = None
@@ -80,7 +80,7 @@ class HircEntry:
         stream.write(data)
         stream.seek(0)
         return cls.from_memory_stream(stream)
-
+      
     def get_base_param(self):
         """
         This interface is used for getting base parameter with exception raising
@@ -110,14 +110,18 @@ class HircEntry:
             self.set_data(new_entry)
         
     def set_data(self, entry = None, **data):
-        assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
+        if self.soundbanks == []:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
 
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified(
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -126,16 +130,16 @@ class HircEntry:
                 setattr(self, name, value)
         self.modified = True
         self.size = len(self.get_data())-5
-
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        parent_id = self.get_parent_id()
-        if parent_id != None and hierarchy.has_entry(parent_id):
-            self.parent = hierarchy.get_entry(parent_id)
-        else:
+        try:
+            self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
+        except:
             self.parent = None
 
     def revert_modifications(self):
-        assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
+        if self.soundbanks == []:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
 
         if self.modified:
             self.set_data(self.from_bytes(self.data_old))
@@ -144,26 +148,46 @@ class HircEntry:
             if self.parent:
                 self.parent.lower_modified()
             else:
-                self.soundbank.lower_modified()
-
+                for bank in self.soundbanks:
+                    bank.lower_modified()
+        
+    def import_entry(self, new_entry):
+        if (
+            (self.modified and new_entry.get_data() != self.data_old)
+            or
+            (not self.modified and new_entry.get_data() != self.get_data())
+        ):
+            self.set_data(new_entry)
+        
+    def get_id(self):
+        return self.hierarchy_id
+        
     def raise_modified(self):
-        assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
+        if self.soundbanks == []:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
 
         self.modified_children+=1
         if self.parent:
             self.parent.raise_modified()
         else:
-            self.soundbank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
         
     def lower_modified(self):
-        assert_not_none(f"No WwiseBank is attached to {self.hierarchy_id}", self.soundbank)
+        if self.soundbanks == []:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
 
         self.modified_children-=1
         if self.parent:
             self.parent.lower_modified()
         else:
-            self.soundbank.lower_modified()
-
+            for bank in self.soundbanks:
+                bank.lower_modified()
+                      
     def update_size(self):
         """
         Interface contract and usage:
@@ -189,6 +213,115 @@ class HircEntry:
     def get_id(self):
         return self.hierarchy_id
 
+class MusicRandomSequence(HircEntry):
+    
+    def __init__(self):
+        super().__init__()
+    
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        entry = MusicRandomSequence()
+        entry.hierarchy_type = stream.uint8_read()
+        entry.size = stream.uint32_read()
+        entry.hierarchy_id = stream.uint32_read()
+        return entry
+        
+    def get_data(self):
+        return b""
+    
+
+class MusicSegment(HircEntry):
+    
+    import_values = ["parent_id", "tracks", "duration", "entry_marker", "exit_marker", "unused_sections", "markers"]
+
+    def __init__(self):
+        super().__init__()
+        self.tracks = []
+        self.duration = 0
+        self.entry_marker = None
+        self.exit_marker = None
+        self.unused_sections = []
+        self.markers = []
+        self.modified = False
+    
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        entry = MusicSegment()
+        entry.hierarchy_type = stream.uint8_read()
+        entry.size = stream.uint32_read()
+        entry.hierarchy_id = stream.uint32_read()
+        entry.unused_sections.append(stream.read(10))
+        entry.parent_id = stream.uint32_read()
+        entry.unused_sections.append(stream.read(1))
+        n = stream.uint8_read() #number of props
+        stream.seek(stream.tell()-1)
+        entry.unused_sections.append(stream.read(5*n + 1))
+        n = stream.uint8_read() #number of props (again)
+        stream.seek(stream.tell()-1)
+        entry.unused_sections.append(stream.read(5*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
+        n = stream.uint32_read() #number of children (tracks)
+        for _ in range(n):
+            entry.tracks.append(stream.uint32_read())
+        entry.unused_sections.append(stream.read(23)) #meter info
+        n = stream.uint32_read() #number of stingers
+        stream.seek(stream.tell()-4)
+        entry.unused_sections.append(stream.read(24*n + 4))
+        entry.duration = struct.unpack("<d", stream.read(8))[0]
+        n = stream.uint32_read() #number of markers
+        for i in range(n):
+            id = stream.uint32_read()
+            position = struct.unpack("<d", stream.read(8))[0]
+            name = []
+            temp = b"1"
+            while temp != b"\x00":
+                temp = stream.read(1)
+                name.append(temp)
+            name = b"".join(name)
+            marker = [id, position, name]
+            entry.markers.append(marker)
+            if i == 0:
+                entry.entry_marker = marker
+            elif i == n-1:
+                entry.exit_marker = marker
+        return entry
+        
+    def set_data(self, entry = None, **data):
+        if self.soundbanks == []:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
+                if name == "entry_marker":
+                    self.entry_marker[1] = value
+                elif name == "exit_marker":
+                    self.exit_marker[1] = value
+                else:
+                    setattr(self, name, value)
+        self.modified = True
+        self.size = len(self.get_data()) - 5
+        try:
+            self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
+            #potentially problematic, might need better way of getting the parent
+        except:
+            self.parent = None
+        
+    def get_data(self):
+        return (
+            b"".join([
+                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
+                self.unused_sections[0],
+                self.parent_id.to_bytes(4, byteorder="little"),
+                self.unused_sections[1],
+                self.unused_sections[2],
+                self.unused_sections[3],
+                len(self.tracks).to_bytes(4, byteorder="little"),
+                b"".join([x.to_bytes(4, byteorder="little") for x in self.tracks]),
+                self.unused_sections[4],
+                self.unused_sections[5],
+                struct.pack("<d", self.duration),
+                len(self.markers).to_bytes(4, byteorder="little"),
+                b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in self.markers])
+            ])
+        )
 
 class ActionException:
     """
@@ -306,8 +439,8 @@ class Action(HircEntry):
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
-
+                for bank in self.soundbanks:
+                    bank.raise_modified()
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -345,7 +478,90 @@ class Action(HircEntry):
         data += self.rangePropBundle.get_data()
 
         return data
+        
 
+class TrackInfoStruct:
+    
+    def __init__(self):
+        self.track_id = self.source_id = self.event_id = self.play_at = self.begin_trim_offset = self.end_trim_offset = self.source_duration = 0
+
+    @classmethod
+    def from_bytes(cls, bytes: bytes | bytearray):
+        t = TrackInfoStruct()
+        t.track_id, t.source_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack("<IIIdddd", bytes)
+        return t
+        
+    def get_id(self):
+        if self.source_id != 0:
+            return self.source_id
+        else:
+            return self.event_id
+
+    def get_data(self):
+        return struct.pack("<IIIdddd", self.track_id, self.source_id, self.event_id, self.play_at, self.begin_trim_offset, self.end_trim_offset, self.source_duration)
+            
+
+class ClipAutomationStruct:
+    
+    def __init__(self):
+        self.graph_points = []
+        self.clip_index = self.auto_type = self.num_graph_points = 0
+        
+    @classmethod
+    def from_memory_stream(cls, stream):
+        s = ClipAutomationStruct()
+        s.clip_index, s.auto_type, s.num_graph_points = struct.unpack("<III", stream.read(12))
+        for _ in range(s.num_graph_points):
+            s.graph_points.append(struct.unpack("<fff", stream.read(12)))
+        return s
+            
+    def get_data(self):
+        return struct.pack("<III", self.clip_index, self.auto_type, self.num_graph_points) + b"".join([struct.pack("<fff", point[0], point[1], point[2]) for point in self.graph_points])
+        
+
+class MusicTrack(HircEntry):
+    
+    import_values = ["bit_flags", "unused_sections", "parent_id", "sources", "track_info", "clip_automations", "misc"]
+    
+    def __init__(self):
+        super().__init__()
+        self.bit_flags = 0
+        self.unused_sections = []
+        self.clip_automations = []
+        
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        entry = MusicTrack()
+        entry.hierarchy_type = stream.uint8_read()
+        entry.size = stream.uint32_read()
+        start_position = stream.tell()
+        entry.hierarchy_id = stream.uint32_read()
+        entry.bit_flags = stream.uint8_read()
+        num_sources = stream.uint32_read()
+        for _ in range(num_sources):
+            source = BankSourceStruct.from_bytes(stream.read(14))
+            entry.sources.append(source)
+        num_track_info = stream.uint32_read()
+        for _ in range(num_track_info):
+            track = TrackInfoStruct.from_bytes(stream.read(44))
+            entry.track_info.append(track)
+        entry.unused_sections.append(stream.read(4))
+        num_clip_automations = stream.uint32_read()
+        for _ in range(num_clip_automations):
+            entry.clip_automations.append(ClipAutomationStruct.from_memory_stream(stream))
+        entry.unused_sections.append(stream.read(5))
+        entry.override_bus_id = stream.uint32_read()
+        entry.parent_id = stream.uint32_read()
+        entry.misc = stream.read(entry.size - (stream.tell()-start_position))
+        return entry
+
+    def get_data(self):
+        b = b"".join([source.get_data() for source in self.sources])
+        t = b"".join([track.get_data() for track in self.track_info])
+        clips = b"".join([clip.get_data() for clip in self.clip_automations])
+        payload = b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unused_sections[1] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
+        self.size = 9 + len(payload)
+        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + payload
 
 class ActionStop(Action):
     """
@@ -1503,22 +1719,6 @@ class Event(HircEntry):
             data += _id.to_bytes(4, "little")
         return data
         
-        
-class MusicRandomSequence(HircEntry):
-    
-    def __init__(self):
-        super().__init__()
-    
-    @classmethod
-    def from_memory_stream(cls, stream: MemoryStream):
-        entry = MusicRandomSequence()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        entry.hierarchy_id = stream.uint32_read()
-        return entry
-        
-    def get_data(self):
-        return b""
 
 
 class RandomSequenceContainer(HircEntry):
@@ -1669,115 +1869,7 @@ class RandomSequenceContainer(HircEntry):
             data += playListItem.get_data()
 
         return data
-    
-
-class MusicSegment(HircEntry):
-    
-    import_values = ["parent_id", "tracks", "duration", "entry_marker", "exit_marker", "unused_sections", "markers"]
-
-    def __init__(self):
-        super().__init__()
-        self.tracks = []
-        self.duration = 0
-        self.entry_marker = None
-        self.exit_marker = None
-        self.unused_sections = []
-        self.markers = []
-        self.modified = False
-    
-    @classmethod
-    def from_memory_stream(cls, stream: MemoryStream):
-        entry = MusicSegment()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        entry.hierarchy_id = stream.uint32_read()
-        entry.unused_sections.append(stream.read(10))
-        entry.parent_id = stream.uint32_read()
-        entry.unused_sections.append(stream.read(1))
-        n = stream.uint8_read() #number of props
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1))
-        n = stream.uint8_read() #number of props (again)
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
-        n = stream.uint32_read() #number of children (tracks)
-        for _ in range(n):
-            entry.tracks.append(stream.uint32_read())
-        entry.unused_sections.append(stream.read(23)) #meter info
-        n = stream.uint32_read() #number of stingers
-        stream.seek(stream.tell()-4)
-        entry.unused_sections.append(stream.read(24*n + 4))
-        entry.duration = struct.unpack("<d", stream.read(8))[0]
-        n = stream.uint32_read() #number of markers
-        for i in range(n):
-            id = stream.uint32_read()
-            position = struct.unpack("<d", stream.read(8))[0]
-            name = []
-            temp = b"1"
-            while temp != b"\x00":
-                temp = stream.read(1)
-                name.append(temp)
-            name = b"".join(name)
-            marker = [id, position, name]
-            entry.markers.append(marker)
-            if i == 0:
-                entry.entry_marker = marker
-            elif i == n-1:
-                entry.exit_marker = marker
-        return entry
-        
-    def set_data(self, entry = None, **data):
-        if self.soundbank == None:
-            raise AssertionError(
-                "No WwiseBank object is attached to this instance WwiseHierarchy"
-            )
-
-        if not self.modified:
-            self.data_old = self.get_data()
-            if self.parent:
-                self.parent.raise_modified()
-            else:
-                self.soundbank.raise_modified()
-        if entry:
-            for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
-        else:
-            for name, value in data.items():
-                if name == "entry_marker":
-                    self.entry_marker[1] = value
-                elif name == "exit_marker":
-                    self.exit_marker[1] = value
-                else:
-                    setattr(self, name, value)
-        self.modified = True
-        self.size = len(self.get_data()) - 5
-
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
-        if hierarchy.has_entry(self.parent_id):
-            self.parent = hierarchy.get_entry(self.parent_id)
-        else:
-            self.parent = None
-        
-    def get_data(self):
-        return (
-            b"".join([
-                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
-                self.unused_sections[0],
-                self.parent_id.to_bytes(4, byteorder="little"),
-                self.unused_sections[1],
-                self.unused_sections[2],
-                self.unused_sections[3],
-                len(self.tracks).to_bytes(4, byteorder="little"),
-                b"".join([x.to_bytes(4, byteorder="little") for x in self.tracks]),
-                self.unused_sections[4],
-                self.unused_sections[5],
-                struct.pack("<d", self.duration),
-                len(self.markers).to_bytes(4, byteorder="little"),
-                b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in self.markers])
-            ])
-        )
-        
-            
+         
 class BankSourceStruct:
     """
     plugin_id U32
@@ -1833,78 +1925,7 @@ class BankSourceStruct:
                     )
                     b += struct.pack(f"<{len(self.plugin_data)}s", self.plugin_data)
         return b
-        
-
-class TrackInfoStruct:
-    
-    def __init__(self):
-        self.track_id = self.source_id = self.event_id = self.play_at = self.begin_trim_offset = self.end_trim_offset = self.source_duration = 0
-
-    @classmethod
-    def from_bytes(cls, bytes: bytes | bytearray):
-        t = TrackInfoStruct()
-        t.track_id, t.source_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack("<IIIdddd", bytes)
-        return t
-        
-    def get_id(self):
-        if self.source_id != 0:
-            return self.source_id
-        else:
-            return self.event_id
-
-    def get_data(self):
-        return struct.pack("<IIIdddd", self.track_id, self.source_id, self.event_id, self.play_at, self.begin_trim_offset, self.end_trim_offset, self.source_duration)
             
-
-class MusicTrack(HircEntry):
-    
-    import_values = ["bit_flags", "unused_sections", "parent_id", "sources", "track_info", "misc"]
-    
-    def __init__(self):
-        super().__init__()
-        self.bit_flags = 0
-        self.sources: list[BankSourceStruct] = []
-        self.track_info: list[TrackInfoStruct] = []
-        self.unused_sections = []
-        
-    @classmethod
-    def from_memory_stream(cls, stream: MemoryStream):
-        entry = MusicTrack()
-        entry.hierarchy_type = stream.uint8_read()
-        entry.size = stream.uint32_read()
-        start_position = stream.tell()
-        entry.hierarchy_id = stream.uint32_read()
-        entry.bit_flags = stream.uint8_read()
-        num_sources = stream.uint32_read()
-        for _ in range(num_sources):
-            source = BankSourceStruct.from_memory_stream(stream)
-            entry.sources.append(source)
-        num_track_info = stream.uint32_read()
-        for _ in range(num_track_info):
-            track = TrackInfoStruct.from_bytes(stream.read(44))
-            entry.track_info.append(track)
-        start = stream.tell()
-        _ = stream.uint32_read()
-        num_clip_automations = stream.uint32_read()
-        for _ in range(num_clip_automations):
-            stream.advance(8)
-            num_graph_points = stream.uint32_read()
-            for _ in range(num_graph_points):
-                stream.advance(12)
-        stream.advance(5)
-        end_position = stream.tell()
-        stream.seek(start)
-        entry.unused_sections.append(stream.read(end_position - start))
-        entry.override_bus_id = stream.uint32_read()
-        entry.parent_id = stream.uint32_read()
-        entry.misc = stream.read(entry.size - (stream.tell()-start_position))
-        return entry
-
-    def get_data(self):
-        b = b"".join([source.get_data() for source in self.sources])
-        t = b"".join([track.get_data() for track in self.track_info])
-        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
-
     
 class Sound(HircEntry):
     
@@ -2033,7 +2054,6 @@ class HircEntryFactory:
             case _:
                 entry = HircEntry.from_memory_stream(stream)
         return entry
-
             
 class WwiseHierarchy:
     
@@ -2077,11 +2097,8 @@ class WwiseHierarchy:
         for entry in new_hierarchy.get_entries():
             if entry.hierarchy_id in self.entries:
                 self.entries[entry.hierarchy_id].import_entry(entry)
-
-            self.entries[entry.hierarchy_id] = entry
-            self.added_entries[entry.hierarchy_id] = entry
-
-            self._categorized_entry(entry)
+            else:
+                self.add_entry(entry)
                 
     def revert_modifications(self, entry_id: int = 0):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
@@ -2092,6 +2109,7 @@ class WwiseHierarchy:
             for entry in self.removed_entries:
                 self.entries[entry.hierarchy_id] = entry
                 self.soundbank.lower_modified() # type: ignore
+                self._categorized_entry(entry)
             self.removed_entries.clear()
             for entry in self.added_entries:
                 self.remove_entry(entry.hierarchy_id)
@@ -2106,6 +2124,7 @@ class WwiseHierarchy:
         self.added_entries[new_entry.hierarchy_id] = new_entry
         self.entries[new_entry.hierarchy_id] = new_entry
         self._categorized_entry(new_entry)
+        new_entry.soundbanks.append(self.soundbank)
             
     def remove_entry(self, entry: HircEntry):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
@@ -2121,6 +2140,7 @@ class WwiseHierarchy:
             self._remove_categorized_entry(entry)
             
             del self.entries[entry.hierarchy_id]
+            entry.soundbanks.remove(self.soundbank)
     
     def has_entry(self, entry_id: int):
         return entry_id in self.entries

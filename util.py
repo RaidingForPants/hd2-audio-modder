@@ -83,7 +83,7 @@ class MemoryStream:
             self.write(value)
             return bytearray(value)
         return value
-        
+
     def int8_read(self) -> int:
         return self.read_format('b', 1)
 
@@ -111,7 +111,6 @@ class MemoryStream:
     def float_read(self) -> float:
         return self.read_format('f', 4)
 
-        
 def pad_to_16_byte_align(data):
     b = bytearray(data)
     l = len(b)
@@ -204,7 +203,6 @@ def strip_patch_index(filename):
             break
     filename = ".".join(split)
     return filename
-
 
 _FNV_32_OFFSET_BASIS = c_uint32(2166136261)
 _FNV_32_PRIME = c_uint32(16777619)

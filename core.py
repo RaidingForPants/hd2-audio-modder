@@ -1,14 +1,14 @@
-import copy
-import locale
 import numpy
 import os
-import posixpath as xpath
 import pyaudio
-import random
 import subprocess
 import struct
-import xml.etree.ElementTree as etree
 import wave
+import copy
+import locale
+import random
+import xml.etree.ElementTree as etree
+import posixpath as xpath
 
 from typing import Callable, Literal, Union
 
@@ -19,7 +19,6 @@ from util import *
 from wwise_hierarchy import *
 
 from log import logger
-   
 
 class AudioSource:
 
@@ -54,7 +53,7 @@ class AudioSource:
     def is_modified(self) -> bool:
         return self.modified
 
-    def get_data(self):
+    def get_data(self) -> bytearray:
         return bytearray() if self.data == b"" else self.data 
         
     def get_resource_id(self) -> int:
@@ -418,6 +417,17 @@ class TextBank:
         
     def is_modified(self) -> bool:
         return self.modified
+
+    def import_text(self, text_bank: "TextBank"):
+        for new_string_entry in text_bank.entries.values():
+            try:
+                old_string_entry = self.entries[new_string_entry.string_id]
+            except:
+                continue
+            if (old_string_entry.modified and new_string_entry.get_text() != old_string_entry.text_old
+                or (not old_string_entry.modified and new_string_entry.get_text() != old_string_entry.get_text())
+            ):
+                old_string_entry.set_text(new_string_entry.get_text())
         
     def generate(self) -> bytearray:
         stream = MemoryStream()
@@ -463,6 +473,7 @@ class GameArchive:
         self.wwise_streams: dict[int, WwiseStream] = {}
         self.wwise_banks: dict[int, WwiseBank] = {}
         self.audio_sources: dict[int, AudioSource] = {}
+        self.hierarchy_entries: dict[int, HircEntry] = {}
         self.text_banks = {}
     
     @classmethod
@@ -492,7 +503,10 @@ class GameArchive:
         
     def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
-        
+
+    def get_hierarchy_entries(self) -> dict[int, HircEntry]:
+        return self.hierarchy_entries
+
     def write_type_header(self, toc_file: MemoryStream, entry_type: int, num_entries: int):
         if num_entries > 0:
             toc_file.write(struct.pack("<QQQII", 0, entry_type, num_entries, 16, 64))
@@ -610,6 +624,7 @@ class GameArchive:
         self.wwise_banks.clear()
         self.audio_sources.clear()
         self.text_banks.clear()
+        self.hierarchy_entries.clear()
         
         media_index = MediaIndex()
         
@@ -652,6 +667,15 @@ class GameArchive:
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
                     pass
+                replacements = {}
+                for hirc_id, hirc_entry in hirc.entries.items():
+                    if hirc_id in self.hierarchy_entries:
+                        # rearrange stuff
+                        self.hierarchy_entries[hirc_id].soundbanks.append(entry)
+                        replacements[hirc_id] = self.hierarchy_entries[hirc_id]
+                    else:
+                        self.hierarchy_entries[hirc_id] = hirc_entry
+                hirc.entries.update(replacements)
                 entry.hierarchy = hirc
                 #Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
@@ -680,6 +704,7 @@ class GameArchive:
                 self.text_banks[text_bank.get_id()] = text_bank
         
         # Create all AudioSource objects
+
         self._create_all_audio_source_objects(media_index)
 
         # Construct list of audio sources in each bank
@@ -731,7 +756,7 @@ class GameArchive:
             return None
 
         plugin_id = source.plugin_id
-        if plugin_id != VORBIS and plugin_id != REV_AUDIO:
+        if plugin_id not in [VORBIS, REV_AUDIO]:
             logger.info(
                f"Audio source {source_id} has plugin ID {plugin_id}. Audio "
                 "tool currently can only unpack audio source with plugin_id of "
@@ -740,7 +765,7 @@ class GameArchive:
             return None
 
         stream_type = source.stream_type
-        if stream_type != BANK and stream_type not in [STREAM, PREFETCH_STREAM]:
+        if stream_type not in [BANK, STREAM, PREFETCH_STREAM]:
             logger.warning(
                 f"Audio source {source_id} has stream type: {stream_type}. Audio"
                  "tool currently can only unpack audio source with stream type  "
@@ -1043,6 +1068,8 @@ class Mod:
         self.audio_count: dict[int, int] = {}
         self.text_banks: dict[int, TextBank] = {}
         self.text_count = {}
+        self.hierarchy_entries: dict[int, HircEntry] = {}
+        self.hierarchy_count: dict[int, int] = {}
         self.game_archives: dict[str, GameArchive] = {}
         self.name: str = name
         
@@ -1066,17 +1093,33 @@ class Mod:
         bank = self.get_wwise_bank(soundbank_id)
         if bank.hierarchy == None:
             raise AssertionError(f"WwiseBank {soundbank_id} with no WwiseHierarchy")
+        if bank in entry.soundbanks:
+            raise Exception(f"Entry {entry.hierarchy_id} already exists in soundbank {soundbank_id}!")
+        if entry.hierarchy_id in self.hierarchy_entries:
+            entry = self.hierarchy_entries[entry.hierarchy_id]
+            self.hierarchy_count[entry_id] = self.hierarchy_count[entry_id] + 1
+        else:
+            self.hierarchy_count[entry.hierarchy_id] = 1
+            self.hierarchy_entries[entry.hierarchy_id] = entry
         bank.hierarchy.add_entry(entry)
         
     def remove_hierarchy_entry(self, soundbank_id: int, entry_id: int):
+        if entry_id not in self.hierarchy_entries:
+            raise AssertionError(f"Hierarchy entry {entry_id} not found")
         bank = self.get_wwise_bank(soundbank_id)
         if bank.hierarchy == None:
             raise AssertionError(f"WwiseBank {soundbank_id} with no WwiseHierarchy")
-        entry = self.get_hierarchy_entry(soundbank_id, entry_id)
+        entry = self.get_hierarchy_entry(entry_id)
         bank.hierarchy.remove_entry(entry)
+        if self.hierarchy_count[entry_id] > 1:
+            self.hierarchy_count[entry_id] = self.hierarchy_count[entry_id] - 1
+        else:
+            del self.hierarchy_count[entry_id]
+            del self.hierarchy_entries[entry_id]
+            
         
     def revert_hierarchy_entry(self, soundbank_id: int, entry_id: int):
-        self.get_hierarchy_entry(soundbank_id, entry_id).revert_modifications()
+        self.get_hierarchy_entry(entry_id).revert_modifications()
         
     def revert_string_entry(self, textbank_id: int, entry_id: int):
         self.get_string_entry(textbank_id, entry_id).revert_modifications()
@@ -1149,7 +1192,6 @@ class Mod:
         # Update Mod audio source list
         self.audio_sources[short_id] = audio_source
         self.audio_count[short_id] = 1
-
         
     def dump_as_wem(self, file_id: int, output_path: str = ""):
         """
@@ -1363,27 +1405,22 @@ class Mod:
     def get_string_entries(self, textbank_id: int) -> dict[int, StringEntry]:
         return self.get_text_bank(textbank_id).entries
                 
-    def get_hierarchy_entry(self, soundbank_id: int, hierarchy_id: int) -> HircEntry:
+
+    def get_hierarchy_entry(self, hierarchy_id: int) -> HircEntry:
         """
         @exception
         - KeyError
-            - Trivial
-        - AssertionError
         """
-        bank = self.get_wwise_bank(soundbank_id)
-        if bank.hierarchy == None:
-            raise AssertionError(f"WwiseBank {soundbank_id} without WwiseHierarchy")
-        try:
-            return bank.hierarchy.get_entry(hierarchy_id)
-        except KeyError:
-            raise KeyError(f"Cannot find wwise hierarchy entry with id {hierarchy_id} in soundbank with id {soundbank_id}")
+        return self.get_hierarchy_entries()[hierarchy_id]
             
-    def get_hierarchy_entries(self, soundbank_id: int):
+    def get_hierarchy_entries(self, soundbank_id: int = 0):
         """
         @exception
         - KeyError (Bubble up)
         - AssertionError
         """
+        if soundbank_id == 0:
+            return self.hierarchy_entries
         bank = self.get_wwise_bank(soundbank_id)
         if bank.hierarchy == None:
             raise AssertionError(f"WwiseBank {soundbank_id} with no WwiseHierarchy")
@@ -1462,6 +1499,11 @@ class Mod:
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         new_archive = GameArchive.from_file(archive_file)
+        
+        key = new_archive.name
+        if key in self.game_archives.keys():
+            return False
+        
         self.add_game_archive(new_archive)
 
         return True
@@ -1483,7 +1525,7 @@ class Mod:
         
     def remove_game_archive(self, archive_name: str = ""):
         if archive_name not in self.game_archives.keys():
-            return
+            raise AssertionError(f"Archive {archive_name} not in mod!")
             
         game_archive = self.game_archives[archive_name]
             
@@ -1491,13 +1533,20 @@ class Mod:
             if key in self.get_wwise_banks().keys():
                 self.bank_count[key] -= 1
                 if self.bank_count[key] == 0:
+                    for entry in game_archive.get_wwise_banks()[key].hierarchy.entries.values():
+                        entry.soundbanks.remove(game_archive.get_wwise_banks()[key])
                     for audio in self.get_wwise_banks()[key].get_content():
                         parents = [p for p in audio.parents]
                         for parent in parents:
-                            if isinstance(parent, HircEntry) and parent.soundbank.get_id() == key:
+                            if isinstance(parent, HircEntry) and key in [b.get_id() for b in parent.soundbanks]:
                                 audio.parents.remove(parent)
                     del self.get_wwise_banks()[key]
                     del self.bank_count[key]
+        for key, entry in game_archive.get_hierarchy_entries().items():
+            self.hierarchy_count[key] -= 1
+            if self.hierarchy_count[key] == 0:
+                del self.hierarchy_count[key]
+                del self.get_hierarchy_entries()[key]
         for key in game_archive.wwise_streams.keys():
             if key in self.get_wwise_streams().keys():
                 self.stream_count[key] -= 1
@@ -1511,7 +1560,6 @@ class Mod:
                         )
                         continue
                     stream.audio_source.parents.remove(self.get_wwise_streams()[key])
-
                     del self.get_wwise_streams()[key]
                     del self.stream_count[key]
         for key in game_archive.text_banks.keys():
@@ -1542,16 +1590,32 @@ class Mod:
             return
 
         self.game_archives[key] = game_archive
+        
+        replacements = {}
+        for key, entry in game_archive.get_hierarchy_entries().items():
+            if key in self.get_hierarchy_entries():
+                self.hierarchy_count[key] += 1
+                existing_entry = self.get_hierarchy_entry(key)
+                replacements[key] = existing_entry
+                for bank in entry.soundbanks:
+                    bank.hierarchy.entries[key] = existing_entry
+                    if bank not in existing_entry.soundbanks:
+                        existing_entry.soundbanks.append(bank)
+            else:
+                self.hierarchy_count[key] = 1
+                self.hierarchy_entries[key] = entry
+        game_archive.get_hierarchy_entries().update(replacements)
+
         for key in game_archive.wwise_banks.keys():
             if key in self.get_wwise_banks().keys():
                 self.bank_count[key] += 1
                 for audio in game_archive.wwise_banks[key].get_content():
                     parents = [p for p in audio.parents]
                     for parent in parents:
-                        if isinstance(parent, HircEntry) and parent.soundbank.get_id() == key:
+                        if isinstance(parent, HircEntry) and key in [b.get_id() for b in parent.soundbanks]:
                             audio.parents.remove(parent)
                             try:
-                                new_parent = self.get_hierarchy_entry(key, parent.get_id())
+                                new_parent = self.get_hierarchy_entry(parent.get_id())
                             except:
                                 continue # add missing hierarchy entry?
                             audio.parents.add(new_parent)
@@ -1639,7 +1703,6 @@ class Mod:
                             entry_marker=0,
                             exit_marker=len_ms
                         )
-
                         tracks = copy.deepcopy(item.track_info)
                         for t in tracks:
                             if t.source_id == old_audio.get_short_id():
@@ -1655,11 +1718,16 @@ class Mod:
                 raise AssertionError(
                     f"WwiseBank {bank.file_id} has no WwiseHierarchy"
                 )
-
-            self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+            try:
+                self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+            except:
+                logger.warning(f"Unable to import heirarchy information for {bank.dep.data}")
 
         for text_bank in patch_game_archive.get_text_banks().values():
-            self.get_text_banks()[text_bank.get_id()].import_text(text_bank)
+            try:
+                self.get_text_banks()[text_bank.get_id()].import_text(text_bank)
+            except:
+                logger.warning("Unable to import some text data")
         
         return True
 
@@ -1711,12 +1779,17 @@ class Mod:
             return
 
         length_import_failed = False
+        wrong_file_format = False
         for filepath, targets in wems.items():
             if not os.path.exists(filepath) or not os.path.isfile(filepath):
                 continue
             have_length = True
             with open(filepath, 'rb') as f:
                 audio_data = bytearray(f.read())
+                if audio_data[20:22] != b"\xFF\xFF":
+                    wrong_file_format = True
+                    logger.warning(f"File {filepath} was the incorrect audio format!")
+                    continue
             if set_duration:
                 try:
                     process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
@@ -1728,40 +1801,41 @@ class Mod:
                             total_samples = int(line[22:line.index("(")-1])
                     len_ms = total_samples * 1000 / sample_rate
                 except:
+                    logger.warning(f"Failed to get duration info for {filepath}!")
                     have_length = False
                     length_import_failed = True
             for target in targets:
-                audio = self.get_audio_source(target)
-                audio.set_data(audio_data)
-                if not have_length:
-                    continue
-
-                # find music segment for Audio Source
-                for item in audio.parents:
-                    if isinstance(item, MusicTrack):
-                        if item.parent == None:
-                            raise AssertionError(
-                                f"Music track {item.hierarchy_id} does not have"
-                                 " a parent!"
-                            )
-
-                        item.parent.set_data(
-                            duration=len_ms, entry_marker=0, exit_marker=len_ms
-                        )
-
-                        tracks = copy.deepcopy(item.track_info)
-
-                        for t in tracks:
-                            if t.source_id == audio.get_short_id():
-                                t.begin_trim_offset = 0
-                                t.end_trim_offset = 0
-                                t.source_duration = len_ms
-                                t.play_at = 0
-                                break
-                        item.set_data(track_info=tracks)
+                audio: AudioSource | None = self.get_audio_source(target)
+                if audio:
+                    audio.set_data(audio_data)
+                    if have_length:
+                        # find music segment for Audio Source
+                        for item in audio.parents:
+                            if isinstance(item, MusicTrack):
+                              if item.parent == None:
+                                raise AssertionError(
+                                    f"Music track {item.hierarchy_id} does not have"
+                                    " a parent!"
+                                )
+                                item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+                                tracks = copy.deepcopy(item.track_info)
+                                for t in tracks:
+                                    if t.source_id == audio.get_short_id():
+                                        t.begin_trim_offset = 0
+                                        t.end_trim_offset = 0
+                                        t.source_duration = len_ms
+                                        t.play_at = 0
+                                        break
+                                item.set_data(track_info=tracks)
+                                
+        if length_import_failed and wrong_file_format:
+            raise RuntimeError("Failed to set track duration for some audio sources. Some audio was not the correct format.")
 
         if length_import_failed:
-            raise RuntimeError("Failed to set track duration for some audio sources")
+            raise RuntimeError("Failed to set track duration for some audio sources.")
+            
+        if wrong_file_format:
+            raise RuntimeError("Some audio was not the correct format. If using Wwise, ensure your Conversion Setting format is set to Vorbis.")
     
     def create_external_sources_list(self, sources: list[str], conversion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
@@ -1837,14 +1911,17 @@ class Mod:
             
     def import_files(self, file_dict: dict[str, list[int]]):
         patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
-        wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wem"}
-        wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] == ".wav"}
+
+        wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wem"}
+        wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wav"}
         
         # check other file extensions and call vgmstream to convert to wav, then add to wavs dict
         filetypes = list(SUPPORTED_AUDIO_TYPES)
         filetypes.remove(".wav")
         filetypes.remove(".wem")
-        others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1] in filetypes}
+
+        others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in filetypes}
+
         temp_files = []
         for file in others.keys():
             subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
