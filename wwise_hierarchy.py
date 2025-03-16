@@ -59,7 +59,7 @@ class HircEntry:
         self.unused_sections = []
 
         # Bookkeeping data - external from hierarchy binary data 
-        self.soundbanks: list[WwiseBank] = None # WwiseBank
+        self.soundbanks: list[WwiseBank] = [] # WwiseBank
         self.modified_children: int = 0
         self.modified: bool = False
         self.parent: HircEntry | None = None
@@ -121,7 +121,7 @@ class HircEntry:
                 self.parent.raise_modified()
             else:
                 for bank in self.soundbanks:
-                    bank.raise_modified(
+                    bank.raise_modified()
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -290,12 +290,12 @@ class MusicSegment(HircEntry):
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
-                if name == "entry_marker":
-                    self.entry_marker[1] = value
-                elif name == "exit_marker":
-                    self.exit_marker[1] = value
-                else:
-                    setattr(self, name, value)
+            if name == "entry_marker":
+                self.entry_marker[1] = value
+            elif name == "exit_marker":
+                self.exit_marker[1] = value
+            else:
+                setattr(self, name, value)
         self.modified = True
         self.size = len(self.get_data()) - 5
         try:
@@ -528,6 +528,8 @@ class MusicTrack(HircEntry):
         self.bit_flags = 0
         self.unused_sections = []
         self.clip_automations = []
+        self.sources = []
+        self.track_info = []
         
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -539,7 +541,7 @@ class MusicTrack(HircEntry):
         entry.bit_flags = stream.uint8_read()
         num_sources = stream.uint32_read()
         for _ in range(num_sources):
-            source = BankSourceStruct.from_bytes(stream.read(14))
+            source = BankSourceStruct.from_memory_stream(stream)
             entry.sources.append(source)
         num_track_info = stream.uint32_read()
         for _ in range(num_track_info):
@@ -2083,7 +2085,7 @@ class WwiseHierarchy:
         num_items = reader.uint32_read()
         for _ in range(num_items):
             entry = HircEntryFactory.from_memory_stream(reader)
-            entry.soundbank = self.soundbank
+            entry.soundbanks.append(self.soundbank)
             self.entries[entry.get_id()] = entry
 
             self._categorized_entry(entry)

@@ -1019,7 +1019,7 @@ class MainWindow:
         self.name_lookup = lookup_store
         self.sound_handler = SoundHandler.get_instance()
         self.watched_paths = []
-        self.mod_handler = ModHandler.get_instance()
+        self.mod_handler = ModHandler.get_instance(lookup_store)
         self.mod_handler.create_new_mod("default")
         
         self.root = TkinterDnD.Tk()
@@ -2017,7 +2017,7 @@ class MainWindow:
             for bank in archive.wwise_banks.values():
                 existing_sources.clear()
                 bank_entry = self.create_treeview_entry(bank, archive_entry)
-                for hierarchy_entry in bank.hierarchy.entries.values():
+                for hierarchy_entry in bank.hierarchy.get_sounds() + bank.hierarchy.get_music_tracks():
                     for source in hierarchy_entry.sources:
                         if source.plugin_id == VORBIS and source.source_id not in existing_sources:
                             existing_sources.add(source.source_id)
