@@ -285,7 +285,6 @@ class FileUploadWindow:
         if self.callback is not None:
             self.callback([])
     
-
 class PopupWindow:
     def __init__(self, message, title="Missing Data!"):
         self.message = message
@@ -1944,7 +1943,7 @@ class MainWindow:
             name = entry.name
             entry_type = "Archive File"
             self.treeview.item(tree_entry, open=True)
-        
+
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -1983,7 +1982,7 @@ class MainWindow:
                                         pass
                     elif isinstance(hierarchy_entry, RandomSequenceContainer):
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
-                        for s_id in hierarchy_entry.contents:
+                        for s_id in hierarchy_entry.children:
                             sound = bank.hierarchy.entries[s_id]
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
