@@ -302,6 +302,8 @@ class WwiseBank:
             data += "DATA".encode('utf-8') + sum([len(x) for x in data_array]).to_bytes(4, byteorder="little")
             data += b"".join(data_array)
             
+        # ensure Actor-Mixers have the right children
+            
         hierarchy_section = self.hierarchy.get_data()
         data += "HIRC".encode('utf-8') + len(hierarchy_section).to_bytes(4, byteorder="little")
         data += hierarchy_section
@@ -670,11 +672,21 @@ class GameArchive:
                 replacements = {}
                 for hirc_id, hirc_entry in hirc.entries.items():
                     if hirc_id in self.hierarchy_entries:
+                        existing_entry = self.hierarchy_entries[hirc_id]
                         # rearrange stuff
-                        self.hierarchy_entries[hirc_id].soundbanks.append(entry)
-                        replacements[hirc_id] = self.hierarchy_entries[hirc_id]
+                        if isinstance(hirc_entry, ActorMixer):
+                            for child in hirc_entry.children.children:
+                                if child not in existing_entry.children.children:
+                                    existing_entry.children.children.append(child)
+                                    existing_entry.children.numChildren += 1
+                                    existing_entry.size += 4
+                        existing_entry.soundbanks.append(entry)
+                        replacements[hirc_id] = existing_entry
                     else:
                         self.hierarchy_entries[hirc_id] = hirc_entry
+                for hirc_id, hirc_entry in replacements.items():
+                    hirc._remove_categorized_entry(hirc.entries[hirc_id])
+                    hirc._categorized_entry(hirc_entry)
                 hirc.entries.update(replacements)
                 entry.hierarchy = hirc
                 #Add all bank sources to the source list
@@ -1597,6 +1609,12 @@ class Mod:
                 self.hierarchy_count[key] += 1
                 existing_entry = self.get_hierarchy_entry(key)
                 replacements[key] = existing_entry
+                if isinstance(entry, ActorMixer):
+                    for child in entry.children.children:
+                        if child not in existing_entry.children.children:
+                            existing_entry.children.children.append(child)
+                            existing_entry.children.numChildren += 1
+                            existing_entry.size += 4
                 for bank in entry.soundbanks:
                     bank.hierarchy.entries[key] = existing_entry
                     if bank not in existing_entry.soundbanks:
@@ -1604,6 +1622,17 @@ class Mod:
             else:
                 self.hierarchy_count[key] = 1
                 self.hierarchy_entries[key] = entry
+        # update in each soundbank hierarchy's type lists, each soundbank hierarchy, and then GameArchive
+        for bank in game_archive.wwise_banks.values():
+            hirc = bank.hierarchy
+            for hirc_id, hirc_entry in replacements.items():
+                if hirc_id in hirc.entries.keys():
+                    try:
+                        hirc._remove_categorized_entry(hirc.entries[hirc_id])
+                    except:
+                        pass
+                    hirc._categorized_entry(hirc_entry)
+                    hirc.entries[hirc_id] = hirc_entry
         game_archive.get_hierarchy_entries().update(replacements)
 
         for key in game_archive.wwise_banks.keys():
@@ -1812,11 +1841,11 @@ class Mod:
                         # find music segment for Audio Source
                         for item in audio.parents:
                             if isinstance(item, MusicTrack):
-                              if item.parent == None:
-                                raise AssertionError(
-                                    f"Music track {item.hierarchy_id} does not have"
-                                    " a parent!"
-                                )
+                                if item.parent == None:
+                                    raise AssertionError(
+                                        f"Music track {item.hierarchy_id} does not have"
+                                        " a parent!"
+                                    )
                                 item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
                                 tracks = copy.deepcopy(item.track_info)
                                 for t in tracks:

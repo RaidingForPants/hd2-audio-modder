@@ -4,6 +4,7 @@ Bank Version 141
 
 import struct
 import uuid
+import copy
 
 from collections.abc import Callable
 from typing import Union
@@ -243,6 +244,7 @@ class MusicSegment(HircEntry):
         self.unused_sections = []
         self.markers = []
         self.modified = False
+        self.parent_id = 0
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -285,17 +287,32 @@ class MusicSegment(HircEntry):
                 entry.exit_marker = marker
         return entry
         
+    def get_parent_id(self):
+        return self.parent_id
+        
     def set_data(self, entry = None, **data):
         if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
-            if name == "entry_marker":
-                self.entry_marker[1] = value
-            elif name == "exit_marker":
-                self.exit_marker[1] = value
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
             else:
-                setattr(self, name, value)
+                for bank in self.soundbanks:
+                    bank.raise_modified()
+        if entry:
+            for value in self.import_values:
+                setattr(self, value, getattr(entry, value))
+        else:
+            for name, value in data.items():
+                if name == "entry_marker":
+                    self.entry_marker[1] = value
+                elif name == "exit_marker":
+                    self.exit_marker[1] = value
+                else:
+                    setattr(self, name, value)
         self.modified = True
         self.size = len(self.get_data()) - 5
         try:
@@ -530,6 +547,7 @@ class MusicTrack(HircEntry):
         self.clip_automations = []
         self.sources = []
         self.track_info = []
+        self.parent_id = 0
         
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -556,6 +574,9 @@ class MusicTrack(HircEntry):
         entry.parent_id = stream.uint32_read()
         entry.misc = stream.read(entry.size - (stream.tell()-start_position))
         return entry
+        
+    def get_parent_id(self):
+        return self.parent_id
 
     def get_data(self):
         b = b"".join([source.get_data() for source in self.sources])
@@ -2213,7 +2234,28 @@ class WwiseHierarchy:
         return self.entries.values()
         
     def get_data(self):
+        old_child_lists = {}
+        old_size = {}
+        for mixer in self.get_actor_mixers():
+            old_child_lists[mixer.hierarchy_id] = mixer.children
+            old_size[mixer.hierarchy_id] = mixer.size
+            new_child_list = copy.deepcopy(mixer.children)
+            old_num_children = new_child_list.numChildren
+            new_list = []
+            for child in new_child_list.children:
+                if child in self.entries.keys():
+                    new_list.append(child)
+            new_child_list.children = new_list
+            new_child_list.numChildren = len(new_list)
+            mixer.children = new_child_list
+            mixer.size = mixer.size - 4*old_num_children + 4*new_child_list.numChildren
+            
         arr = [entry.get_data() for entry in self.entries.values()]
+        
+        for mixer in self.get_actor_mixers():
+            mixer.children = old_child_lists[mixer.hierarchy_id]
+            mixer.size = old_size[mixer.hierarchy_id]
+        
         return len(arr).to_bytes(4, byteorder="little") + b"".join(arr)
 
     def _categorized_entry(self, entry: HircEntry):
