@@ -3,7 +3,6 @@ import matplotlib as mpl
 from cycler import cycler
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import mplcursors
 import math
 import tkinter as tk
 import numpy as np

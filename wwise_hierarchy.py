@@ -2199,8 +2199,8 @@ class WwiseHierarchy:
                 self.soundbank.lower_modified() # type: ignore
                 self._categorized_entry(entry)
             self.removed_entries.clear()
-            for entry in self.added_entries:
-                self.remove_entry(entry.hierarchy_id)
+            for entry in self.added_entries.copy().values():
+                self.remove_entry(entry)
                 self.soundbank.lower_modified() # type: ignore
             for entry in self.get_entries():
                 entry.revert_modifications()
