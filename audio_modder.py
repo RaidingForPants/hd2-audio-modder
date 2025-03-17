@@ -26,6 +26,8 @@ from typing import Any, Literal, Callable
 from typing_extensions import Self
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+import asyncio
+import threading
 
 import config as cfg
 import db
@@ -160,6 +162,46 @@ class ProgressWindow:
     def destroy(self):
         self.root.destroy()
         
+class ProgressFrame(Frame):
+    
+    DETERMINATE = 0
+    INDETERMINATE = 1
+    DONE = 2
+    INDETERMINATE_AUTO = 3
+    
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.progress_bar = ttk.Progressbar(self, orient=HORIZONTAL, length=300)
+        self.text = ttk.Label(self, text="Done", font=('Segoe UI', 12))
+        #self.progress_bar.grid(row=0, column=0)
+        self.text.grid(row=0, column=0)
+        
+    def step(self):
+        self.progress_bar.step()
+        self.progress_bar.update_idletasks()
+        
+    def set_text(self, s):
+        self.text.configure(text=s)
+        
+    def set_mode(self, max_progress = 0, mode = 0):
+        if mode != self.INDETERMINATE_AUTO:
+            self.progress_bar.stop()
+        if mode == self.DONE:
+            self.progress_bar.grid_forget()
+            self.text.grid_forget()
+            self.text.grid(row=0, column=0)
+        else:
+            self.text.grid_forget()
+            self.progress_bar.grid(row=0, column=0)
+            self.text.grid(row=0, column=1)
+            if mode == self.INDETERMINATE:
+                self.progress_bar.configure(mode="indeterminate")
+            elif mode == self.DETERMINATE:
+                self.progress_bar.configure(mode="determinate", maximum=max_progress)
+            elif mode == self.INDETERMINATE_AUTO:
+                self.progress_bar.configure(mode="indeterminate", maximum=20)
+                self.progress_bar.start()
+        
 class VerticalScrolledFrame(ttk.Frame):
     """A pure Tkinter scrollable frame that actually works!
     * Use the 'interior' attribute to place widgets inside the scrollable frame.
@@ -226,8 +268,8 @@ class PendingFile(Frame):
 
 class FileUploadWindow:
     
-    def __init__(self, callback=None):
-        self.root = TkinterDnD.Tk()
+    def __init__(self, parent, callback=None):
+        self.root = Toplevel(parent)
         self.root.geometry("500x500")
         if os.path.exists("icon.ico"):
             self.root.iconbitmap("icon.ico")
@@ -1023,6 +1065,10 @@ class MainWindow:
         self.mod_handler = ModHandler.get_instance()
         self.mod_handler.create_new_mod("default")
         
+        self.loop = asyncio.new_event_loop()
+        self.asyncio_thread = threading.Thread(target=self.run_asyncio_loop, args=(self.loop,), daemon=True)
+        self.asyncio_thread.start()
+        
         self.root = TkinterDnD.Tk()
         if os.path.exists("icon.ico"):
             self.root.iconbitmap("icon.ico")
@@ -1071,10 +1117,13 @@ class MainWindow:
         
         self.window = PanedWindow(self.root, orient=HORIZONTAL, borderwidth=0, background="white")
         self.window.config(sashwidth=8, sashrelief="raised", opaqueresize=False)
-        self.window.pack(fill=BOTH)
-
         
-        self.top_bar.pack(side="top")
+        self.top_bar.pack(side="top", fill='x')
+        
+        self.progress_frame = ProgressFrame(self.root)
+        self.progress_frame.pack(side="bottom", fill='x')
+        
+        self.window.pack(fill=BOTH)
         
         self.search_results = []
         self.search_result_index = 0
@@ -1226,6 +1275,7 @@ class MainWindow:
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
 
         self.root.resizable(True, True)
+        #async_mainloop(self.root)
         self.root.mainloop()
         
     def drop_position(self, event):
@@ -1245,21 +1295,7 @@ class MainWindow:
     def combine_mods(self):
         if self.file_upload_window is None:
             self.sound_handler.kill_sound()
-            self.file_upload_window = FileUploadWindow(callback=self.combine_mods_callback)
-            try:
-                self.file_upload_window.root.tk.call("source", "azure.tcl")
-            except Exception as e:
-                logger.critical("Error occurred when loading themes:")
-                logger.critical(e)
-                logger.critical("Ensure azure.tcl and the themes folder are in the same folder as the executable")
-            theme = self.selected_theme.get()
-            try:
-                if theme == "dark_mode":
-                    self.file_upload_window.root.tk.call("set_theme", "dark")
-                elif theme == "light_mode":
-                    self.file_upload_window.root.tk.call("set_theme", "light")
-            except:
-                pass
+            self.file_upload_window = FileUploadWindow(self.root, callback=self.combine_mods_callback)
         
     def combine_mods_callback(self, files):
         self.file_upload_window = None
@@ -1604,12 +1640,21 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
+        self.start_async_task(self.loop, self.import_files_async, file_dict=file_dict)
+        
+    async def import_files_async(self, file_dict):
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Importing Files")
         try:
-            self.mod_handler.get_active_mod().import_files(file_dict)
+            await self.mod_handler.get_active_mod().import_files(file_dict)
         except Exception as e:
-            showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)}. Some imports were skipped.")
-        self.check_modified()
-        self.show_info_window()
+            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+            self.progress_frame.set_text("Done")
+            showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)} Some imports may have been skipped.")
+        self.root.after_idle(self.check_modified)
+        self.root.after_idle(self.show_info_window)
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text("Done")
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
@@ -2090,8 +2135,9 @@ class MainWindow:
                         self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
                         break
             self.selected_language.set(first)
-
+    
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
+        self.sound_handler.kill_sound()
         if not archive_file:
             archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
         if not archive_file:
@@ -2099,18 +2145,25 @@ class MainWindow:
         if ".patch" in os.path.basename(archive_file):
             self.import_patch(archive_file)
             return
-        self.sound_handler.kill_sound()
-        if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
+        self.start_async_task(self.loop, self.load_archive_async, archive_file=archive_file)
+    
+    async def load_archive_async(self, archive_file: str | None = ""):
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Loading Archive {os.path.basename(archive_file)}")
+        success = await self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file)
+        if success:
             archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
             self.clear_search()
             self.update_language_menu()
             self.update_recent_files(filepath=archive_file)
             if self.selected_view.get() == "SourceView":
-                self.create_source_view(new_game_archive=archive)
+                self.root.after_idle(lambda: self.create_source_view(new_game_archive=archive))
             else:
-                self.create_hierarchy_view(new_game_archive=archive)
+                self.root.after_idle(lambda: self.create_hierarchy_view(new_game_archive=archive))
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text("Done")
 
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
@@ -2231,29 +2284,52 @@ class MainWindow:
             return
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
-        new_archive = GameArchive.from_file(archive_file)
+        self.start_async_task(self.loop, self.import_patch_async, archive_file=archive_file)
         
+    async def import_patch_async(self, archive_file: str = ""):
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Loading file {os.path.basename(archive_file)}")
+        new_archive = GameArchive.from_file(archive_file)
         missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+        if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
+            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
+        self.root.after_idle(self.import_patch2, missing_soundbank_ids, new_archive, archive_file)
+        
+    def import_patch2(self, missing_soundbank_ids, new_archive, archive_file):
+        archives = set()
         if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
-            if len(new_archive.text_banks) > 0:
-                self.load_archive(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
-            archives = set()
             for soundbank_id in missing_soundbank_ids:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)
                 if r.success:
                     archives.add(r.archive)
-            for archive in archives:
-                self.load_archive(archive_file=os.path.join(self.app_state.game_data_path, archive))
-            missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+        self.start_async_task(self.loop, self.import_patch_async2, archives_to_load=archives, new_archive=new_archive, archive_file=archive_file)
+                
+    async def import_patch_async2(self, archives_to_load, new_archive, archive_file):
+        for archive in archives_to_load:
+            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, archive))
+        missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
         missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
         if missing_soundbanks:
             newline = "\n"
             showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
-        if self.mod_handler.get_active_mod().import_patch(archive_file):
-            self.check_modified()
-            self.show_info_window()
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Importing Patches")
+        success = self.mod_handler.get_active_mod().import_patch(archive_file)
+        if success:
+            self.root.after_idle(self.check_modified)
+            self.root.after_idle(self.show_info_window)
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text(f"Done")
+
+    def start_async_task(self, loop, coroutine, *args, **kwargs):
+        asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), loop)
+    
+    def run_asyncio_loop(self, loop):
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
 
 if __name__ == "__main__":
+    
     logger.setLevel(logging.INFO)
     random.seed()
     app_state: cfg.Config | None = cfg.load_config()
