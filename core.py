@@ -1245,7 +1245,7 @@ class Mod:
         with open(output_path, "wb") as f:
             f.write(self.get_audio_source(file_id).get_data())
         
-    def dump_as_wav(self, file_id: int, output_file: str = "", muted: bool = False):
+    async def dump_as_wav(self, file_id: int, output_file: str = "", muted: bool = False):
         """
         @exception
         - ValueError
@@ -1271,10 +1271,12 @@ class Mod:
         with open(f"{save_path}.wem", 'wb') as f:
             f.write(self.get_audio_source(file_id).get_data())
 
-        process = subprocess.run(
-            [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], 
+        process = await asyncio.create_subprocess_exec(
+            VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem", 
             stdout=subprocess.DEVNULL
         )
+        
+        stdout, stderr = await process.communicate()
         
         if process.returncode != 0:
             logger.error(f"Encountered error when converting {file_id}.wem into .wav format")
@@ -1297,7 +1299,7 @@ class Mod:
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
         
-    def dump_multiple_as_wav(self, file_ids: list[int], output_folder: str = "", muted: bool = False,
+    async def dump_multiple_as_wav(self, file_ids: list[int], output_folder: str = "", muted: bool = False,
                              with_seq: bool = False):
         """
         @exception
@@ -1313,10 +1315,13 @@ class Mod:
         bank.set_audio_sources(audio_sources)
         bank.to_file(os.path.join(CACHE, "temp.bnk"))
 
-        process = subprocess.run(
-            [VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), os.path.join(CACHE, "temp.bnk")],
+        process = await asyncio.create_subprocess_exec(
+            VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), os.path.join(CACHE, "temp.bnk"),
             stdout=subprocess.DEVNULL,
         )
+        
+        stdout, stderr = await process.communicate()
+        
         if process.returncode != 0:
             logger.error(f"Encountered error when converting to .wav")
         os.remove(os.path.join(CACHE, "temp.bnk"))
@@ -1348,7 +1353,7 @@ class Mod:
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
     
-    def dump_all_as_wav(self, output_folder: str = ""):
+    async def dump_all_as_wav(self, output_folder: str = ""):
         """
         @exception
         - OSError
@@ -1367,7 +1372,7 @@ class Mod:
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
             file_ids = [audio.get_id() for audio in bank.get_content()]
-            self.dump_multiple_as_wav(file_ids=file_ids, output_folder=subfolder)
+            await self.dump_multiple_as_wav(file_ids=file_ids, output_folder=subfolder)
 
     def save_archive_file(self, game_archive: GameArchive, output_folder: str = ""):
         """
