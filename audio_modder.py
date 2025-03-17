@@ -1070,6 +1070,7 @@ class MainWindow:
         self.loop = asyncio.new_event_loop()
         self.asyncio_thread = threading.Thread(target=self.run_asyncio_loop, args=(self.loop,), daemon=True)
         self.asyncio_thread.start()
+        self.async_tasks = []
         
         self.root = TkinterDnD.Tk()
         if os.path.exists("icon.ico"):
@@ -1275,10 +1276,15 @@ class MainWindow:
         self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.root.resizable(True, True)
         #async_mainloop(self.root)
         self.root.mainloop()
+        
+    def on_close(self):
+        self.root.destroy()
         
     def drop_position(self, event):
         if event.data:
@@ -1658,21 +1664,15 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
-        self.start_async_task(self.loop, self.import_files_async, file_dict=file_dict)
+        self.start_async_task(self.loop, "Importing Files", self.import_files_async, file_dict=file_dict)
         
     async def import_files_async(self, file_dict):
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Importing Files")
         try:
             await self.mod_handler.get_active_mod().import_files(file_dict)
         except Exception as e:
-            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-            self.progress_frame.set_text("Done")
             showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)} Some imports may have been skipped.")
         self.root.after_idle(self.check_modified)
         self.root.after_idle(self.show_info_window)
-        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-        self.progress_frame.set_text("Done")
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
@@ -1942,18 +1942,25 @@ class MainWindow:
             )
             if not output_file:
                 return
-            self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
-            return
+            self.start_async_task(self.loop, "Dumping Files", self.dump_single_as_wav_async, muted, with_seq, output_file)
         else:
             output_folder = filedialog.askdirectory(title="Save As")
             if not output_folder:
                 return
-            self.mod_handler.get_active_mod().dump_multiple_as_wav(
-                [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
-                muted=muted,
-                with_seq=with_seq,
-                output_folder=output_folder
-            )
+            self.start_async_task(self.loop, "Dumping Files", self.dump_multiple_as_wav_async, muted, with_seq, output_folder)
+            
+    async def dump_single_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_file: str = ""):
+        await self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
+                
+    async def dump_multiple_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_folder: str = ""):
+        if not os.path.exists(output_folder):
+            return
+        await self.mod_handler.get_active_mod().dump_multiple_as_wav(
+            [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
+            muted=muted,
+            with_seq=with_seq,
+            output_folder=output_folder
+        )
 
     def create_treeview_entry(self, entry, parent_item=""): #if HircEntry, add id of parent bank to the tags
         if entry is None: return
@@ -2162,11 +2169,9 @@ class MainWindow:
         if ".patch" in os.path.basename(archive_file):
             self.import_patch(archive_file)
             return
-        self.start_async_task(self.loop, self.load_archive_async, archive_file=archive_file)
+        self.start_async_task(self.loop, f"Loading Archive {os.path.basename(archive_file)}", self.load_archive_async, archive_file=archive_file)
     
     async def load_archive_async(self, archive_file: str | None = ""):
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Loading Archive {os.path.basename(archive_file)}")
         success = await self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file)
         if success:
             archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
@@ -2179,8 +2184,6 @@ class MainWindow:
                 self.root.after_idle(lambda: self.create_hierarchy_view(new_game_archive=archive))
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
-        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-        self.progress_frame.set_text("Done")
 
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
@@ -2270,7 +2273,10 @@ class MainWindow:
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
-        self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
+        self.start_async_task(self.loop, "Dumping Files", self.dump_all_as_wav_async, output_folder)
+            
+    async def dump_all_as_wav_async(self, output_folder):
+        await self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
         
     def play_audio(self, file_id: int, callback=None):
         audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
@@ -2301,11 +2307,9 @@ class MainWindow:
             return
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
-        self.start_async_task(self.loop, self.import_patch_async, archive_file=archive_file)
+        self.start_async_task(self.loop, f"Loading file {os.path.basename(archive_file)}", self.import_patch_async, archive_file=archive_file)
         
     async def import_patch_async(self, archive_file: str = ""):
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Loading file {os.path.basename(archive_file)}")
         new_archive = GameArchive.from_file(archive_file)
         missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
         if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
@@ -2319,7 +2323,7 @@ class MainWindow:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)
                 if r.success:
                     archives.add(r.archive)
-        self.start_async_task(self.loop, self.import_patch_async2, archives_to_load=archives, new_archive=new_archive, archive_file=archive_file)
+        self.start_async_task(self.loop, "Importing Patches", self.import_patch_async2, archives_to_load=archives, new_archive=new_archive, archive_file=archive_file)
                 
     async def import_patch_async2(self, archives_to_load, new_archive, archive_file):
         for archive in archives_to_load:
@@ -2329,17 +2333,30 @@ class MainWindow:
         if missing_soundbanks:
             newline = "\n"
             showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Importing Patches")
         success = self.mod_handler.get_active_mod().import_patch(archive_file)
         if success:
             self.root.after_idle(self.check_modified)
             self.root.after_idle(self.show_info_window)
-        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-        self.progress_frame.set_text(f"Done")
 
-    def start_async_task(self, loop, coroutine, *args, **kwargs):
-        asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), loop)
+    def start_async_task(self, loop, label, coroutine, *args, **kwargs):
+        task = asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), loop)
+        if len(self.async_tasks) == 0:
+            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+            self.progress_frame.set_text(label)
+        task.add_done_callback(self.async_task_finished)
+        self.async_tasks.append((task, label))
+        
+    def async_task_finished(self, future):
+        for task in self.async_tasks:
+            if task[0] == future:
+                break
+        self.async_tasks.remove(task)
+        if len(self.async_tasks) > 0:
+            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+            self.progress_frame.set_text(self.async_tasks[0][1])
+        else:
+            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+            self.progress_frame.set_text(f"Done")
     
     def run_asyncio_loop(self, loop):
         asyncio.set_event_loop(loop)
