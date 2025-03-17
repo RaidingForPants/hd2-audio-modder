@@ -2281,28 +2281,43 @@ class MainWindow:
             return
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
-        new_archive = GameArchive.from_file(archive_file)
+        self.start_async_task(self.loop, self.import_patch_async, archive_file=archive_file)
         
+    async def import_patch_async(self, archive_file: str = ""):
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Loading file {os.path.basename(archive_file)}")
+        new_archive = GameArchive.from_file(archive_file)
         missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+        if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
+            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
+        self.root.after_idle(self.import_patch2, missing_soundbank_ids, new_archive, archive_file)
+        
+    def import_patch2(self, missing_soundbank_ids, new_archive, archive_file):
+        archives = set()
         if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
-            if len(new_archive.text_banks) > 0:
-                self.load_archive(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
-            archives = set()
             for soundbank_id in missing_soundbank_ids:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)
                 if r.success:
                     archives.add(r.archive)
-            for archive in archives:
-                self.load_archive(archive_file=os.path.join(self.app_state.game_data_path, archive))
-            missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+        self.start_async_task(self.loop, self.import_patch_async2, archives_to_load=archives, new_archive=new_archive, archive_file=archive_file)
+                
+    async def import_patch_async2(self, archives_to_load, new_archive, archive_file):
+        for archive in archives_to_load:
+            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, archive))
+        missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
         missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
         if missing_soundbanks:
             newline = "\n"
             showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
-        if self.mod_handler.get_active_mod().import_patch(archive_file):
-            self.check_modified()
-            self.show_info_window()
-            
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Importing Patches")
+        success = self.mod_handler.get_active_mod().import_patch(archive_file)
+        if success:
+            self.root.after_idle(self.check_modified)
+            self.root.after_idle(self.show_info_window)
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text(f"Done")
+
     def start_async_task(self, loop, coroutine, *args, **kwargs):
         asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), loop)
     
