@@ -9,6 +9,7 @@ import locale
 import random
 import xml.etree.ElementTree as etree
 import posixpath as xpath
+import asyncio
 
 from typing import Callable, Literal, Union
 
@@ -301,8 +302,6 @@ class WwiseBank:
             data += b"".join(didx_array)
             data += "DATA".encode('utf-8') + sum([len(x) for x in data_array]).to_bytes(4, byteorder="little")
             data += b"".join(data_array)
-            
-        # ensure Actor-Mixers have the right children
             
         hierarchy_section = self.hierarchy.get_data()
         data += "HIRC".encode('utf-8') + len(hierarchy_section).to_bytes(4, byteorder="little")
@@ -1416,7 +1415,6 @@ class Mod:
             
     def get_string_entries(self, textbank_id: int) -> dict[int, StringEntry]:
         return self.get_text_bank(textbank_id).entries
-                
 
     def get_hierarchy_entry(self, hierarchy_id: int) -> HircEntry:
         """
@@ -1499,7 +1497,7 @@ class Mod:
     def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
         
-    def load_archive_file(self, archive_file: str = ""):
+    async def load_archive_file(self, archive_file: str = ""):
         """
         @exception
         - OSError
@@ -1634,7 +1632,7 @@ class Mod:
                     hirc._categorized_entry(hirc_entry)
                     hirc.entries[hirc_id] = hirc_entry
         game_archive.get_hierarchy_entries().update(replacements)
-
+        
         for key in game_archive.wwise_banks.keys():
             if key in self.get_wwise_banks().keys():
                 self.bank_count[key] += 1
@@ -1794,7 +1792,7 @@ class Mod:
  
         patch_game_archive.to_file(output_folder)
 
-    def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
+    async def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
         """
         @exception
         - ValueError
@@ -1821,15 +1819,18 @@ class Mod:
                     continue
             if set_duration:
                 try:
-                    process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
-                    process.check_returncode()
-                    for line in process.stdout.decode(locale.getpreferredencoding()).split("\n"):
+                    process = await asyncio.create_subprocess_exec(VGMSTREAM, "-m", filepath, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                    stdout, stderr = await process.communicate()
+                    if process.returncode != 0:
+                        raise Exception("")
+                    for line in stdout.decode(locale.getpreferredencoding()).split("\n"):
                         if "sample rate" in line:
                             sample_rate = float(line[13:line.index("Hz")-1])
                         if "stream total samples" in line:
                             total_samples = int(line[22:line.index("(")-1])
                     len_ms = total_samples * 1000 / sample_rate
-                except:
+                except Exception as e:
+                    print(e)
                     logger.warning(f"Failed to get duration info for {filepath}!")
                     have_length = False
                     length_import_failed = True
@@ -1882,7 +1883,7 @@ class Mod:
         
         return os.path.join(TMP, "external_sources.wsources")
         
-    def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
+    async def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
         """
         @exception
         - ValueError
@@ -1905,15 +1906,24 @@ class Mod:
                 "The current operating system does not support this feature"
             )
         
-        subprocess.run([
+        process = await asyncio.create_subprocess_exec(
             WWISE_CLI,
             "migrate",
             wwise_project,
             "--quiet",
-        ]).check_returncode()
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            if stdout:
+                logger.error(stdout.decode(locale.getpreferredencoding()))
+            raise Exception("Non-zero return code in Wwise project migration")
         
         convert_dest = os.path.join(TMP, SYSTEM)
-        subprocess.run([
+        
+        process = await asyncio.create_subprocess_exec(
             WWISE_CLI,
             "convert-external-source",
             wwise_project,
@@ -1922,10 +1932,19 @@ class Mod:
             source_list,
             "--output",
             TMP,
-        ]).check_returncode()
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            if stdout:
+                logger.error(stdout.decode(locale.getpreferredencoding()))
+            raise Exception("Non-zero return code in Wwise source conversion")
+        
         wems = {os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"): targets for filepath, targets in wavs.items()}
 
-        self.import_wems(wems)
+        await self.import_wems(wems)
         
         for wem in wems.keys():
             try:
@@ -1938,9 +1957,8 @@ class Mod:
         except OSError as err:
             logger.error(err)
             
-    def import_files(self, file_dict: dict[str, list[int]]):
+    async def import_files(self, file_dict: dict[str, list[int]]):
         patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
-
         wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wem"}
         wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wav"}
         
@@ -1948,9 +1966,7 @@ class Mod:
         filetypes = list(SUPPORTED_AUDIO_TYPES)
         filetypes.remove(".wav")
         filetypes.remove(".wem")
-
         others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in filetypes}
-
         temp_files = []
         for file in others.keys():
             subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
@@ -1960,9 +1976,9 @@ class Mod:
         for patch in patches:
             self.import_patch(patch_file=patch)
         if len(wems) > 0:
-            self.import_wems(wems)
+            await self.import_wems(wems)
         if len(wavs) > 0:
-            self.import_wavs(wavs)
+            await self.import_wavs(wavs)
         for file in temp_files:
             try:
                 os.remove(file)

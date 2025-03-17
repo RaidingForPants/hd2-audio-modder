@@ -210,9 +210,6 @@ class HircEntry:
         callback()
         self.update_size()
         self.raise_modified()
-        
-    def get_id(self):
-        return self.hierarchy_id
 
 class MusicRandomSequence(HircEntry):
     
@@ -229,6 +226,73 @@ class MusicRandomSequence(HircEntry):
         
     def get_data(self):
         return b""
+
+
+class RandomSequenceContainer(HircEntry):
+    
+    import_values = ["unused_sections", "contents", "parent_id"]
+    
+    def __init__(self):
+        super().__init__()
+        self.unused_sections = []
+        self.contents = []
+        
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        entry = RandomSequenceContainer()
+        entry.hierarchy_type = stream.uint8_read()
+        entry.size = stream.uint32_read()
+        start_position = stream.tell()
+        entry.hierarchy_id = stream.uint32_read()
+
+        # ---------------------------------------
+        section_start = stream.tell()
+        stream.advance(1)
+        n = stream.uint8_read() #num fx
+        if n == 0:
+            stream.advance(12)
+        else:
+            stream.advance(7*n + 13)
+        stream.advance(5*stream.uint8_read()) #number of props
+        stream.advance(9*stream.uint8_read()) #number of props (again)
+        if stream.uint8_read() & 0b0000_0010: #positioning bit vector
+            if stream.uint8_read() & 0b0100_0000: # relative pathing bit vector
+                stream.advance(5)
+                stream.advance(16*stream.uint32_read())
+                stream.advance(20*stream.uint32_read())
+        if stream.uint8_read() & 0b0000_1000: #I forget what this is for (if HAS AUX)
+            stream.advance(26)
+        else:
+           stream.advance(10)
+        stream.advance(3*stream.uint8_read()) #num state props
+        for _ in range(stream.uint8_read()): #num state groups
+            stream.advance(5)
+            stream.advance(8*stream.uint8_read())
+        for _ in range(stream.uint16_read()):  # num RTPC
+            stream.advance(12)
+            stream.advance(stream.uint16_read()*12)
+        section_end = stream.tell()
+        # ---------------------------------------
+
+        stream.seek(section_start)
+        entry.unused_sections.append(stream.read(section_end-section_start+24))
+
+        for _ in range(stream.uint32_read()): #number of children (tracks)
+            entry.contents.append(stream.uint32_read())
+
+        entry.unused_sections.append(stream.read(entry.size - (stream.tell()-start_position)))
+        return entry
+        
+    def get_data(self):
+        return (
+            b"".join([
+                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
+                self.unused_sections[0],
+                len(self.contents).to_bytes(4, byteorder="little"),
+                b"".join([x.to_bytes(4, byteorder="little") for x in self.contents]),
+                self.unused_sections[1]
+            ])
+        )
     
 
 class MusicSegment(HircEntry):
@@ -286,15 +350,16 @@ class MusicSegment(HircEntry):
             elif i == n-1:
                 entry.exit_marker = marker
         return entry
-        
+
     def get_parent_id(self):
         return self.parent_id
-        
+      
     def set_data(self, entry = None, **data):
         if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
+
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:

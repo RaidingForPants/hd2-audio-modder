@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
-import matplotlib
+import matplotlib as mpl
+from cycler import cycler
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import mplcursors
@@ -7,6 +8,15 @@ import math
 import tkinter as tk
 import numpy as np
 from tkinter import Frame
+
+def graphs_set_dark_mode():
+    plt.style.use("dark_background")
+    mpl.rcParams['axes.prop_cycle'] = cycler(color=['#ffd500'])
+    mpl.rcParams['figure.facecolor'] = "#333333"
+    mpl.rcParams['axes.facecolor'] = "#333333"
+
+def graphs_set_light_mode():
+    plt.style.use("default")
 
 class Graph(Frame):
     
@@ -69,7 +79,7 @@ class Graph(Frame):
             if distance < min_distance:
                 min_distance = distance
                 self.index = i
-        if event.button == matplotlib.backend_bases.MouseButton.LEFT:
+        if event.button == mpl.backend_bases.MouseButton.LEFT:
             if min_distance < 0.5:
                 self.grabbed_point = True
             else:
@@ -81,7 +91,7 @@ class Graph(Frame):
                 self.line.set_xdata(self.x)
                 self.line.set_ydata(self.y)
                 self.fig.canvas.draw()
-        elif event.button == matplotlib.backend_bases.MouseButton.RIGHT:
+        elif event.button == mpl.backend_bases.MouseButton.RIGHT:
             if min_distance < 0.5:
                 self.x = np.delete(self.x, self.index)
                 self.y = np.delete(self.y, self.index)
