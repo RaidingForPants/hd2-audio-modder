@@ -543,6 +543,8 @@ class MusicTrackWindow:
             x = [point[0] for point in track.clip_automations[i].graph_points]
             y = [point[1] for point in track.clip_automations[i].graph_points]
             g = Graph(self.graph_notebook)
+            self.graphs.append(g)
+
             g.set_data(x, y)
             source_id = info[self.track.clip_automations[i].clip_index].source_id
             source = next(x for x in self.track.sources if x.source_id == source_id)
@@ -1464,13 +1466,11 @@ class MainWindow:
         try:
             if theme == "dark_mode":
                 self.root.tk.call("set_theme", "dark")
-                if self.file_upload_window is not None:
-                    self.file_upload_window.root.tk.call("set_theme", "dark")
+                graphs_set_dark_mode()
                 self.window.configure(background="white")
             elif theme == "light_mode":
                 self.root.tk.call("set_theme", "light")
-                if self.file_upload_window is not None:
-                    self.file_upload_window.root.tk.call("set_theme", "light")
+                graphs_set_light_mode()
                 self.window.configure(background="black")
             
         except Exception as e:
@@ -2329,7 +2329,6 @@ class MainWindow:
         loop.run_forever()
 
 if __name__ == "__main__":
-    
     logger.setLevel(logging.INFO)
     random.seed()
     app_state: cfg.Config | None = cfg.load_config()
