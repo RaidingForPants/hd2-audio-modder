@@ -191,6 +191,36 @@ class BankParser:
             return bytearray()
 
 
+class DummyBank:
+    
+    def __init__(self):
+        self.header = bytes.fromhex("424B4844140000008D00000088EBF538A63FBFDE8947E009160D0000")
+        self.audio_sources = []
+        
+    def set_audio_sources(self, audio_sources):
+        self.audio_sources = audio_sources
+        
+    def to_file(self, filepath):
+        data_array = []
+        didx_array = []
+        offset = 0
+        
+        for audio in self.audio_sources:
+            data_array.append(audio.get_data())
+            didx_array.append(struct.pack("<III", audio.get_short_id(), offset, audio.size))
+            offset += audio.size
+        
+        data = bytearray()
+        data += self.header
+        data += "DIDX".encode('utf-8') + (12*len(didx_array)).to_bytes(4, byteorder="little")
+        data += b"".join(didx_array)
+        data += "DATA".encode('utf-8') + sum([len(x) for x in data_array]).to_bytes(4, byteorder="little")
+        data += b"".join(data_array)
+            
+        with open(filepath, "wb") as f:
+            f.write(data)
+
+
 class WwiseBank:
     
     def __init__(self):
@@ -1277,30 +1307,23 @@ class Mod:
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise OSError(f"Invalid output folder '{output_folder}'")
 
-        for i, file_id in enumerate(file_ids, start=0):
-            audio: AudioSource = self.get_audio_source(int(file_id))
-            basename = str(audio.get_id()) if not with_seq else f"{i:02d}_{audio.get_id()}"
-            save_path = os.path.join(output_folder, basename)
-            if muted:
-                subprocess.run([
-                    FFMPEG, 
-                    "-f", "lavfi", 
-                    "-i", "anullsrc=r=48000:cl=stereo",
-                    "-t", "1", # TO-DO, this should match up with actual duration
-                    "-c:a", "pcm_s16le",
-                    f"{save_path}.wav"],
-                    stdout=subprocess.DEVNULL
-                )
-            else:
-                with open(save_path + ".wem", "wb") as f:
-                    f.write(audio.get_data())
-                process = subprocess.run(
-                    [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"],
-                    stdout=subprocess.DEVNULL,
-                )
-                if process.returncode != 0:
-                    logger.error(f"Encountered error when converting {basename}.wem to .wav")
-                os.remove(f"{save_path}.wem")
+        audio_sources = [self.get_audio_source(int(file_id)) for file_id in file_ids]
+        
+        bank = DummyBank()
+        bank.set_audio_sources(audio_sources)
+        bank.to_file(os.path.join(CACHE, "temp.bnk"))
+
+        process = subprocess.run(
+            [VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), os.path.join(CACHE, "temp.bnk")],
+            stdout=subprocess.DEVNULL,
+        )
+        if process.returncode != 0:
+            logger.error(f"Encountered error when converting to .wav")
+        os.remove(os.path.join(CACHE, "temp.bnk"))
+        
+        for audio_source in audio_sources:
+            if audio_source.get_resource_id() != 0:
+                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{audio_source.get_resource_id()}.wav"))
 
     def dump_all_as_wem(self, output_folder: str = ""):
         """
@@ -1343,14 +1366,8 @@ class Mod:
             subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
-            for audio in bank.get_content():
-                save_path = os.path.join(subfolder, f"{audio.get_id()}")
-                with open(save_path+".wem", "wb") as f:
-                    f.write(audio.get_data())
-                process = subprocess.run([VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], stdout=subprocess.DEVNULL)
-                if process.returncode != 0:
-                    logger.error(f"Encountered error when converting {os.path.basename(save_path)}.wem to .wav")
-                os.remove(f"{save_path}.wem")
+            file_ids = [audio.get_id() for audio in bank.get_content()]
+            self.dump_multiple_as_wav(file_ids=file_ids, output_folder=subfolder)
 
     def save_archive_file(self, game_archive: GameArchive, output_folder: str = ""):
         """
