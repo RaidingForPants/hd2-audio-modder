@@ -1,7 +1,9 @@
-from typing import Any
-import struct
 import os
+import struct
+
+from ctypes import c_uint32
 from math import ceil
+from typing import Any
 from itertools import takewhile
 
 class MemoryStream:
@@ -81,31 +83,34 @@ class MemoryStream:
             self.write(value)
             return bytearray(value)
         return value
-        
-    def int8_read(self):
+
+    def int8_read(self) -> int:
         return self.read_format('b', 1)
 
-    def uint8_read(self):
+    def uint8_read(self) -> int:
         return self.read_format('B', 1)
 
-    def int16_read(self):
+    def int16_read(self) -> int:
         return self.read_format('h', 2)
 
-    def uint16_read(self):
+    def uint16_read(self) -> int:
         return self.read_format('H', 2)
 
-    def int32_read(self):
+    def int32_read(self) -> int:
         return self.read_format('i', 4)
 
-    def uint32_read(self):
+    def uint32_read(self) -> int:
         return self.read_format('I', 4)
 
-    def int64_read(self):
+    def int64_read(self) -> int:
         return self.read_format('q', 8)
 
-    def uint64_read(self):
+    def uint64_read(self) -> int:
         return self.read_format('Q', 8)
-        
+
+    def float_read(self) -> float:
+        return self.read_format('f', 4)
+
 def pad_to_16_byte_align(data):
     b = bytearray(data)
     l = len(b)
@@ -198,3 +203,33 @@ def strip_patch_index(filename):
             break
     filename = ".".join(split)
     return filename
+
+_FNV_32_OFFSET_BASIS = c_uint32(2166136261)
+_FNV_32_PRIME = c_uint32(16777619)
+_FNV_30_MASK = c_uint32((1 << 30) - 1)
+
+
+def fnv_30(data: bytes):
+    h = _FNV_32_OFFSET_BASIS
+    for b in data:
+        b = c_uint32(b)
+        h = c_uint32(h.value * _FNV_32_PRIME.value)
+        h = c_uint32(h.value ^ b.value)
+    downshift = c_uint32(h.value >> 30)
+    mask = c_uint32(h.value & _FNV_30_MASK.value)
+
+    return c_uint32(downshift.value ^ mask.value).value
+
+
+def assert_equal(msg: str, expect, receive):
+    if expect != receive:
+        raise AssertionError(f"{msg}: expecting {expect}, received {receive}")
+
+
+def assert_true(msg: str, cond):
+    if not cond:
+        raise AssertionError(f"{msg}")
+
+def assert_not_none(msg: str, value):
+    if value == None:
+        raise AssertionError(f"{msg}")

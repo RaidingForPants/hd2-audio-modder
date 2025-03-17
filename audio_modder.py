@@ -1064,7 +1064,7 @@ class MainWindow:
         self.name_lookup = lookup_store
         self.sound_handler = SoundHandler.get_instance()
         self.watched_paths = []
-        self.mod_handler = ModHandler.get_instance()
+        self.mod_handler = ModHandler.get_instance(lookup_store)
         self.mod_handler.create_new_mod("default")
         
         self.loop = asyncio.new_event_loop()
@@ -1989,7 +1989,6 @@ class MainWindow:
             name = entry.name
             entry_type = "Archive File"
             self.treeview.item(tree_entry, open=True)
-        
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -2028,7 +2027,7 @@ class MainWindow:
                                         pass
                     elif isinstance(hierarchy_entry, RandomSequenceContainer):
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
-                        for s_id in hierarchy_entry.contents:
+                        for s_id in hierarchy_entry.children:
                             sound = bank.hierarchy.entries[s_id]
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
@@ -2063,7 +2062,7 @@ class MainWindow:
             for bank in archive.wwise_banks.values():
                 existing_sources.clear()
                 bank_entry = self.create_treeview_entry(bank, archive_entry)
-                for hierarchy_entry in bank.hierarchy.entries.values():
+                for hierarchy_entry in bank.hierarchy.get_sounds() + bank.hierarchy.get_music_tracks():
                     for source in hierarchy_entry.sources:
                         if source.plugin_id == VORBIS and source.source_id not in existing_sources:
                             existing_sources.add(source.source_id)
