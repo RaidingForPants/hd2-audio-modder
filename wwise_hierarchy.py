@@ -485,13 +485,14 @@ class WwiseHierarchy:
             try:
                 self.get_entry(entry.get_id()).import_entry(entry)
             except KeyError:
-                pass
-                self.entries[entry.get_id()] = entry
-                self.added_entries[entry.get_id()] = entry
-                try:
-                    self.type_lists[entry.hierarchy_type].append(entry)
-                except KeyError:
-                    self.type_lists[entry.hierarchy_type] = [entry]
+                self.add_entry(entry)
+                #pass
+                #self.entries[entry.get_id()] = entry
+                #self.added_entries[entry.get_id()] = entry
+                #try:
+                #    self.type_lists[entry.hierarchy_type].append(entry)
+                #except KeyError:
+                #    self.type_lists[entry.hierarchy_type] = [entry]
                 
     def revert_modifications(self, entry_id: int = 0):
         if self.soundbank == None:
@@ -502,12 +503,12 @@ class WwiseHierarchy:
         if entry_id:
             self.get_entry(entry_id).revert_modifications()
         else:
-            for entry in self.removed_entries:
+            for entry in self.removed_entries.values():
                 self.entries[entry.hierarchy_id] = entry
                 self.soundbank.lower_modified()
             self.removed_entries.clear()
-            for entry in self.added_entries:
-                self.remove_entry(entry.hierarchy_id)
+            for entry in list(self.added_entries.values()):
+                self.remove_entry(entry)
                 self.soundbank.lower_modified()
             for entry in self.get_entries():
                 entry.revert_modifications()
@@ -525,7 +526,7 @@ class WwiseHierarchy:
             self.type_lists[new_entry.hierarchy_type].append(new_entry)
         except KeyError:
             self.type_lists[new_entry.hierarchy_type] = [new_entry]
-        entry.soundbanks.append(self.soundbank)
+        new_entry.soundbanks.append(self.soundbank)
             
     def remove_entry(self, entry: HircEntry):
         if self.soundbank == None:

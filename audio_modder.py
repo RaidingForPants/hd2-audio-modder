@@ -26,6 +26,8 @@ from typing import Any, Literal, Callable
 from typing_extensions import Self
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+import asyncio
+import threading
 
 import config as cfg
 import db
@@ -43,7 +45,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "2.0.0"
+VERSION = "1.17.0"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -160,6 +162,172 @@ class ProgressWindow:
     def destroy(self):
         self.root.destroy()
         
+class ProgressFrame(Frame):
+    
+    DETERMINATE = 0
+    INDETERMINATE = 1
+    DONE = 2
+    INDETERMINATE_AUTO = 3
+    
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.progress_bar = ttk.Progressbar(self, orient=HORIZONTAL, length=300)
+        self.text = ttk.Label(self, text="Done", font=('Segoe UI', 12))
+        #self.progress_bar.grid(row=0, column=0)
+        self.text.grid(row=0, column=0)
+        
+    def step(self):
+        self.progress_bar.step()
+        self.progress_bar.update_idletasks()
+        
+    def set_text(self, s):
+        self.text.configure(text=s)
+        
+    def set_mode(self, max_progress = 0, mode = 0):
+        if mode != self.INDETERMINATE_AUTO:
+            self.progress_bar.stop()
+        if mode == self.DONE:
+            self.progress_bar.grid_forget()
+            self.text.grid_forget()
+            self.text.grid(row=0, column=0)
+        else:
+            self.text.grid_forget()
+            self.progress_bar.grid(row=0, column=0)
+            self.text.grid(row=0, column=1)
+            if mode == self.INDETERMINATE:
+                self.progress_bar.configure(mode="indeterminate")
+            elif mode == self.DETERMINATE:
+                self.progress_bar.configure(mode="determinate", maximum=max_progress)
+            elif mode == self.INDETERMINATE_AUTO:
+                self.progress_bar.configure(mode="indeterminate", maximum=20)
+                self.progress_bar.start()
+        
+class VerticalScrolledFrame(ttk.Frame):
+    """A pure Tkinter scrollable frame that actually works!
+    * Use the 'interior' attribute to place widgets inside the scrollable frame.
+    * Construct and pack/place/grid normally.
+    * This frame only allows vertical scrolling.
+    """
+    def __init__(self, parent, *args, **kw):
+        ttk.Frame.__init__(self, parent, *args, **kw)
+
+        # Create a canvas object and a vertical scrollbar for scrolling it.
+        vscrollbar = ttk.Scrollbar(self, orient=VERTICAL)
+        vscrollbar.pack(fill=Y, side=RIGHT, expand=FALSE)
+        canvas = Canvas(self, bd=0, highlightthickness=0,
+                           yscrollcommand=vscrollbar.set)
+        canvas.pack(side=LEFT, fill=BOTH, expand=TRUE)
+        vscrollbar.config(command=canvas.yview)
+
+        # Reset the view
+        canvas.xview_moveto(0)
+        canvas.yview_moveto(0)
+
+        # Create a frame inside the canvas which will be scrolled with it.
+        self.interior = interior = ttk.Frame(canvas)
+        interior_id = canvas.create_window(0, 0, window=interior,
+                                           anchor=NW)
+
+        # Track changes to the canvas and frame width and sync them,
+        # also updating the scrollbar.
+        def _configure_interior(event):
+            # Update the scrollbars to match the size of the inner frame.
+            size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
+            canvas.config(scrollregion="0 0 %s %s" % size)
+            if interior.winfo_reqwidth() != canvas.winfo_width():
+                # Update the canvas's width to fit the inner frame.
+                canvas.config(width=interior.winfo_reqwidth())
+        interior.bind('<Configure>', _configure_interior)
+
+        def _configure_canvas(event):
+            if interior.winfo_reqwidth() != canvas.winfo_width():
+                # Update the inner frame's width to fill the canvas.
+                canvas.itemconfigure(interior_id, width=canvas.winfo_width())
+        canvas.bind('<Configure>', _configure_canvas)
+        
+class PendingFile(Frame):
+    
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.filepath = ""
+        self.button = ttk.Button(self, text="X", command=self.button_press)
+        self.label = ttk.Label(self, text=self.filepath, font=('Segoe UI', 12),
+                                      justify="center")
+        self.button.pack(side="right", anchor="e")
+        self.label.pack(side='left', expand=True, fill='x', anchor="w")
+        
+    def set_filepath(self, new_path):
+        self.filepath = new_path
+        self.label.config(text=new_path)
+    
+    def get_filepath(self):
+        return self.filepath
+    
+    def button_press(self):
+        self.destroy()
+
+class FileUploadWindow:
+    
+    def __init__(self, parent, callback=None):
+        self.root = Toplevel(parent)
+        self.root.geometry("500x500")
+        if os.path.exists("icon.ico"):
+            self.root.iconbitmap("icon.ico")
+        self.root.title("Select Mods to Combine")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.scrollframe = VerticalScrolledFrame(self.root)
+        self.drop_frame = Frame(self.root, width=500, height=500, borderwidth=3, highlightbackground="gray", highlightthickness=2)
+        self.drop_frame.drop_target_register(DND_FILES)
+        self.drop_frame.grid_columnconfigure(0, weight=1)
+        self.drop_frame.grid_columnconfigure(1, weight=1)
+        self.drop_frame.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_rowconfigure(2, weight=0)
+        self.label = Label(self.drop_frame, text="Drop Files Here or ", font=('Segoe UI', 12), justify="right")
+        self.label.grid(row=0, column=0, sticky="nse")
+        self.drop_frame.grid(row=0, column=0, columnspan=2, sticky="news")
+        self.drop_frame.dnd_bind("<<Drop>>", self.drop_add_files)
+        self.upload_button = ttk.Button(self.drop_frame, text="Add file", command=self.add_files)
+        self.accept_button = ttk.Button(self.root, text="Accept", command=self.return_files)
+        self.accept_button.grid(row=2, column=0, sticky="w")
+        self.cancel_button = ttk.Button(self.root, text="Cancel", command=self.on_close)
+        self.cancel_button.grid(row=2, column=1, sticky="e")
+        self.upload_button.grid(row=0, column=1, sticky="w")
+        self.scrollframe.grid(row=1, column=0, columnspan=2, sticky="news")
+        self.callback = callback
+        
+    def drop_add_files(self, event):
+        if event.data:
+            dropped_files = event.widget.tk.splitlist(event.data)
+            dropped_files = [file for file in dropped_files if os.path.splitext(file)[1].lower() == ".zip" or ".patch_" in os.path.splitext(file)[1]]
+            for file in dropped_files:
+                pending_file = PendingFile(self.scrollframe.interior)
+                pending_file.set_filepath(file)
+                pending_file.pack(side="top", expand=True, fill="x", pady=2)
+        
+    def add_files(self):
+        filenames = filedialog.askopenfilenames(parent=self.root, title="Choose mod files to combine", filetypes=[("Mod Files", "*.zip *.patch*")])
+        for name in filenames:
+            pending_file = PendingFile(self.scrollframe.interior)
+            pending_file.set_filepath(name)
+            pending_file.pack(side="top", expand=True, fill="x")
+        
+    def return_files(self):
+        files = [file.get_filepath() for file in self.scrollframe.interior.winfo_children() if isinstance(file, PendingFile)]
+        self.root.destroy()
+        if self.callback is not None:
+            self.callback(files)
+        
+        
+    def on_close(self):
+        self.root.destroy()
+        if self.callback is not None:
+            self.callback([])
+    
+
 class PopupWindow:
     def __init__(self, message, title="Missing Data!"):
         self.message = message
@@ -376,6 +544,7 @@ class MusicTrackWindow:
             y = [point[1] for point in track.clip_automations[i].graph_points]
             g = Graph(self.graph_notebook)
             self.graphs.append(g)
+
             g.set_data(x, y)
             source_id = info[self.track.clip_automations[i].clip_index].source_id
             source = next(x for x in self.track.sources if x.source_id == source_id)
@@ -898,12 +1067,18 @@ class MainWindow:
         self.mod_handler = ModHandler.get_instance()
         self.mod_handler.create_new_mod("default")
         
+        self.loop = asyncio.new_event_loop()
+        self.asyncio_thread = threading.Thread(target=self.run_asyncio_loop, args=(self.loop,), daemon=True)
+        self.asyncio_thread.start()
+        
         self.root = TkinterDnD.Tk()
         if os.path.exists("icon.ico"):
             self.root.iconbitmap("icon.ico")
         
         self.drag_source_widget = None
         self.workspace_selection = []
+        
+        self.file_upload_window = None
         
         try:
             self.root.tk.call("source", "azure.tcl")
@@ -944,10 +1119,13 @@ class MainWindow:
         
         self.window = PanedWindow(self.root, orient=HORIZONTAL, borderwidth=0, background="white")
         self.window.config(sashwidth=8, sashrelief="raised", opaqueresize=False)
-        self.window.pack(fill=BOTH)
-
         
-        self.top_bar.pack(side="top")
+        self.top_bar.pack(side="top", fill='x')
+        
+        self.progress_frame = ProgressFrame(self.root)
+        self.progress_frame.pack(side="bottom", fill='x')
+        
+        self.window.pack(fill=BOTH)
         
         self.search_results = []
         self.search_result_index = 0
@@ -1059,7 +1237,8 @@ class MainWindow:
             label="Import"
         )
         
-        self.file_menu.add_command(label="Combine Music Mods", command=self.combine_music_mods)
+        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+            self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
         
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
@@ -1098,6 +1277,7 @@ class MainWindow:
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
 
         self.root.resizable(True, True)
+        #async_mainloop(self.root)
         self.root.mainloop()
         
     def drop_position(self, event):
@@ -1113,6 +1293,74 @@ class MainWindow:
 
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
+        
+    def combine_mods(self):
+        if self.file_upload_window is None:
+            self.sound_handler.kill_sound()
+            self.file_upload_window = FileUploadWindow(self.root, callback=self.combine_mods_callback)
+        
+    def combine_mods_callback(self, files):
+        self.file_upload_window = None
+        if len(files) == 1:
+            tkinter.messagebox.showinfo("You cannot combine only 1 mod!")
+        elif len(files) > 1:
+            current_mod = self.mod_handler.get_active_mod()
+            combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
+            zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
+            patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
+            
+            for mod in zip_files:
+                zip = zipfile.ZipFile(mod)
+                zip.extractall(path=CACHE)
+            patch_files.extend([os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]])
+            
+            for file in patch_files:
+                new_archive = GameArchive.from_file(file)
+                archives = set()
+                if len(new_archive.text_banks) > 0:
+                    archives.add("9ba626afa44a3aa3")
+                missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
+                for soundbank_id in missing_soundbank_ids:
+                    r = self.name_lookup.lookup_soundbank(soundbank_id)
+                    if r.success:
+                        archives.add(r.archive)
+                for archive in archives:
+                    combined_mod.load_archive_file(archive_file=os.path.join(self.app_state.game_data_path, archive))
+                missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
+                missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
+                if missing_soundbanks:
+                    newline = "\n"
+                    showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
+                combined_mod.import_patch(file)
+                
+            output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
+            if output_file:
+                combined_mod.write_patch(CACHE)
+                zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
+                with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"), 'rb') as patch_file:
+                    zip.writestr("9ba626afa44a3aa3.patch_0", patch_file.read())
+                if os.path.exists(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream")):
+                    with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"), 'rb') as stream_file:
+                        zip.writestr("9ba626afa44a3aa3.patch_0.stream", stream_file.read())
+                zip.close()
+                try:
+                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"))
+                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"))
+                except:
+                    pass
+            self.mod_handler.delete_mod("combined_mods_temp")
+            self.mod_handler.set_active_mod(current_mod.name)
+            
+            for file in os.listdir(CACHE):
+                file = os.path.join(CACHE, file)
+                try:
+                    if os.path.isfile(file):
+                        os.remove(file)
+                    elif os.path.isdir(file):
+                        shutil.rmtree(file)
+                except:
+                    pass
+            
         
     def combine_music_mods(self):
         self.sound_handler.kill_sound()
@@ -1166,10 +1414,13 @@ class MainWindow:
             dropped_files = event.widget.tk.splitlist(event.data)
             for file in dropped_files:
                 import_files.extend(list_files_recursive(file))
+            patch_files = [file for file in import_files if ".patch_" in os.path.basename(file)]
+            for file in patch_files:
+                self.import_patch(file)
             if os.path.exists(WWISE_CLI):
-                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES or ".patch_" in os.path.basename(file)]
+                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
             else:
-                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem" or ".patch_" in os.path.basename(file)]
+                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
             if (
                 len(import_files) == 1 
                 and os.path.splitext(import_files[0])[1] in SUPPORTED_AUDIO_TYPES
@@ -1221,6 +1472,7 @@ class MainWindow:
                 self.root.tk.call("set_theme", "light")
                 graphs_set_light_mode()
                 self.window.configure(background="black")
+            
         except Exception as e:
             logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
         self.app_state.theme = theme
@@ -1388,12 +1640,21 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
+        self.start_async_task(self.loop, self.import_files_async, file_dict=file_dict)
+        
+    async def import_files_async(self, file_dict):
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Importing Files")
         try:
-            self.mod_handler.get_active_mod().import_files(file_dict)
+            await self.mod_handler.get_active_mod().import_files(file_dict)
         except Exception as e:
-            showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)}. Some imports were skipped.")
-        self.check_modified()
-        self.show_info_window()
+            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+            self.progress_frame.set_text("Done")
+            showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)} Some imports may have been skipped.")
+        self.root.after_idle(self.check_modified)
+        self.root.after_idle(self.show_info_window)
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text("Done")
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
@@ -1643,7 +1904,7 @@ class MainWindow:
 
     def dump_as_wem(self):
         if len(self.treeview.selection()) == 1:
-            output_file = filedialog.asksaveasfilename(mode='wb', title="Save As", initialfile=f"{self.right_click_id}.wem", defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
+            output_file = filedialog.asksaveasfilename(title="Save As", initialfile=f"{self.right_click_id}.wem", defaultextension=".wem", filetypes=[("Wwise Audio", "*.wem")])
             if not output_file:
                 return
             self.mod_handler.get_active_mod().dump_as_wem(self.right_click_id, output_file)
@@ -1685,7 +1946,10 @@ class MainWindow:
                 modified = entry.modified or entry.has_modified_children()
             else:
                 modified = entry.modified
-            tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
+            if isinstance(entry, StringEntry):
+                tree_entry = self.treeview.insert(parent_item, END, tags=(entry.get_id(), entry.parent.get_id()))
+            else:
+                tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
             bg, fg = self.get_colors(modified=modified)
             self.treeview.tag_configure(entry.get_id(), background=bg, foreground=fg)
         if isinstance(entry, WwiseBank):
@@ -1762,9 +2026,6 @@ class MainWindow:
                                         self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
                                     except:
                                         pass
-                            #for info in track.track_info:
-                            #    if info.event_id != 0:
-                            #        self.create_treeview_entry(info, track_entry)
                     elif isinstance(hierarchy_entry, RandomSequenceContainer):
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for s_id in hierarchy_entry.contents:
@@ -1818,7 +2079,7 @@ class MainWindow:
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":
-            string_entry = self.mod_handler.get_active_mod().get_string_entry(int(self.treeview.item(item, option="tags")[0]))
+            string_entry = self.mod_handler.get_active_mod().get_string_entry(textbank_id=int(self.treeview.item(item, option="tags")[1]), entry_id=int(self.treeview.item(item, option="tags")[0]))
             match = search_text_var in string_entry.get_text()
         else:
             s = self.treeview.item(item, option="text")
@@ -1874,30 +2135,35 @@ class MainWindow:
                         self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
                         break
             self.selected_language.set(first)
-
+    
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
+        self.sound_handler.kill_sound()
         if not archive_file:
             archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
         if not archive_file:
             return
-        if ".patch" in archive_file:
-            showwarning(title="Invalid archive", message="Cannot open patch files. Use Import Patch to apply a patch file's changes to the loaded archive(s)")
+        if ".patch" in os.path.basename(archive_file):
+            self.import_patch(archive_file)
             return
-        self.sound_handler.kill_sound()
-        if self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file):
+        self.start_async_task(self.loop, self.load_archive_async, archive_file=archive_file)
+    
+    async def load_archive_async(self, archive_file: str | None = ""):
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Loading Archive {os.path.basename(archive_file)}")
+        success = await self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file)
+        if success:
             archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
             self.clear_search()
             self.update_language_menu()
             self.update_recent_files(filepath=archive_file)
             if self.selected_view.get() == "SourceView":
-                self.create_source_view(new_game_archive=archive)
+                self.root.after_idle(lambda: self.create_source_view(new_game_archive=archive))
             else:
-                self.create_hierarchy_view(new_game_archive=archive)
+                self.root.after_idle(lambda: self.create_hierarchy_view(new_game_archive=archive))
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
-        else:
-            for child in self.treeview.get_children():
-                self.treeview.delete(child)
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text("Done")
 
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
@@ -1927,6 +2193,7 @@ class MainWindow:
                 else:
                     bg, fg = self.get_colors(modified=item.modified)
                 self.treeview.tag_configure(item.get_id(), background=bg, foreground=fg)
+                parents = []
                 if isinstance(item, HircEntry):
                     parents = [item.parent] if item.parent is not None else item.soundbanks
                 elif isinstance(item, AudioSource):
@@ -1937,8 +2204,7 @@ class MainWindow:
                     parents = [item.parent]
                 elif isinstance(item, TextBank):
                     parents = []
-                for item in parents:
-                    self.check_modified(parents)
+                self.check_modified(parents)
         else:
             for child in self.treeview.get_children():
                 self.clear_treeview_background(child)
@@ -1963,6 +2229,8 @@ class MainWindow:
                                             foreground=fg)
                         
             for text_bank in self.mod_handler.get_active_mod().text_banks.values():
+                if text_bank.get_language() != language:
+                    continue
                 bg, fg = self.get_colors(modified=text_bank.modified)
                 self.treeview.tag_configure(text_bank.get_id(), 
                                                 background=bg,
@@ -2008,14 +2276,57 @@ class MainWindow:
             return
         self.mod_handler.get_active_mod().write_patch(output_folder)
         
-    def import_patch(self):
+    def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
-        archive_file = askopenfilename(title="Select patch file")
+        if archive_file == "":
+            archive_file = askopenfilename(title="Select patch file", filetypes=[("Patch File", "*.patch_*")])
         if not archive_file:
             return
-        if self.mod_handler.get_active_mod().import_patch(archive_file):
-            self.check_modified()
-            self.show_info_window()
+        if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
+            archive_file = os.path.splitext(archive_file)[0]
+        self.start_async_task(self.loop, self.import_patch_async, archive_file=archive_file)
+        
+    async def import_patch_async(self, archive_file: str = ""):
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Loading file {os.path.basename(archive_file)}")
+        new_archive = GameArchive.from_file(archive_file)
+        missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+        if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
+            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
+        self.root.after_idle(self.import_patch2, missing_soundbank_ids, new_archive, archive_file)
+        
+    def import_patch2(self, missing_soundbank_ids, new_archive, archive_file):
+        archives = set()
+        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+            for soundbank_id in missing_soundbank_ids:
+                r = self.name_lookup.lookup_soundbank(soundbank_id)
+                if r.success:
+                    archives.add(r.archive)
+        self.start_async_task(self.loop, self.import_patch_async2, archives_to_load=archives, new_archive=new_archive, archive_file=archive_file)
+                
+    async def import_patch_async2(self, archives_to_load, new_archive, archive_file):
+        for archive in archives_to_load:
+            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, archive))
+        missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+        missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
+        if missing_soundbanks:
+            newline = "\n"
+            showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Importing Patches")
+        success = self.mod_handler.get_active_mod().import_patch(archive_file)
+        if success:
+            self.root.after_idle(self.check_modified)
+            self.root.after_idle(self.show_info_window)
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text(f"Done")
+
+    def start_async_task(self, loop, coroutine, *args, **kwargs):
+        asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), loop)
+    
+    def run_asyncio_loop(self, loop):
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
 
 if __name__ == "__main__":
     logger.setLevel(logging.INFO)
@@ -2067,8 +2378,8 @@ if __name__ == "__main__":
         showwarning(title="Missing Game Data", message="No folder selected for Helldivers data folder." \
             " Audio archive search is disabled.")
     try:
-        if os.path.exists("friendlynames.db"):
-            current_version = db.get_db_version("friendlynames.db") + 1
+        if os.path.exists(FRIENDLYNAMES_DB):
+            current_version = db.get_db_version(FRIENDLYNAMES_DB) + 1
         else:
             current_version = -1
         r = requests.get("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
@@ -2076,22 +2387,68 @@ if __name__ == "__main__":
             raise Exception("Error fetching latest database")
         data = r.json()
         download_url = data["assets"][0]["browser_download_url"]
+        print(download_url)
         latest_version = int(float(data["tag_name"].replace("v", "")))
         if current_version < latest_version:
             r = requests.get(download_url)
             if r.status_code != 200:
                 raise Exception("Error fetching latest database")
-            with open("friendlynames.db", "wb") as f:
+            with open(FRIENDLYNAMES_DB, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
     except Exception as e:
         print(e)
         
     try:
-        lookup_store = db.FriendlyNameLookup("friendlynames.db")
-    except Exception as err:
-        logger.error("Failed to connect to audio archive database", 
-                     stack_info=True)
+        if not (getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')):
+            raise Exception("Automatic updates not supported for python script")
+        r = requests.get("https://api.github.com/repos/raidingforpants/hd2-audio-modder/releases/latest")
+        if r.status_code != 200:
+            raise Exception("Error fetching update info")
+        data = r.json()
+        if SYSTEM == "Darwin":
+            download_url = data["assets"][1]["browser_download_url"]
+            updater = "updater"
+        elif SYSTEM == "Windows":
+            download_url = data["assets"][2]["browser_download_url"]
+            updater = "updater.exe"
+        elif SYSTEM == "Linux":
+            download_url = data["assets"][0]["browser_download_url"]
+            updater = "updater"
+        latest_version = [int(i) for i in data["tag_name"].replace("v", "").split(".")]
+        current_version = [int(i) for i in VERSION.split(".")]
+        while len(latest_version) < 3:
+            latest_version.append(0)
+        update_available = False
+        if latest_version[0] > current_version[0]:
+            update_available = True
+        elif latest_version[0] == current_version[0] and latest_version[1] > current_version[1]:
+            update_available = True
+        elif latest_version[0] == current_version[0] and latest_version[1] == current_version[1] and latest_version[2] > current_version[2]:
+            update_available = True
+        if update_available:
+            response = askyesnocancel(title="Update", message=f"A new version is available ({data['tag_name'].replace('v', '')}). Would you like to install it?")
+            if response:
+                subprocess.Popen(
+                    [
+                        updater,
+                        download_url,
+                        str(os.getpid())
+                    ],
+                    creationflags=subprocess.DETACHED_PROCESS
+                )
+                sys.exit()
+    except Exception as e:
+        print(e)
+
+    if os.path.exists(FRIENDLYNAMES_DB):
+        try:
+            lookup_store = db.FriendlyNameLookup(FRIENDLYNAMES_DB)
+        except Exception as err:
+            logger.error("Failed to connect to audio archive database", 
+                         stack_info=True)
+            lookup_store = None
+    else:
         lookup_store = None
         
     language = language_lookup("English (US)")
