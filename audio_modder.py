@@ -1298,7 +1298,7 @@ class MainWindow:
         if self.file_upload_window is None:
             self.sound_handler.kill_sound()
             self.file_upload_window = FileUploadWindow(self.root, callback=self.combine_mods_callback)
-        
+            
     def combine_mods_callback(self, files):
         self.file_upload_window = None
         if len(files) == 1:
@@ -1309,58 +1309,76 @@ class MainWindow:
             zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
             patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
             
-            for mod in zip_files:
+            for index, mod in enumerate(zip_files):
                 zip = zipfile.ZipFile(mod)
-                zip.extractall(path=CACHE)
-            patch_files.extend([os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]])
-            
-            for file in patch_files:
-                new_archive = GameArchive.from_file(file)
-                archives = set()
-                if len(new_archive.text_banks) > 0:
-                    archives.add("9ba626afa44a3aa3")
-                missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
-                for soundbank_id in missing_soundbank_ids:
-                    r = self.name_lookup.lookup_soundbank(soundbank_id)
-                    if r.success:
-                        archives.add(r.archive)
-                for archive in archives:
-                    combined_mod.load_archive_file(archive_file=os.path.join(self.app_state.game_data_path, archive))
-                missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in combined_mod.get_wwise_banks()]
-                missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
-                if missing_soundbanks:
-                    newline = "\n"
-                    showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
-                combined_mod.import_patch(file)
-                
-            output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
-            if output_file:
-                combined_mod.write_patch(CACHE)
-                zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
-                with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"), 'rb') as patch_file:
-                    zip.writestr("9ba626afa44a3aa3.patch_0", patch_file.read())
-                if os.path.exists(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream")):
-                    with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"), 'rb') as stream_file:
-                        zip.writestr("9ba626afa44a3aa3.patch_0.stream", stream_file.read())
-                zip.close()
-                try:
-                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"))
-                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"))
-                except:
-                    pass
-            self.mod_handler.delete_mod("combined_mods_temp")
-            self.mod_handler.set_active_mod(current_mod.name)
-            
-            for file in os.listdir(CACHE):
-                file = os.path.join(CACHE, file)
-                try:
-                    if os.path.isfile(file):
-                        os.remove(file)
-                    elif os.path.isdir(file):
-                        shutil.rmtree(file)
-                except:
-                    pass
-            
+                extract_location = os.path.join(CACHE, str(index))
+                os.mkdir(extract_location)
+                zip.extractall(path=extract_location)
+                patch_files.extend([os.path.join(extract_location, file) for file in os.listdir(extract_location) if os.path.isfile(os.path.join(extract_location, file)) and "patch" in os.path.splitext(file)[1]])
+
+            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+            self.start_async_task(self.loop, self.combine_mods_async, files=patch_files, mod=combined_mod)
+        
+    async def combine_mods_async(self, files, mod):
+        missing_soundbank_ids = []
+        for file in files:
+            self.progress_frame.set_text(f"Parsing file {file}")
+            new_archive = GameArchive.from_file(file)
+            archives = set()
+            if len(new_archive.text_banks) > 0:
+                archives.add("9ba626afa44a3aa3")
+            missing_soundbank_ids.extend([soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys()])
+        self.root.after_idle(lambda: self.combine_mods2(files, archives, missing_soundbank_ids, mod))
+        
+    def combine_mods2(self, files, archives, missing_soundbank_ids, mod):
+        for soundbank_id in missing_soundbank_ids:
+            r = self.name_lookup.lookup_soundbank(soundbank_id)
+            if r.success:
+                archives.add(r.archive)
+            else:
+                showerror(title="", message="Unable to complete automated mod merging; please merge manually.")
+                return
+        self.start_async_task(self.loop, self.combine_mods_async2, files=files, archives=archives, mod=mod)
+        
+    async def combine_mods_async2(self, files, archives, mod):
+        for archive in archives:
+            path = os.path.join(self.app_state.game_data_path, archive)
+            self.progress_frame.set_text(f"Loading file {os.path.basename(archive)}")
+            await mod.load_archive_file(archive_file=path)
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text(f"Importing patches")
+        for file in files:
+            mod.import_patch(file)
+        output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
+        self.progress_frame.set_text("Writing patch")
+        if output_file:
+            mod.write_patch(CACHE)
+            zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
+            with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"), 'rb') as patch_file:
+                zip.writestr("9ba626afa44a3aa3.patch_0", patch_file.read())
+            if os.path.exists(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream")):
+                with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"), 'rb') as stream_file:
+                    zip.writestr("9ba626afa44a3aa3.patch_0.stream", stream_file.read())
+            zip.close()
+            try:
+                os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"))
+                os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"))
+            except:
+                pass
+        self.mod_handler.delete_mod("combined_mods_temp")
+        #self.mod_handler.set_active_mod(current_mod.name)
+        
+        for file in os.listdir(CACHE):
+            file = os.path.join(CACHE, file)
+            try:
+                if os.path.isfile(file):
+                    os.remove(file)
+                elif os.path.isdir(file):
+                    shutil.rmtree(file)
+            except:
+                pass
+        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+        self.progress_frame.set_text("Done")
         
     def combine_music_mods(self):
         self.sound_handler.kill_sound()
@@ -2386,7 +2404,6 @@ if __name__ == "__main__":
             raise Exception("Error fetching latest database")
         data = r.json()
         download_url = data["assets"][0]["browser_download_url"]
-        print(download_url)
         latest_version = int(float(data["tag_name"].replace("v", "")))
         if current_version < latest_version:
             r = requests.get(download_url)
