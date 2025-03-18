@@ -1519,7 +1519,7 @@ class Mod:
     def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
         
-    async def load_archive_file(self, archive_file: str = ""):
+    def load_archive_file(self, archive_file: str = ""):
         """
         @exception
         - OSError

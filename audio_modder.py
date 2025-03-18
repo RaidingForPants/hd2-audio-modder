@@ -9,6 +9,8 @@ import xml.etree.ElementTree as etree
 import requests
 import json
 import logging
+import queue
+import random
 
 from functools import partial
 from functools import cmp_to_key
@@ -1045,6 +1047,119 @@ class ArchiveSearch(ttk.Entry):
             self.fmt = fmt
         self.entries = entries
         self.delete(0, tkinter.END)
+        
+class TaskItem:
+    
+    def __init__(self, thread, name):
+        self.thread = thread
+        self.name = name
+        
+    def get_thread(self):
+        return self.thread
+        
+    def get_name(self):
+        return self.name
+        
+class TaskQueue:
+    
+    def __init__(self):
+        self.async_event_loop = EventLoop()
+        self.async_task_queue = queue.Queue()
+        self.sync_task_queue = queue.Queue()
+        self.sync_thread_running = False
+        self.sync_thread = None
+        self.progress_frame = None
+        
+    def schedule(self, name, callback, task, *args, **kwargs):
+        task = self.sync_wrapper(task, callback)
+        t = threading.Thread(target=task, args=args, kwargs=kwargs)
+        item = TaskItem(t, name)
+        if self.sync_thread_running:
+            self.sync_task_queue.put(item)
+        else:
+            self.start_task(item)
+            
+    def start_task(self, task_item):
+        assert not self.sync_thread_running, "Tried to start new sync task with task already running!"
+        self.sync_thread_running = True
+        self.sync_thread = task_item.get_thread()
+        self.start_progress_frame()
+        self.set_progress_frame_text(task_item.get_name())
+        self.sync_thread.start()
+            
+    def set_progress_frame(self, frame):
+        self.progress_frame = frame
+        
+    def set_progress_frame_text(self, text):
+        if self.progress_frame is not None:
+            self.progress_frame.set_text(text)
+            
+    def start_progress_frame(self):
+        if self.progress_frame is not None:
+            print("start")
+            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+            
+    def stop_progress_frame(self):
+        if self.progress_frame is not None:
+            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+            self.progress_frame.set_text("Done")
+        
+    def schedule_async(self, name, callback, task, *args, **kwargs):
+        callback = self.async_wrapper(callback)
+        self.async_event_loop.start_task(callback, task, *args, **kwargs)
+    
+    def async_wrapper(self, callback):
+        if callback is not None:
+            def wrapper(future):
+                self.async_task_finished(future)
+                callback(future)
+        else:
+            def wrapper(future):
+                self.async_task_finished(future)
+        return wrapper
+        
+    def sync_wrapper(self, task, callback):
+        if callback is not None:
+            def wrapper(*args, **kwargs):
+                result = task(*args, **kwargs)
+                self.sync_task_finished()
+                callback(result)
+        else:
+            def wrapper(*args, **kwargs):
+                task(*args, **kwargs)
+                self.sync_task_finished()
+        return wrapper
+        
+    def async_task_finished(self, future):
+        print("async task done!")
+        
+    def sync_task_finished(self):
+        self.sync_thread_running = False
+        if not self.sync_task_queue.empty():
+            task_item = self.sync_task_queue.get()
+            self.start_task(task_item)
+        else:
+            self.sync_thread = None
+            self.stop_progress_frame()
+        print("sync task done!")
+    
+class EventLoop:
+    
+    def __init__(self):
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self.run_asyncio_loop, args=(self.loop,), daemon=True)
+        self.thread.start()
+    
+    def start_task(self, callback, coroutine, *args, **kwargs):
+        task = asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), self.loop)
+        task.add_done_callback(callback)
+    
+    def run_asyncio_loop(self, loop):
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
+    
+    def get_loop(self):
+        return self.loop
 
 class MainWindow:
 
@@ -1067,10 +1182,8 @@ class MainWindow:
         self.mod_handler = ModHandler.get_instance(lookup_store)
         self.mod_handler.create_new_mod("default")
         
-        self.loop = asyncio.new_event_loop()
-        self.asyncio_thread = threading.Thread(target=self.run_asyncio_loop, args=(self.loop,), daemon=True)
-        self.asyncio_thread.start()
-        self.async_tasks = []
+        self.task_manager = TaskQueue()
+        self.active_task_ids = []
         
         self.root = TkinterDnD.Tk()
         if os.path.exists("icon.ico"):
@@ -1277,6 +1390,8 @@ class MainWindow:
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
         
+        self.task_manager.set_progress_frame(self.progress_frame)
+        
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.root.resizable(True, True)
@@ -1300,6 +1415,13 @@ class MainWindow:
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
         
+    def generate_task_id(self):
+        while True:
+            id = random.randint(0, 2**64-1)
+            if id not in self.active_task_ids:
+                break
+        return id
+        
     def combine_mods(self):
         if self.file_upload_window is None:
             self.sound_handler.kill_sound()
@@ -1312,6 +1434,7 @@ class MainWindow:
         elif len(files) > 1:
             current_mod = self.mod_handler.get_active_mod()
             combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
+            self.mod_handler.set_active_mod(current_mod)
             zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
             patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
             
@@ -1323,13 +1446,15 @@ class MainWindow:
                 patch_files.extend([os.path.join(extract_location, file) for file in os.listdir(extract_location) if os.path.isfile(os.path.join(extract_location, file)) and "patch" in os.path.splitext(file)[1]])
 
             self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-            self.start_async_task(self.loop, self.combine_mods_async, files=patch_files, mod=combined_mod)
+            self.start_async_task(self.loop, "Parsing Input Files", self.combine_mods_async, files=patch_files, mod=combined_mod)
         
     async def combine_mods_async(self, files, mod):
         missing_soundbank_ids = []
-        for file in files:
-            self.progress_frame.set_text(f"Parsing file {file}")
+        self.progress_frame.set_mode(mode=ProgressFrame.DETERMINATE, max_progress=len(files))
+        for index, file in enumerate(files):
+            #self.progress_frame.set_text(f"Parsing Input File {index+1}/{len(files)}")
             new_archive = GameArchive.from_file(file)
+            self.progress_frame.step()
             archives = set()
             if len(new_archive.text_banks) > 0:
                 archives.add("9ba626afa44a3aa3")
@@ -1344,19 +1469,23 @@ class MainWindow:
             else:
                 showerror(title="", message="Unable to complete automated mod merging; please merge manually.")
                 return
-        self.start_async_task(self.loop, self.combine_mods_async2, files=files, archives=archives, mod=mod)
+        self.start_async_task(self.loop, "Loading Required Archives", self.combine_mods_async2, files=files, archives=archives, mod=mod)
         
     async def combine_mods_async2(self, files, archives, mod):
-        for archive in archives:
+        self.progress_frame.set_mode(mode=ProgressFrame.DETERMINATE, max_progress=len(archives))
+        for index, archive in enumerate(archives):
             path = os.path.join(self.app_state.game_data_path, archive)
-            self.progress_frame.set_text(f"Loading file {os.path.basename(archive)}")
+            #self.progress_frame.set_text(f"Loading Required Archive {index+1}/{len(archives)}")
             await mod.load_archive_file(archive_file=path)
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Importing patches")
-        for file in files:
+            self.progress_frame.step()
+        self.progress_frame.set_mode(mode=ProgressFrame.DETERMINATE, max_progress=len(files))
+        for index, file in enumerate(files):
+            #self.progress_frame.set_text(f"Importing Patch {index+1}/{len(files)}")
             mod.import_patch(file)
+            self.progress_frame.step()
         output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
-        self.progress_frame.set_text("Writing patch")
+        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+        self.progress_frame.set_text("Writing Patch")
         if output_file:
             mod.write_patch(CACHE)
             zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
@@ -1383,8 +1512,6 @@ class MainWindow:
                     shutil.rmtree(file)
             except:
                 pass
-        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-        self.progress_frame.set_text("Done")
         
     def combine_music_mods(self):
         self.sound_handler.kill_sound()
@@ -2169,21 +2296,36 @@ class MainWindow:
         if ".patch" in os.path.basename(archive_file):
             self.import_patch(archive_file)
             return
-        self.start_async_task(self.loop, f"Loading Archive {os.path.basename(archive_file)}", self.load_archive_async, archive_file=archive_file)
-    
-    async def load_archive_async(self, archive_file: str | None = ""):
-        success = await self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file)
-        if success:
-            archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
+        self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.create_callback(self.load_archive_task_finished), task=self.load_archive_task, archive_files=[archive_file])
+        
+    def load_archive_task(self, archive_files: str | None = ""):
+        results = []
+        for archive_file in archive_files:
+            results.append((self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file), archive_file))
+        return results
+                
+    def load_archive_task_finished(self, results):
+        new_game_archives = []
+        for result in results:
+            success = result[0]
+            archive_file = result[1]
+            if success:
+                self.update_recent_files(filepath=archive_file)
+                archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
+                new_game_archives.append(archive)
+        for archive in new_game_archives:
+            if self.selected_view.get() == "SourceView":
+                self.create_source_view(new_game_archive=archive)
+            else:
+                self.create_hierarchy_view(new_game_archive=archive)
+        if len(new_game_archives) > 0:
             self.clear_search()
             self.update_language_menu()
-            self.update_recent_files(filepath=archive_file)
-            if self.selected_view.get() == "SourceView":
-                self.root.after_idle(lambda: self.create_source_view(new_game_archive=archive))
-            else:
-                self.root.after_idle(lambda: self.create_hierarchy_view(new_game_archive=archive))
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
+        
+    def create_callback(self, callback):
+        return lambda arg: self.root.after_idle(callback, arg)
 
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
@@ -2273,7 +2415,8 @@ class MainWindow:
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
-        self.start_async_task(self.loop, "Dumping Files", self.dump_all_as_wav_async, output_folder)
+        self.task_manager.schedule_async("Dumping Files", None, self.dump_all_as_wav_async, output_folder)
+        #self.start_async_task(self.loop, "Dumping Files", self.dump_all_as_wav_async, output_folder)
             
     async def dump_all_as_wav_async(self, output_folder):
         await self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
@@ -2337,30 +2480,6 @@ class MainWindow:
         if success:
             self.root.after_idle(self.check_modified)
             self.root.after_idle(self.show_info_window)
-
-    def start_async_task(self, loop, label, coroutine, *args, **kwargs):
-        task = asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), loop)
-        if len(self.async_tasks) == 0:
-            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-            self.progress_frame.set_text(label)
-        task.add_done_callback(self.async_task_finished)
-        self.async_tasks.append((task, label))
-        
-    def async_task_finished(self, future):
-        for task in self.async_tasks:
-            if task[0] == future:
-                break
-        self.async_tasks.remove(task)
-        if len(self.async_tasks) > 0:
-            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-            self.progress_frame.set_text(self.async_tasks[0][1])
-        else:
-            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-            self.progress_frame.set_text(f"Done")
-    
-    def run_asyncio_loop(self, loop):
-        asyncio.set_event_loop(loop)
-        loop.run_forever()
 
 if __name__ == "__main__":
     logger.setLevel(logging.INFO)
