@@ -1060,7 +1060,7 @@ class TaskItem:
     def get_name(self):
         return self.name
         
-class TaskQueue:
+class TaskManager:
     
     def __init__(self):
         self.async_event_loop = EventLoop()
@@ -1121,13 +1121,18 @@ class TaskQueue:
     def sync_wrapper(self, task, callback):
         if callback is not None:
             def wrapper(*args, **kwargs):
-                result = task(*args, **kwargs)
-                self.sync_task_finished()
-                callback(result)
+                try:
+                    result = task(*args, **kwargs)
+                    self.sync_task_finished()
+                    callback(*result)
+                finally:
+                    self.sync_task_finished()
         else:
             def wrapper(*args, **kwargs):
-                task(*args, **kwargs)
-                self.sync_task_finished()
+                try:
+                    task(*args, **kwargs)
+                finally:
+                    self.sync_task_finished()
         return wrapper
         
     def async_task_finished(self, future):
@@ -1160,6 +1165,19 @@ class EventLoop:
     
     def get_loop(self):
         return self.loop
+        
+def task(func):
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        if not type(result) is tuple:
+            result = (result,)
+        return result
+    return wrapper
+        
+def callback(callback):
+    def wrapper(*args, **kwargs):
+        args[0].root.after_idle(callback, *args, **kwargs)
+    return wrapper
 
 class MainWindow:
 
@@ -1182,7 +1200,7 @@ class MainWindow:
         self.mod_handler = ModHandler.get_instance(lookup_store)
         self.mod_handler.create_new_mod("default")
         
-        self.task_manager = TaskQueue()
+        self.task_manager = TaskManager()
         self.active_task_ids = []
         
         self.root = TkinterDnD.Tk()
@@ -1423,6 +1441,9 @@ class MainWindow:
         return id
         
     def combine_mods(self):
+        if not os.path.exists(self.app_state.game_data_path):
+            showerror(title="Missing Required Configuration", message="Unknown game data folder location. Unable to automatically combine mods")
+            return
         if self.file_upload_window is None:
             self.sound_handler.kill_sound()
             self.file_upload_window = FileUploadWindow(self.root, callback=self.combine_mods_callback)
@@ -1434,34 +1455,31 @@ class MainWindow:
         elif len(files) > 1:
             current_mod = self.mod_handler.get_active_mod()
             combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
-            self.mod_handler.set_active_mod(current_mod)
-            zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
-            patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
-            
-            for index, mod in enumerate(zip_files):
-                zip = zipfile.ZipFile(mod)
-                extract_location = os.path.join(CACHE, str(index))
-                os.mkdir(extract_location)
-                zip.extractall(path=extract_location)
-                patch_files.extend([os.path.join(extract_location, file) for file in os.listdir(extract_location) if os.path.isfile(os.path.join(extract_location, file)) and "patch" in os.path.splitext(file)[1]])
+            self.mod_handler.set_active_mod(current_mod.name)
+            self.task_manager.schedule(name="Processing Input Files", callback=self.combine_mods_soundbank_lookup, task=self.combine_mods_task, files=files, mod=combined_mod)
 
-            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-            self.start_async_task(self.loop, "Parsing Input Files", self.combine_mods_async, files=patch_files, mod=combined_mod)
+    @task
+    def combine_mods_task(self, files, mod):
+        zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
+        patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
         
-    async def combine_mods_async(self, files, mod):
+        for index, mod_file in enumerate(zip_files):
+            zip = zipfile.ZipFile(mod_file)
+            extract_location = os.path.join(CACHE, str(index))
+            os.mkdir(extract_location)
+            zip.extractall(path=extract_location)
+            patch_files.extend([os.path.join(extract_location, file) for file in os.listdir(extract_location) if os.path.isfile(os.path.join(extract_location, file)) and "patch" in os.path.splitext(file)[1]])
         missing_soundbank_ids = []
-        self.progress_frame.set_mode(mode=ProgressFrame.DETERMINATE, max_progress=len(files))
-        for index, file in enumerate(files):
-            #self.progress_frame.set_text(f"Parsing Input File {index+1}/{len(files)}")
+        archives = set()
+        for index, file in enumerate(patch_files):
             new_archive = GameArchive.from_file(file)
-            self.progress_frame.step()
-            archives = set()
             if len(new_archive.text_banks) > 0:
                 archives.add("9ba626afa44a3aa3")
             missing_soundbank_ids.extend([soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys()])
-        self.root.after_idle(lambda: self.combine_mods2(files, archives, missing_soundbank_ids, mod))
-        
-    def combine_mods2(self, files, archives, missing_soundbank_ids, mod):
+        return patch_files, archives, missing_soundbank_ids, mod
+
+    @callback
+    def combine_mods_soundbank_lookup(self, files, archives, missing_soundbank_ids, mod):
         for soundbank_id in missing_soundbank_ids:
             r = self.name_lookup.lookup_soundbank(soundbank_id)
             if r.success:
@@ -1469,23 +1487,16 @@ class MainWindow:
             else:
                 showerror(title="", message="Unable to complete automated mod merging; please merge manually.")
                 return
-        self.start_async_task(self.loop, "Loading Required Archives", self.combine_mods_async2, files=files, archives=archives, mod=mod)
+        for archive in archives:
+            archive = os.path.join(self.app_state.game_data_path, archive)
+            self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=lambda arg: None, task=task(mod.load_archive_file), archive_file=archive)
+        for file in files:
+            self.task_manager.schedule(name=f"Applying Patch {file}", callback=lambda arg: None, task=task(mod.import_patch), patch_file=file)
+        self.task_manager.schedule(name="Saving Output File", callback=lambda arg: None, task=self.combine_mods_write_output, mod=mod)
         
-    async def combine_mods_async2(self, files, archives, mod):
-        self.progress_frame.set_mode(mode=ProgressFrame.DETERMINATE, max_progress=len(archives))
-        for index, archive in enumerate(archives):
-            path = os.path.join(self.app_state.game_data_path, archive)
-            #self.progress_frame.set_text(f"Loading Required Archive {index+1}/{len(archives)}")
-            await mod.load_archive_file(archive_file=path)
-            self.progress_frame.step()
-        self.progress_frame.set_mode(mode=ProgressFrame.DETERMINATE, max_progress=len(files))
-        for index, file in enumerate(files):
-            #self.progress_frame.set_text(f"Importing Patch {index+1}/{len(files)}")
-            mod.import_patch(file)
-            self.progress_frame.step()
+    @task    
+    def combine_mods_write_output(self, mod):
         output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text("Writing Patch")
         if output_file:
             mod.write_patch(CACHE)
             zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
@@ -1513,48 +1524,8 @@ class MainWindow:
             except:
                 pass
         
-    def combine_music_mods(self):
-        self.sound_handler.kill_sound()
-        if not self.app_state.game_data_path or not os.path.exists(self.app_state.game_data_path):
-            showwarning(title="Error", message="Unable to locate Helldivers 2 game files. Cannot automatically merge mods.")
-        mod_files = filedialog.askopenfilenames(title="Choose mod files to combine", filetypes=[("Zip Archive", "*.zip")])
-        if mod_files:
-            combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
-            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "046d4441a6dae0a9"))
-            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "89de9c3d26d2adc1"))
-            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "fdf011daecf24312"))
-            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "2e24ba9dd702da5c"))
-            extracted_mods = []
-            for mod in mod_files:
-                zip = zipfile.ZipFile(mod)
-                zip.extractall(path=CACHE)
-                for patch_file in [os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]]:
-                    combined_mod.import_patch(patch_file)
-                for file in os.listdir(CACHE):
-                    file = os.path.join(CACHE, file)
-                    try:
-                        if os.path.isfile(file):
-                            os.remove(file)
-                        elif os.path.isdir(file):
-                            shutil.rmtree(file)
-                    except:
-                        pass
-            output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
-            if output_file:
-                combined_mod.write_patch(CACHE)
-                zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
-                with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"), 'rb') as patch_file:
-                    zip.writestr("9ba626afa44a3aa3.patch_0", patch_file.read())
-                if os.path.exists(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream")):
-                    with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"), 'rb') as stream_file:
-                        zip.writestr("9ba626afa44a3aa3.patch_0.stream", stream_file.read())
-                zip.close()
-                try:
-                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"))
-                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"))
-                except:
-                    pass
-            self.mod_handler.delete_mod("combined_mods_temp")
+    def combine_mods_cleanup(self):
+        pass
 
     def drop_import(self, event):
         self.drag_source_widget = None
@@ -1791,15 +1762,21 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
-        self.start_async_task(self.loop, "Importing Files", self.import_files_async, file_dict=file_dict)
+        self.task_manager.schedule(name="Importing Files", callback=self.import_files_callback, task=self.import_files_task, file_dict=file_dict)
         
-    async def import_files_async(self, file_dict):
+    @task
+    def import_files_task(self, file_dict):
         try:
-            await self.mod_handler.get_active_mod().import_files(file_dict)
+            self.mod_handler.get_active_mod().import_files(file_dict)
         except Exception as e:
             showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)} Some imports may have been skipped.")
-        self.root.after_idle(self.check_modified)
-        self.root.after_idle(self.show_info_window)
+        return file_dict
+    
+    @callback
+    def import_files_callback(self, file_dict):
+        # use file dict for diffing? not sure how this would work with patch files
+        self.check_modified()
+        self.show_info_window()
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
@@ -2076,13 +2053,13 @@ class MainWindow:
                 return
             self.start_async_task(self.loop, "Dumping Files", self.dump_multiple_as_wav_async, muted, with_seq, output_folder)
             
-    async def dump_single_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_file: str = ""):
-        await self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
+    def dump_single_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_file: str = ""):
+        self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
                 
-    async def dump_multiple_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_folder: str = ""):
+    def dump_multiple_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_folder: str = ""):
         if not os.path.exists(output_folder):
             return
-        await self.mod_handler.get_active_mod().dump_multiple_as_wav(
+        self.mod_handler.get_active_mod().dump_multiple_as_wav(
             [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
             muted=muted,
             with_seq=with_seq,
@@ -2296,16 +2273,19 @@ class MainWindow:
         if ".patch" in os.path.basename(archive_file):
             self.import_patch(archive_file)
             return
-        self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.create_callback(self.load_archive_task_finished), task=self.load_archive_task, archive_files=[archive_file])
-        
+        self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
+    
+    @task
     def load_archive_task(self, archive_files: str | None = ""):
         results = []
         for archive_file in archive_files:
             results.append((self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file), archive_file))
         return results
-                
+    
+    @callback
     def load_archive_task_finished(self, results):
         new_game_archives = []
+        print(results)
         for result in results:
             success = result[0]
             archive_file = result[1]
@@ -2325,7 +2305,7 @@ class MainWindow:
                 child.forget()
         
     def create_callback(self, callback):
-        return lambda arg: self.root.after_idle(callback, arg)
+        return lambda args: self.root.after_idle(callback, *args)
 
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
@@ -2416,10 +2396,9 @@ class MainWindow:
         if not output_folder:
             return
         self.task_manager.schedule_async("Dumping Files", None, self.dump_all_as_wav_async, output_folder)
-        #self.start_async_task(self.loop, "Dumping Files", self.dump_all_as_wav_async, output_folder)
             
-    async def dump_all_as_wav_async(self, output_folder):
-        await self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
+    def dump_all_as_wav_async(self, output_folder):
+        self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
         
     def play_audio(self, file_id: int, callback=None):
         audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
@@ -2450,36 +2429,34 @@ class MainWindow:
             return
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
-        self.start_async_task(self.loop, f"Loading file {os.path.basename(archive_file)}", self.import_patch_async, archive_file=archive_file)
-        
-    async def import_patch_async(self, archive_file: str = ""):
+        self.task_manager.schedule(name="Processing Patch Contents", callback=self.import_patch_soundbank_lookup, task=self.import_patch_task, archive_file=archive_file)
+    
+    @task
+    def import_patch_task(self, archive_file: str = ""):
         new_archive = GameArchive.from_file(archive_file)
         missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
         if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
-            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
-        self.root.after_idle(self.import_patch2, missing_soundbank_ids, new_archive, archive_file)
-        
-    def import_patch2(self, missing_soundbank_ids, new_archive, archive_file):
+            self.mod_handler.get_active_mod().load_archive_file(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
+        return missing_soundbank_ids, new_archive, archive_file
+    
+    @callback
+    def import_patch_soundbank_lookup(self, missing_soundbank_ids, new_archive, patch_file):
         archives = set()
         if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
             for soundbank_id in missing_soundbank_ids:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)
                 if r.success:
                     archives.add(r.archive)
-        self.start_async_task(self.loop, "Importing Patches", self.import_patch_async2, archives_to_load=archives, new_archive=new_archive, archive_file=archive_file)
-                
-    async def import_patch_async2(self, archives_to_load, new_archive, archive_file):
-        for archive in archives_to_load:
-            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, archive))
-        missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
-        missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
-        if missing_soundbanks:
-            newline = "\n"
-            showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
-        success = self.mod_handler.get_active_mod().import_patch(archive_file)
-        if success:
-            self.root.after_idle(self.check_modified)
-            self.root.after_idle(self.show_info_window)
+        for archive in archives:
+            archive = os.path.join(self.app_state.game_data_path, archive)
+            self.task_manager.schedule(name="Loading Archive {archive}", callback=lambda arg: None, task=task(self.mod_handler.get_active_mod().load_archive_file), archive_file=archive)
+        self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
+    
+    @callback
+    def import_patch_finished(self, success):
+        print(success)
+        self.check_modified()
+        self.show_info_window()
 
 if __name__ == "__main__":
     logger.setLevel(logging.INFO)

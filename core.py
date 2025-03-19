@@ -1245,7 +1245,7 @@ class Mod:
         with open(output_path, "wb") as f:
             f.write(self.get_audio_source(file_id).get_data())
         
-    async def dump_as_wav(self, file_id: int, output_file: str = "", muted: bool = False):
+    def dump_as_wav(self, file_id: int, output_file: str = "", muted: bool = False):
         """
         @exception
         - ValueError
@@ -1271,12 +1271,11 @@ class Mod:
         with open(f"{save_path}.wem", 'wb') as f:
             f.write(self.get_audio_source(file_id).get_data())
 
-        process = await asyncio.create_subprocess_exec(
-            VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem", 
+        process = subprocess.run([
+            VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"
+            ],
             stdout=subprocess.DEVNULL
         )
-        
-        stdout, stderr = await process.communicate()
         
         if process.returncode != 0:
             logger.error(f"Encountered error when converting {file_id}.wem into .wav format")
@@ -1299,7 +1298,7 @@ class Mod:
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
         
-    async def dump_multiple_as_wav(self, file_ids: list[int], output_folder: str = "", muted: bool = False,
+    def dump_multiple_as_wav(self, file_ids: list[int], output_folder: str = "", muted: bool = False,
                              with_seq: bool = False):
         """
         @exception
@@ -1315,12 +1314,11 @@ class Mod:
         bank.set_audio_sources(audio_sources)
         bank.to_file(os.path.join(CACHE, "temp.bnk"))
 
-        process = await asyncio.create_subprocess_exec(
+        process = subprocess.run([
             VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), os.path.join(CACHE, "temp.bnk"),
+            ],
             stdout=subprocess.DEVNULL,
         )
-        
-        stdout, stderr = await process.communicate()
         
         if process.returncode != 0:
             logger.error(f"Encountered error when converting to .wav")
@@ -1353,7 +1351,7 @@ class Mod:
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
     
-    async def dump_all_as_wav(self, output_folder: str = ""):
+    def dump_all_as_wav(self, output_folder: str = ""):
         """
         @exception
         - OSError
@@ -1372,7 +1370,7 @@ class Mod:
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
             file_ids = [audio.get_id() for audio in bank.get_content()]
-            await self.dump_multiple_as_wav(file_ids=file_ids, output_folder=subfolder)
+            self.dump_multiple_as_wav(file_ids=file_ids, output_folder=subfolder)
 
     def save_archive_file(self, game_archive: GameArchive, output_folder: str = ""):
         """
@@ -1814,7 +1812,7 @@ class Mod:
  
         patch_game_archive.to_file(output_folder)
 
-    async def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
+    def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
         """
         @exception
         - ValueError
@@ -1841,11 +1839,10 @@ class Mod:
                     continue
             if set_duration:
                 try:
-                    process = await asyncio.create_subprocess_exec(VGMSTREAM, "-m", filepath, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                    stdout, stderr = await process.communicate()
+                    process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
                     if process.returncode != 0:
                         raise Exception("")
-                    for line in stdout.decode(locale.getpreferredencoding()).split("\n"):
+                    for line in process.stdout.decode(locale.getpreferredencoding()).split("\n"):
                         if "sample rate" in line:
                             sample_rate = float(line[13:line.index("Hz")-1])
                         if "stream total samples" in line:
@@ -1905,7 +1902,7 @@ class Mod:
         
         return os.path.join(TMP, "external_sources.wsources")
         
-    async def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
+    def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
         """
         @exception
         - ValueError
@@ -1928,24 +1925,19 @@ class Mod:
                 "The current operating system does not support this feature"
             )
         
-        process = await asyncio.create_subprocess_exec(
+        process = subprocess.run([
             WWISE_CLI,
             "migrate",
             wwise_project,
             "--quiet",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await process.communicate()
+        ])
         
         if process.returncode != 0:
-            if stdout:
-                logger.error(stdout.decode(locale.getpreferredencoding()))
             raise Exception("Non-zero return code in Wwise project migration")
         
         convert_dest = os.path.join(TMP, SYSTEM)
         
-        process = await asyncio.create_subprocess_exec(
+        process = subprocess.run([
             WWISE_CLI,
             "convert-external-source",
             wwise_project,
@@ -1954,19 +1946,14 @@ class Mod:
             source_list,
             "--output",
             TMP,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await process.communicate()
+        ])
         
         if process.returncode != 0:
-            if stdout:
-                logger.error(stdout.decode(locale.getpreferredencoding()))
             raise Exception("Non-zero return code in Wwise source conversion")
         
         wems = {os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"): targets for filepath, targets in wavs.items()}
 
-        await self.import_wems(wems)
+        self.import_wems(wems)
         
         for wem in wems.keys():
             try:
@@ -1979,7 +1966,7 @@ class Mod:
         except OSError as err:
             logger.error(err)
             
-    async def import_files(self, file_dict: dict[str, list[int]]):
+    def import_files(self, file_dict: dict[str, list[int]]):
         patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
         wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wem"}
         wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wav"}
@@ -1998,9 +1985,9 @@ class Mod:
         for patch in patches:
             self.import_patch(patch_file=patch)
         if len(wems) > 0:
-            await self.import_wems(wems)
+            self.import_wems(wems)
         if len(wavs) > 0:
-            await self.import_wavs(wavs)
+            self.import_wavs(wavs)
         for file in temp_files:
             try:
                 os.remove(file)
