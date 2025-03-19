@@ -32,6 +32,7 @@ class AudioSource:
         self.data_old: bytearray | Literal[b""] = b""
         self.parents: set[HircEntry | WwiseStream] = set()
         self.stream_type: int = 0
+        self.muted = False
         
     def set_data(self, data: bytearray, notify_subscribers: bool = True, set_modified: bool = True):
         if not self.modified and set_modified:
@@ -55,7 +56,10 @@ class AudioSource:
         return self.modified
 
     def get_data(self) -> bytearray:
-        return bytearray() if self.data == b"" else self.data 
+        if not self.muted:
+            return bytearray() if self.data == b"" else self.data 
+        else:
+            return b"" # returns wem with no samples
         
     def get_resource_id(self) -> int:
         return self.resource_id
@@ -1271,8 +1275,9 @@ class Mod:
         with open(f"{save_path}.wem", 'wb') as f:
             f.write(self.get_audio_source(file_id).get_data())
 
-        process = subprocess.run(
-            [VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"], 
+        process = subprocess.run([
+            VGMSTREAM, "-o", f"{save_path}.wav", f"{save_path}.wem"
+            ],
             stdout=subprocess.DEVNULL
         )
         
@@ -1296,6 +1301,22 @@ class Mod:
                 save_path = os.path.join(output_folder, f"{audio.get_id()}")
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
+                    
+    def create_dummy_bank(self, file_ids: list[int], output_filepath: str):
+        bank = DummyBank()
+        bank.set_audio_sources([self.get_audio_source(int(file_id)) for file_id in file_ids])
+        bank.to_file(output_filepath)
+    
+    async def dump_from_bank_file(self, output_folder: str, bank_filepath: str):
+        process = await asyncio.create_subprocess_exec(
+            VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), bank_filepath,
+            stdout=subprocess.DEVNULL,
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            logger.error(f"Encountered error when converting to .wav")
         
     def dump_multiple_as_wav(self, file_ids: list[int], output_folder: str = "", muted: bool = False,
                              with_seq: bool = False):
@@ -1307,16 +1328,14 @@ class Mod:
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise OSError(f"Invalid output folder '{output_folder}'")
 
-        audio_sources = [self.get_audio_source(int(file_id)) for file_id in file_ids]
-        
-        bank = DummyBank()
-        bank.set_audio_sources(audio_sources)
-        bank.to_file(os.path.join(CACHE, "temp.bnk"))
+        self.create_dummy_bank(file_ids, os.path.join(CACHE, "temp.bnk"))
 
-        process = subprocess.run(
-            [VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), os.path.join(CACHE, "temp.bnk")],
+        process = subprocess.run([
+            VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), os.path.join(CACHE, "temp.bnk"),
+            ],
             stdout=subprocess.DEVNULL,
         )
+        
         if process.returncode != 0:
             logger.error(f"Encountered error when converting to .wav")
         os.remove(os.path.join(CACHE, "temp.bnk"))
@@ -1514,7 +1533,7 @@ class Mod:
     def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
         
-    async def load_archive_file(self, archive_file: str = ""):
+    def load_archive_file(self, archive_file: str = ""):
         """
         @exception
         - OSError
@@ -1809,7 +1828,7 @@ class Mod:
  
         patch_game_archive.to_file(output_folder)
 
-    async def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
+    def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
         """
         @exception
         - ValueError
@@ -1836,11 +1855,10 @@ class Mod:
                     continue
             if set_duration:
                 try:
-                    process = await asyncio.create_subprocess_exec(VGMSTREAM, "-m", filepath, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                    stdout, stderr = await process.communicate()
+                    process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
                     if process.returncode != 0:
                         raise Exception("")
-                    for line in stdout.decode(locale.getpreferredencoding()).split("\n"):
+                    for line in process.stdout.decode(locale.getpreferredencoding()).split("\n"):
                         if "sample rate" in line:
                             sample_rate = float(line[13:line.index("Hz")-1])
                         if "stream total samples" in line:
@@ -1900,7 +1918,7 @@ class Mod:
         
         return os.path.join(TMP, "external_sources.wsources")
         
-    async def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
+    def import_wavs(self, wavs: dict[str, list[int]] | None = None, wwise_project: str = DEFAULT_WWISE_PROJECT):
         """
         @exception
         - ValueError
@@ -1923,24 +1941,19 @@ class Mod:
                 "The current operating system does not support this feature"
             )
         
-        process = await asyncio.create_subprocess_exec(
+        process = subprocess.run([
             WWISE_CLI,
             "migrate",
             wwise_project,
             "--quiet",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await process.communicate()
+        ])
         
         if process.returncode != 0:
-            if stdout:
-                logger.error(stdout.decode(locale.getpreferredencoding()))
             raise Exception("Non-zero return code in Wwise project migration")
         
         convert_dest = os.path.join(TMP, SYSTEM)
         
-        process = await asyncio.create_subprocess_exec(
+        process = subprocess.run([
             WWISE_CLI,
             "convert-external-source",
             wwise_project,
@@ -1949,19 +1962,14 @@ class Mod:
             source_list,
             "--output",
             TMP,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await process.communicate()
+        ])
         
         if process.returncode != 0:
-            if stdout:
-                logger.error(stdout.decode(locale.getpreferredencoding()))
             raise Exception("Non-zero return code in Wwise source conversion")
         
         wems = {os.path.join(convert_dest, f"{os.path.splitext(os.path.basename(filepath))[0]}.wem"): targets for filepath, targets in wavs.items()}
 
-        await self.import_wems(wems)
+        self.import_wems(wems)
         
         for wem in wems.keys():
             try:
@@ -1974,7 +1982,7 @@ class Mod:
         except OSError as err:
             logger.error(err)
             
-    async def import_files(self, file_dict: dict[str, list[int]]):
+    def import_files(self, file_dict: dict[str, list[int]]):
         patches = [file for file in file_dict.keys() if "patch" in os.path.splitext(file)[1]]
         wems = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wem"}
         wavs = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() == ".wav"}
@@ -1993,9 +2001,9 @@ class Mod:
         for patch in patches:
             self.import_patch(patch_file=patch)
         if len(wems) > 0:
-            await self.import_wems(wems)
+            self.import_wems(wems)
         if len(wavs) > 0:
-            await self.import_wavs(wavs)
+            self.import_wavs(wavs)
         for file in temp_files:
             try:
                 os.remove(file)

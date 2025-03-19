@@ -9,6 +9,8 @@ import xml.etree.ElementTree as etree
 import requests
 import json
 import logging
+import queue
+import random
 
 from functools import partial
 from functools import cmp_to_key
@@ -1045,6 +1047,150 @@ class ArchiveSearch(ttk.Entry):
             self.fmt = fmt
         self.entries = entries
         self.delete(0, tkinter.END)
+        
+class TaskItem:
+    
+    def __init__(self, thread, name):
+        self.thread = thread
+        self.name = name
+        
+    def get_thread(self):
+        return self.thread
+        
+    def get_name(self):
+        return self.name
+        
+class TaskManager:
+    
+    def __init__(self):
+        self.async_event_loop = EventLoop()
+        self.async_task_queue = queue.Queue()
+        self.sync_task_queue = queue.Queue()
+        self.sync_thread_running = False
+        self.sync_thread = None
+        self.progress_frame = None
+        
+    def schedule(self, name, callback, task, *args, **kwargs):
+        task = self.sync_wrapper(task, callback)
+        t = threading.Thread(target=task, args=args, kwargs=kwargs)
+        item = TaskItem(t, name)
+        if self.sync_thread_running:
+            self.sync_task_queue.put(item)
+        else:
+            self.start_task(item)
+            
+    def schedule_in_new_thread(self, name, callback, task, *args, **kwargs):
+        task = self.sync_wrapper(task, callback)
+        t = threading.Thread(target=task, args=args, kwargs=kwargs)
+        t.start()
+            
+    def start_task(self, task_item):
+        assert not self.sync_thread_running, "Tried to start new sync task with task already running!"
+        self.sync_thread_running = True
+        self.sync_thread = task_item.get_thread()
+        self.start_progress_frame()
+        self.set_progress_frame_text(task_item.get_name())
+        self.sync_thread.start()
+            
+    def set_progress_frame(self, frame):
+        self.progress_frame = frame
+        
+    def set_progress_frame_text(self, text):
+        if self.progress_frame is not None:
+            self.progress_frame.set_text(text)
+            
+    def start_progress_frame(self):
+        if self.progress_frame is not None:
+            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
+            
+    def stop_progress_frame(self):
+        if self.progress_frame is not None:
+            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+            self.progress_frame.set_text("Done")
+        
+    def schedule_async(self, name, callback, task, *args, **kwargs):
+        callback = self.async_wrapper(callback)
+        self.async_event_loop.start_task(callback, task, *args, **kwargs)
+    
+    def async_wrapper(self, callback):
+        if callback is not None:
+            def wrapper(future):
+                try:
+                    callback(*future.result())
+                finally:
+                    self.async_task_finished(future)
+        else:
+            def wrapper(future):
+                self.async_task_finished(future)
+        return wrapper
+        
+    def sync_wrapper(self, task, callback):
+        if callback is not None:
+            def wrapper(*args, **kwargs):
+                try:
+                    result = task(*args, **kwargs)
+                    self.sync_task_finished()
+                    callback(*result)
+                finally:
+                    self.sync_task_finished()
+        else:
+            def wrapper(*args, **kwargs):
+                try:
+                    task(*args, **kwargs)
+                finally:
+                    self.sync_task_finished()
+        return wrapper
+        
+    def async_task_finished(self, future):
+        pass
+        
+    def sync_task_finished(self):
+        self.sync_thread_running = False
+        if not self.sync_task_queue.empty():
+            task_item = self.sync_task_queue.get()
+            self.start_task(task_item)
+        else:
+            self.sync_thread = None
+            self.stop_progress_frame()
+    
+class EventLoop:
+    
+    def __init__(self):
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self.run_asyncio_loop, args=(self.loop,), daemon=True)
+        self.thread.start()
+    
+    def start_task(self, callback, coroutine, *args, **kwargs):
+        task = asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), self.loop)
+        task.add_done_callback(callback)
+    
+    def run_asyncio_loop(self, loop):
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
+    
+    def get_loop(self):
+        return self.loop
+        
+def task(func):
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        if not type(result) is tuple:
+            result = (result,)
+        return result
+    return wrapper
+    
+def async_task(func):
+    async def wrapper(*args, **kwargs):
+        result = await func(*args, **kwargs)
+        if not type(result) is tuple:
+            result = (result,)
+        return result
+    return wrapper
+
+def callback(callback):
+    def wrapper(*args, **kwargs):
+        args[0].root.after_idle(callback, *args, **kwargs)
+    return wrapper
 
 class MainWindow:
 
@@ -1067,9 +1213,8 @@ class MainWindow:
         self.mod_handler = ModHandler.get_instance(lookup_store)
         self.mod_handler.create_new_mod("default")
         
-        self.loop = asyncio.new_event_loop()
-        self.asyncio_thread = threading.Thread(target=self.run_asyncio_loop, args=(self.loop,), daemon=True)
-        self.asyncio_thread.start()
+        self.task_manager = TaskManager()
+        self.active_task_ids = []
         
         self.root = TkinterDnD.Tk()
         if os.path.exists("icon.ico"):
@@ -1275,6 +1420,10 @@ class MainWindow:
         self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
+        
+        self.task_manager.set_progress_frame(self.progress_frame)
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.root.resizable(True, True)
         #async_mainloop(self.root)
@@ -1294,7 +1443,17 @@ class MainWindow:
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
         
+    def generate_task_id(self):
+        while True:
+            id = random.randint(0, 2**64-1)
+            if id not in self.active_task_ids:
+                break
+        return id
+        
     def combine_mods(self):
+        if not os.path.exists(self.app_state.game_data_path):
+            showerror(title="Missing Required Configuration", message="Unknown game data folder location. Unable to automatically combine mods")
+            return
         if self.file_upload_window is None:
             self.sound_handler.kill_sound()
             self.file_upload_window = FileUploadWindow(self.root, callback=self.combine_mods_callback)
@@ -1306,31 +1465,31 @@ class MainWindow:
         elif len(files) > 1:
             current_mod = self.mod_handler.get_active_mod()
             combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
-            zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
-            patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
-            
-            for index, mod in enumerate(zip_files):
-                zip = zipfile.ZipFile(mod)
-                extract_location = os.path.join(CACHE, str(index))
-                os.mkdir(extract_location)
-                zip.extractall(path=extract_location)
-                patch_files.extend([os.path.join(extract_location, file) for file in os.listdir(extract_location) if os.path.isfile(os.path.join(extract_location, file)) and "patch" in os.path.splitext(file)[1]])
+            self.mod_handler.set_active_mod(current_mod.name)
+            self.task_manager.schedule(name="Processing Input Files", callback=self.combine_mods_soundbank_lookup, task=self.combine_mods_task, files=files, mod=combined_mod)
 
-            self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-            self.start_async_task(self.loop, self.combine_mods_async, files=patch_files, mod=combined_mod)
+    @task
+    def combine_mods_task(self, files, mod):
+        zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
+        patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
         
-    async def combine_mods_async(self, files, mod):
+        for index, mod_file in enumerate(zip_files):
+            zip = zipfile.ZipFile(mod_file)
+            extract_location = os.path.join(CACHE, str(index))
+            os.mkdir(extract_location)
+            zip.extractall(path=extract_location)
+            patch_files.extend([os.path.join(extract_location, file) for file in os.listdir(extract_location) if os.path.isfile(os.path.join(extract_location, file)) and "patch" in os.path.splitext(file)[1]])
         missing_soundbank_ids = []
-        for file in files:
-            self.progress_frame.set_text(f"Parsing file {file}")
+        archives = set()
+        for index, file in enumerate(patch_files):
             new_archive = GameArchive.from_file(file)
-            archives = set()
             if len(new_archive.text_banks) > 0:
                 archives.add("9ba626afa44a3aa3")
             missing_soundbank_ids.extend([soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys()])
-        self.root.after_idle(lambda: self.combine_mods2(files, archives, missing_soundbank_ids, mod))
-        
-    def combine_mods2(self, files, archives, missing_soundbank_ids, mod):
+        return patch_files, archives, missing_soundbank_ids, mod
+
+    @callback
+    def combine_mods_soundbank_lookup(self, files, archives, missing_soundbank_ids, mod):
         for soundbank_id in missing_soundbank_ids:
             r = self.name_lookup.lookup_soundbank(soundbank_id)
             if r.success:
@@ -1338,19 +1497,16 @@ class MainWindow:
             else:
                 showerror(title="", message="Unable to complete automated mod merging; please merge manually.")
                 return
-        self.start_async_task(self.loop, self.combine_mods_async2, files=files, archives=archives, mod=mod)
-        
-    async def combine_mods_async2(self, files, archives, mod):
         for archive in archives:
-            path = os.path.join(self.app_state.game_data_path, archive)
-            self.progress_frame.set_text(f"Loading file {os.path.basename(archive)}")
-            await mod.load_archive_file(archive_file=path)
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Importing patches")
+            archive = os.path.join(self.app_state.game_data_path, archive)
+            self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=None, task=task(mod.load_archive_file), archive_file=archive)
         for file in files:
-            mod.import_patch(file)
+            self.task_manager.schedule(name=f"Applying Patch {file}", callback=None, task=task(mod.import_patch), patch_file=file)
+        self.task_manager.schedule(name="Saving Output File", callback=None, task=self.combine_mods_write_output, mod=mod)
+        
+    @task    
+    def combine_mods_write_output(self, mod):
         output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
-        self.progress_frame.set_text("Writing patch")
         if output_file:
             mod.write_patch(CACHE)
             zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
@@ -1377,51 +1533,9 @@ class MainWindow:
                     shutil.rmtree(file)
             except:
                 pass
-        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-        self.progress_frame.set_text("Done")
         
-    def combine_music_mods(self):
-        self.sound_handler.kill_sound()
-        if not self.app_state.game_data_path or not os.path.exists(self.app_state.game_data_path):
-            showwarning(title="Error", message="Unable to locate Helldivers 2 game files. Cannot automatically merge mods.")
-        mod_files = filedialog.askopenfilenames(title="Choose mod files to combine", filetypes=[("Zip Archive", "*.zip")])
-        if mod_files:
-            combined_mod = self.mod_handler.create_new_mod("combined_mods_temp")
-            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "046d4441a6dae0a9"))
-            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "89de9c3d26d2adc1"))
-            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "fdf011daecf24312"))
-            combined_mod.load_archive_file(os.path.join(self.app_state.game_data_path, "2e24ba9dd702da5c"))
-            extracted_mods = []
-            for mod in mod_files:
-                zip = zipfile.ZipFile(mod)
-                zip.extractall(path=CACHE)
-                for patch_file in [os.path.join(CACHE, file) for file in os.listdir(CACHE) if os.path.isfile(os.path.join(CACHE, file)) and "patch" in os.path.splitext(file)[1]]:
-                    combined_mod.import_patch(patch_file)
-                for file in os.listdir(CACHE):
-                    file = os.path.join(CACHE, file)
-                    try:
-                        if os.path.isfile(file):
-                            os.remove(file)
-                        elif os.path.isdir(file):
-                            shutil.rmtree(file)
-                    except:
-                        pass
-            output_file = filedialog.asksaveasfilename(title="Save combined mod", filetypes=[("Zip Archive", "*.zip")], initialfile="combined_mod.zip")
-            if output_file:
-                combined_mod.write_patch(CACHE)
-                zip = zipfile.ZipFile(output_file, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=3)
-                with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"), 'rb') as patch_file:
-                    zip.writestr("9ba626afa44a3aa3.patch_0", patch_file.read())
-                if os.path.exists(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream")):
-                    with open(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"), 'rb') as stream_file:
-                        zip.writestr("9ba626afa44a3aa3.patch_0.stream", stream_file.read())
-                zip.close()
-                try:
-                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0"))
-                    os.remove(os.path.join(CACHE, "9ba626afa44a3aa3.patch_0.stream"))
-                except:
-                    pass
-            self.mod_handler.delete_mod("combined_mods_temp")
+    def combine_mods_cleanup(self):
+        pass
 
     def drop_import(self, event):
         self.drag_source_widget = None
@@ -1647,21 +1761,23 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
-        self.start_async_task(self.loop, self.import_files_async, file_dict=file_dict)
+        self.task_manager.schedule(name="Importing Files", callback=self.import_files_callback, task=self.import_files_task, file_dict=file_dict)
         
-    async def import_files_async(self, file_dict):
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Importing Files")
+    @task
+    def import_files_task(self, file_dict):
         try:
-            await self.mod_handler.get_active_mod().import_files(file_dict)
+            self.mod_handler.get_active_mod().import_files(file_dict)
         except Exception as e:
             self.progress_frame.set_mode(mode=ProgressFrame.DONE)
             self.progress_frame.set_text("Done")
             showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)} Some imports may have been skipped.")
-        self.root.after_idle(self.check_modified)
-        self.root.after_idle(self.show_info_window)
-        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-        self.progress_frame.set_text("Done")
+        return file_dict
+    
+    @callback
+    def import_files_callback(self, file_dict):
+        # use file dict for diffing? not sure how this would work with patch files
+        self.check_modified()
+        self.show_info_window()
 
     def init_workspace(self):
         self.workspace_panel = Frame(self.window)
@@ -1930,19 +2046,37 @@ class MainWindow:
             )
             if not output_file:
                 return
-            self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
-            return
+            self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=False)
         else:
-            output_folder = filedialog.askdirectory(title="Save As")
+            output_folder = filedialog.askdirectory(title="Save To")
             if not output_folder:
                 return
-            self.mod_handler.get_active_mod().dump_multiple_as_wav(
-                [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
-                muted=muted,
-                with_seq=with_seq,
-                output_folder=output_folder
-            )
+            file_ids = [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()]
+            task_id = self.generate_task_id()
+            self.active_task_ids.append(task_id)
+            task_folder = os.path.join(output_folder, f"dump_{task_id}")
+            os.mkdir(task_folder)
+            self.task_manager.schedule(name="Dumping Files", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=task_folder)
+    
+    @task
+    def dump_as_wav_setup_task(self, task_id, file_ids, output_location):
+        self.mod_handler.get_active_mod().create_dummy_bank(file_ids, os.path.join(output_location, "temp.bnk"))
+        self.task_manager.schedule_async(name="Dumping Files", callback=self.dump_as_wav_finished, task=self.dump_as_wav_task, file_ids=file_ids, output_folder=output_location, bank_filepath=os.path.join(output_location, "temp.bnk"), task_id=task_id)
+            
+    @async_task 
+    async def dump_as_wav_task(self, file_ids, output_folder, bank_filepath, task_id):
+        await self.mod_handler.get_active_mod().dump_from_bank_file(output_folder=output_folder, bank_filepath=bank_filepath)
+        os.remove(bank_filepath)
+        for audio_source in [self.mod_handler.get_active_mod().get_audio_source(source_id) for source_id in file_ids]:
+            if audio_source.get_resource_id() != 0:
+                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{audio_source.get_resource_id()}.wav"))
 
+        return task_id
+
+    @callback
+    def dump_as_wav_finished(self, task_id):
+        self.active_task_ids.remove(task_id)
+        
     def create_treeview_entry(self, entry, parent_item=""): #if HircEntry, add id of parent bank to the tags
         if entry is None: return
         if isinstance(entry, GameArchive):
@@ -2146,25 +2280,35 @@ class MainWindow:
         if ".patch" in os.path.basename(archive_file):
             self.import_patch(archive_file)
             return
-        self.start_async_task(self.loop, self.load_archive_async, archive_file=archive_file)
+        self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
     
-    async def load_archive_async(self, archive_file: str | None = ""):
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Loading Archive {os.path.basename(archive_file)}")
-        success = await self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file)
-        if success:
-            archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
+    @task
+    def load_archive_task(self, archive_files: str | None = ""):
+        results = []
+        for archive_file in archive_files:
+            results.append((self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file), archive_file))
+        return results
+    
+    @callback
+    def load_archive_task_finished(self, results):
+        new_game_archives = []
+        for result in results:
+            success = result[0]
+            archive_file = result[1]
+            if success:
+                self.update_recent_files(filepath=archive_file)
+                archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
+                new_game_archives.append(archive)
+        for archive in new_game_archives:
+            if self.selected_view.get() == "SourceView":
+                self.create_source_view(new_game_archive=archive)
+            else:
+                self.create_hierarchy_view(new_game_archive=archive)
+        if len(new_game_archives) > 0:
             self.clear_search()
             self.update_language_menu()
-            self.update_recent_files(filepath=archive_file)
-            if self.selected_view.get() == "SourceView":
-                self.root.after_idle(lambda: self.create_source_view(new_game_archive=archive))
-            else:
-                self.root.after_idle(lambda: self.create_hierarchy_view(new_game_archive=archive))
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
-        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-        self.progress_frame.set_text("Done")
 
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
@@ -2266,14 +2410,22 @@ class MainWindow:
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
-        self.mod_handler.get_active_mod().dump_all_as_wem(output_folder)
+        self.task_manager.schedule(name="Dumping Files", callback=None, task=task(self.mod_handler.get_active_mod().dump_all_as_wem), output_folder=output_folder)
         
     def dump_all_as_wav(self):
         self.sound_handler.kill_sound()
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
-        self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
+        #1. queue tasks for creating each dummy bank
+        #2. schedule tasks to dump each dummy bank
+        for bank in self.mod_handler.get_active_mod().get_wwise_banks().values():
+            bank_folder = os.path.join(output_folder, bank.dep.data.replace("\x00", "").split("/")[-1])
+            os.mkdir(bank_folder)
+            file_ids = [audio_source.get_short_id() for audio_source in bank.get_content()]
+            task_id = self.generate_task_id()
+            self.active_task_ids.append(task_id)
+            self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder)
         
     def play_audio(self, file_id: int, callback=None):
         audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
@@ -2293,7 +2445,7 @@ class MainWindow:
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
-        self.mod_handler.get_active_mod().write_patch(output_folder)
+        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder)
         
     def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
@@ -2303,49 +2455,33 @@ class MainWindow:
             return
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
-        self.start_async_task(self.loop, self.import_patch_async, archive_file=archive_file)
-        
-    async def import_patch_async(self, archive_file: str = ""):
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Loading file {os.path.basename(archive_file)}")
+        self.task_manager.schedule(name="Processing Patch Contents", callback=self.import_patch_soundbank_lookup, task=self.import_patch_task, archive_file=archive_file)
+    
+    @task
+    def import_patch_task(self, archive_file: str = ""):
         new_archive = GameArchive.from_file(archive_file)
         missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
         if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
-            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
-        self.root.after_idle(self.import_patch2, missing_soundbank_ids, new_archive, archive_file)
-        
-    def import_patch2(self, missing_soundbank_ids, new_archive, archive_file):
+            self.mod_handler.get_active_mod().load_archive_file(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
+        return missing_soundbank_ids, new_archive, archive_file
+    
+    @callback
+    def import_patch_soundbank_lookup(self, missing_soundbank_ids, new_archive, patch_file):
         archives = set()
         if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
             for soundbank_id in missing_soundbank_ids:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)
                 if r.success:
                     archives.add(r.archive)
-        self.start_async_task(self.loop, self.import_patch_async2, archives_to_load=archives, new_archive=new_archive, archive_file=archive_file)
-                
-    async def import_patch_async2(self, archives_to_load, new_archive, archive_file):
-        for archive in archives_to_load:
-            await self.load_archive_async(archive_file=os.path.join(self.app_state.game_data_path, archive))
-        missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
-        missing_soundbanks = [new_archive.get_wwise_banks()[soundbank_id].dep.data.replace("\x00", "") for soundbank_id in missing_soundbank_ids]
-        if missing_soundbanks:
-            newline = "\n"
-            showwarning(title="", message=f"Missing soundbanks present in patch file:{newline+newline.join(missing_soundbanks)}")
-        self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
-        self.progress_frame.set_text(f"Importing Patches")
-        success = self.mod_handler.get_active_mod().import_patch(archive_file)
-        if success:
-            self.root.after_idle(self.check_modified)
-            self.root.after_idle(self.show_info_window)
-        self.progress_frame.set_mode(mode=ProgressFrame.DONE)
-        self.progress_frame.set_text(f"Done")
+        for archive in archives:
+            archive = os.path.join(self.app_state.game_data_path, archive)
+            self.task_manager.schedule(name="Loading Archive {archive}", callback=None, task=task(self.mod_handler.get_active_mod().load_archive_file), archive_file=archive)
+        self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
 
-    def start_async_task(self, loop, coroutine, *args, **kwargs):
-        asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), loop)
-    
-    def run_asyncio_loop(self, loop):
-        asyncio.set_event_loop(loop)
-        loop.run_forever()
+    @callback
+    def import_patch_finished(self, success):
+        self.check_modified()
+        self.show_info_window()
 
 if __name__ == "__main__":
     logger.setLevel(logging.INFO)
