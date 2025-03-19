@@ -1888,7 +1888,7 @@ class MainWindow:
         selection_type = self.treeview.item(self.treeview.selection(), option="values")[0]
         if selection_type == "Archive File":
             return
-        selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[0])
+        selection_id = int(self.treeview.item(self.treeview.selection(), option="tags")[-1])
         item = self.treeview.selection()[0]
         while self.treeview.parent(self.treeview.parent(item)):
             item = self.treeview.parent(item)
@@ -1972,7 +1972,7 @@ class MainWindow:
             else:
                 modified = entry.modified
             if isinstance(entry, StringEntry):
-                tree_entry = self.treeview.insert(parent_item, END, tags=(entry.get_id(), entry.parent.get_id()))
+                tree_entry = self.treeview.insert(parent_item, END, tags=(entry.parent.get_id(), entry.get_id()))
             else:
                 tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
             bg, fg = self.get_colors(modified=modified)
@@ -2103,7 +2103,7 @@ class MainWindow:
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":
-            string_entry = self.mod_handler.get_active_mod().get_string_entry(textbank_id=int(self.treeview.item(item, option="tags")[1]), entry_id=int(self.treeview.item(item, option="tags")[0]))
+            string_entry = self.mod_handler.get_active_mod().get_string_entry(textbank_id=int(self.treeview.item(item, option="tags")[0]), entry_id=int(self.treeview.item(item, option="tags")[1]))
             match = search_text_var in string_entry.get_text()
         else:
             s = self.treeview.item(item, option="text")
@@ -2207,12 +2207,49 @@ class MainWindow:
 
     def check_modified(self, diff = None):
         if diff is not None:
+            print(diff)
             for item in diff:
                 if isinstance(item, HircEntry):
                     bg, fg = self.get_colors(modified=item.modified or item.has_modified_children())
                 else:
                     bg, fg = self.get_colors(modified=item.modified)
-                self.treeview.tag_configure(item.get_id(), background=bg, foreground=fg)
+                '''
+                print(bg)
+                print(fg)
+                if isinstance(item, TextBank):
+                    continue
+                    print("text bank")
+                    for i in self.treeview.tag_has(item.get_id()):
+                        tags = self.treeview.item(i, option="tags")
+                        if len(tags) == 1:
+                            break
+                    print(tags)
+                    new_tags = list(tags)
+                    new_tags.append("textbank")
+                    print(new_tags)
+                    self.treeview.item(i, tags=new_tags)
+                    print(self.treeview.item(i, option="tags"))
+                    #self.treeview.tag_configure("textbank", background=bg, foreground=fg)
+                    self.treeview.item(i, tags=tags)
+                    print(self.treeview.item(i, option="tags"))
+                else:
+                    print("string entry")
+                    print(self.treeview.tag_has(item.get_id()))
+                    print(self.treeview.item(self.treeview.tag_has(item.get_id())[0], option="tags"))
+                    self.treeview.tag_configure(item.get_id(), background=bg, foreground=fg)
+                '''
+                if isinstance(item, TextBank):
+                    continue
+                print(self.treeview.tag_has(str(item.get_id())))
+                print(item.get_id())
+                i = self.treeview.tag_has(str(item.get_id()))[0]
+                print(self.treeview.item(i, option="text"))
+                tags = self.treeview.item(i, option="tags")
+                print(tags)
+                self.treeview.item(i, tags=tags[1])
+                print(self.treeview.item(i, option="tags"))
+                self.treeview.tag_configure(tags[1], background="#ffffff")
+                self.treeview.tag_configure(tags[1], foreground="#ffffff")
                 parents = []
                 if isinstance(item, HircEntry):
                     parents = [item.parent] if item.parent is not None else item.soundbanks
@@ -2224,8 +2261,9 @@ class MainWindow:
                     parents = [item.parent]
                 elif isinstance(item, TextBank):
                     parents = []
-                self.check_modified(parents)
+                #self.check_modified(parents)
         else:
+            print("uh oh")
             for child in self.treeview.get_children():
                 self.clear_treeview_background(child)
             bg: Any
