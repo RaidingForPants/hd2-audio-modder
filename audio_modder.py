@@ -1429,9 +1429,6 @@ class MainWindow:
         #async_mainloop(self.root)
         self.root.mainloop()
         
-    def on_close(self):
-        self.root.destroy()
-        
     def drop_position(self, event):
         if event.data:
             if len(event.widget.tk.splitlist(event.data)) != 1:
@@ -1603,10 +1600,12 @@ class MainWindow:
                 self.root.tk.call("set_theme", "dark")
                 graphs_set_dark_mode()
                 self.window.configure(background="white")
+                self.treeview.tag_configure("modified", background=MainWindow.dark_mode_modified_bg, foreground=MainWindow.dark_mode_modified_fg)
             elif theme == "light_mode":
                 self.root.tk.call("set_theme", "light")
                 graphs_set_light_mode()
                 self.window.configure(background="black")
+                self.treeview.tag_configure("modified", background=MainWindow.light_mode_modified_bg, foreground=MainWindow.light_mode_modified_fg)
             
         except Exception as e:
             logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
@@ -1614,20 +1613,7 @@ class MainWindow:
         self.workspace.column("#0", width=256+16)
         self.treeview.column("#0", width=250)
         self.treeview.column("type", width=100)
-        self.check_modified()
-        
-    def get_colors(self, modified=False):
-        theme = self.selected_theme.get()
-        if theme == "dark_mode":
-            if modified:
-                return (MainWindow.dark_mode_modified_bg, MainWindow.dark_mode_modified_fg)
-            else:
-                return (MainWindow.dark_mode_bg, MainWindow.dark_mode_fg)
-        elif theme == "light_mode":
-            if modified:
-                return (MainWindow.light_mode_modified_bg, MainWindow.light_mode_modified_fg)
-            else:
-                return (MainWindow.light_mode_bg, MainWindow.light_mode_fg)
+        #self.check_modified()
 
     def render_workspace(self):
         """
@@ -1782,6 +1768,8 @@ class MainWindow:
         try:
             self.mod_handler.get_active_mod().import_files(file_dict)
         except Exception as e:
+            self.progress_frame.set_mode(mode=ProgressFrame.DONE)
+            self.progress_frame.set_text("Done")
             showwarning(title="Import Error", message=f"Error occurred during file import: {str(e)} Some imports may have been skipped.")
         return file_dict
     
@@ -1953,7 +1941,6 @@ class MainWindow:
         for select in selects:
             values = self.treeview.item(select, option="values")
             tags = self.treeview.item(select, option="tags")
-            assert(len(values) == 1 and len(tags) == 1)
             if values[0] != "Audio Source":
                 continue
             self.play_audio(int(tags[0]))
@@ -2095,16 +2082,12 @@ class MainWindow:
         if isinstance(entry, GameArchive):
             tree_entry = self.treeview.insert(parent_item, END, tag=entry.name)
         else:
-            if isinstance(entry, HircEntry):
-                modified = entry.modified or entry.has_modified_children()
-            else:
-                modified = entry.modified
             if isinstance(entry, StringEntry):
                 tree_entry = self.treeview.insert(parent_item, END, tags=(entry.get_id(), entry.parent.get_id()))
             else:
                 tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
-            bg, fg = self.get_colors(modified=modified)
-            self.treeview.tag_configure(entry.get_id(), background=bg, foreground=fg)
+            if entry.modified or (isinstance(entry, HircEntry) and entry.has_modified_children()): 
+                self.mark_modified(entry, tree_entry)
         if isinstance(entry, WwiseBank):
             if self.name_lookup is not None:
                 bank = self.name_lookup.lookup_soundbank(str(entry.get_id()))
@@ -2326,35 +2309,65 @@ class MainWindow:
             self.update_language_menu()
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
-        
+
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
         if output_folder and os.path.exists(output_folder):
             self.sound_handler.kill_sound()
             self.mod_handler.get_active_mod().save(output_folder)
-
-    def clear_treeview_background(self, item):
-        bg_color, fg_color = self.get_colors()
-        self.treeview.tag_configure(self.treeview.item(item)['tags'][0],
-                                    background=bg_color,
-                                    foreground=fg_color)
-        for child in self.treeview.get_children(item):
-            self.clear_treeview_background(child)
         
     """
     TO-DO:
     optimization point: small, but noticeable lag if there are many, many 
     entries in the tree
     """
+    
+    def clear_modified(self):
+        modified_items = self.treeview.tag_has("modified")
+        for item in modified_items:
+            tags = self.treeview.item(item, option="tags")
+            tags = list(tags)
+            tags.remove("modified")
+            self.treeview.item(item, tags=tags)
+    
+    def mark_modified(self, entry, item=None):
+        if isinstance(entry, HircEntry):
+            modified = entry.modified or entry.has_modified_children()
+        else:
+            modified = entry.modified
+        if item is None:
+            if isinstance(entry, AudioSource):
+                i = self.treeview.tag_has(entry.get_short_id())
+                if len(i) == 0:
+                    return
+                i = i[0]
+            else:
+                i = self.treeview.tag_has(entry.get_id())
+                if len(i) == 0:
+                    return
+                i = i[0]
+        else:
+            i = item
+        tags = self.treeview.item(i, option="tags")
+        if modified:
+            if "modified" not in tags:
+                tags = tags + ("modified",)
+        else:
+            if "modified" in tags:
+                tags = list(tags)
+                tags.remove("modified")
+        self.treeview.item(i, tags=tags)
+        
+    def get_all_treeview_items(self, tree, item=""):
+        children = tree.get_children(item)
+        for child in children:
+            children += self.get_all_treeview_items(tree, child)
+        return children
 
     def check_modified(self, diff = None):
         if diff is not None:
             for item in diff:
-                if isinstance(item, HircEntry):
-                    bg, fg = self.get_colors(modified=item.modified or item.has_modified_children())
-                else:
-                    bg, fg = self.get_colors(modified=item.modified)
-                self.treeview.tag_configure(item.get_id(), background=bg, foreground=fg)
+                self.mark_modified(item)
                 parents = []
                 if isinstance(item, HircEntry):
                     parents = [item.parent] if item.parent is not None else item.soundbanks
@@ -2368,40 +2381,29 @@ class MainWindow:
                     parents = []
                 self.check_modified(parents)
         else:
-            for child in self.treeview.get_children():
-                self.clear_treeview_background(child)
-            bg: Any
-            fg: Any
-            for bank in self.mod_handler.get_active_mod().wwise_banks.values():
-                bg, fg = self.get_colors(modified=bank.modified)
-                self.treeview.tag_configure(bank.get_id(),
-                                            background=bg,
-                                            foreground=fg)
-                for entry in bank.hierarchy.get_entries():
-                    is_modified = entry.modified or entry.has_modified_children()
-                    bg, fg = self.get_colors(modified=is_modified)
-                    self.treeview.tag_configure(entry.get_id(),
-                                            background=bg,
-                                            foreground=fg)
-            for audio in self.mod_handler.get_active_mod().get_audio_sources().values():
-                is_modified = audio.modified
-                bg, fg = self.get_colors(modified=is_modified)
-                self.treeview.tag_configure(audio.get_id(),
-                                            background=bg,
-                                            foreground=fg)
-                        
-            for text_bank in self.mod_handler.get_active_mod().text_banks.values():
-                if text_bank.get_language() != language:
+            for item in self.get_all_treeview_items(self.treeview):
+                item_type = self.treeview.item(item, option="values")[0]
+                if item_type == "Archive File":
                     continue
-                bg, fg = self.get_colors(modified=text_bank.modified)
-                self.treeview.tag_configure(text_bank.get_id(), 
-                                                background=bg,
-                                                foreground=fg)
-                for entry in text_bank.entries.values():
-                    bg, fg = self.get_colors(modified=entry.modified)
-                    self.treeview.tag_configure(entry.get_id(),
-                                            background=bg,
-                                            foreground=fg)
+                elif item_type == "Sound Bank":
+                    try:
+                        bank = self.mod_handler.get_active_mod().get_wwise_bank(int(self.treeview.item(item, option="tags")[0]))
+                    except:
+                        continue
+                    self.mark_modified(bank, item)
+                elif item_type == "Text Bank":
+                    bank = self.mod_handler.get_active_mod().get_text_bank(int(self.treeview.item(item, option="tags")[0]))
+                    self.mark_modified(bank, item)
+                elif item_type == "Audio Source":
+                    source = self.mod_handler.get_active_mod().get_audio_source(int(self.treeview.item(item, option="tags")[0]))
+                    self.mark_modified(source, item)
+                elif item_type == "String":
+                    tags = self.treeview.item(item, option="tags")
+                    string_entry = self.mod_handler.get_active_mod().get_string_entry(int(tags[1]), int(tags[0]))
+                    self.mark_modified(string_entry, item)
+                else: #HircEntry
+                    entry = self.mod_handler.get_active_mod().get_hierarchy_entry(int(self.treeview.item(item, option="tags")[0]))
+                    self.mark_modified(entry, item)
         
     def dump_all_as_wem(self):
         self.sound_handler.kill_sound()
@@ -2435,8 +2437,7 @@ class MainWindow:
     def revert_all(self):
         self.sound_handler.kill_sound()
         self.mod_handler.get_active_mod().revert_all()
-        for child in self.treeview.get_children():
-            self.clear_treeview_background(child)
+        self.clear_modified()
         self.show_info_window()
         
     def write_patch(self):
@@ -2476,7 +2477,7 @@ class MainWindow:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name="Loading Archive {archive}", callback=None, task=task(self.mod_handler.get_active_mod().load_archive_file), archive_file=archive)
         self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
-    
+
     @callback
     def import_patch_finished(self, success):
         self.check_modified()
