@@ -32,6 +32,7 @@ class AudioSource:
         self.data_old: bytearray | Literal[b""] = b""
         self.parents: set[HircEntry | WwiseStream] = set()
         self.stream_type: int = 0
+        self.muted = False
         
     def set_data(self, data: bytearray, notify_subscribers: bool = True, set_modified: bool = True):
         if not self.modified and set_modified:
@@ -55,7 +56,10 @@ class AudioSource:
         return self.modified
 
     def get_data(self) -> bytearray:
-        return bytearray() if self.data == b"" else self.data 
+        if not self.muted:
+            return bytearray() if self.data == b"" else self.data 
+        else:
+            return b"" # returns wem with no samples
         
     def get_resource_id(self) -> int:
         return self.resource_id
@@ -1297,6 +1301,22 @@ class Mod:
                 save_path = os.path.join(output_folder, f"{audio.get_id()}")
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
+                    
+    def create_dummy_bank(self, file_ids: list[int], output_filepath: str):
+        bank = DummyBank()
+        bank.set_audio_sources([self.get_audio_source(int(file_id)) for file_id in file_ids])
+        bank.to_file(output_filepath)
+    
+    async def dump_from_bank_file(self, output_folder: str, bank_filepath: str):
+        process = await asyncio.create_subprocess_exec(
+            VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), bank_filepath,
+            stdout=subprocess.DEVNULL,
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            logger.error(f"Encountered error when converting to .wav")
         
     def dump_multiple_as_wav(self, file_ids: list[int], output_folder: str = "", muted: bool = False,
                              with_seq: bool = False):
@@ -1308,11 +1328,7 @@ class Mod:
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise OSError(f"Invalid output folder '{output_folder}'")
 
-        audio_sources = [self.get_audio_source(int(file_id)) for file_id in file_ids]
-        
-        bank = DummyBank()
-        bank.set_audio_sources(audio_sources)
-        bank.to_file(os.path.join(CACHE, "temp.bnk"))
+        self.create_dummy_bank(file_ids, os.path.join(CACHE, "temp.bnk"))
 
         process = subprocess.run([
             VGMSTREAM, "-S", "0", "-o", os.path.join(output_folder, "?n.wav"), os.path.join(CACHE, "temp.bnk"),

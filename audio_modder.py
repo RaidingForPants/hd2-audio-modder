@@ -1079,6 +1079,11 @@ class TaskManager:
         else:
             self.start_task(item)
             
+    def schedule_in_new_thread(self, name, callback, task, *args, **kwargs):
+        task = self.sync_wrapper(task, callback)
+        t = threading.Thread(target=task, args=args, kwargs=kwargs)
+        t.start()
+            
     def start_task(self, task_item):
         assert not self.sync_thread_running, "Tried to start new sync task with task already running!"
         self.sync_thread_running = True
@@ -1096,7 +1101,6 @@ class TaskManager:
             
     def start_progress_frame(self):
         if self.progress_frame is not None:
-            print("start")
             self.progress_frame.set_mode(mode=ProgressFrame.INDETERMINATE_AUTO)
             
     def stop_progress_frame(self):
@@ -1111,8 +1115,10 @@ class TaskManager:
     def async_wrapper(self, callback):
         if callback is not None:
             def wrapper(future):
-                self.async_task_finished(future)
-                callback(future)
+                try:
+                    callback(*future.result())
+                finally:
+                    self.async_task_finished(future)
         else:
             def wrapper(future):
                 self.async_task_finished(future)
@@ -1136,7 +1142,7 @@ class TaskManager:
         return wrapper
         
     def async_task_finished(self, future):
-        print("async task done!")
+        pass
         
     def sync_task_finished(self):
         self.sync_thread_running = False
@@ -1146,7 +1152,6 @@ class TaskManager:
         else:
             self.sync_thread = None
             self.stop_progress_frame()
-        print("sync task done!")
     
 class EventLoop:
     
@@ -1173,7 +1178,15 @@ def task(func):
             result = (result,)
         return result
     return wrapper
-        
+    
+def async_task(func):
+    async def wrapper(*args, **kwargs):
+        result = await func(*args, **kwargs)
+        if not type(result) is tuple:
+            result = (result,)
+        return result
+    return wrapper
+
 def callback(callback):
     def wrapper(*args, **kwargs):
         args[0].root.after_idle(callback, *args, **kwargs)
@@ -2046,13 +2059,41 @@ class MainWindow:
             )
             if not output_file:
                 return
-            self.start_async_task(self.loop, "Dumping Files", self.dump_single_as_wav_async, muted, with_seq, output_file)
+            self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=False)
         else:
-            output_folder = filedialog.askdirectory(title="Save As")
+            output_folder = filedialog.askdirectory(title="Save To")
             if not output_folder:
                 return
-            self.start_async_task(self.loop, "Dumping Files", self.dump_multiple_as_wav_async, muted, with_seq, output_folder)
+            file_ids = [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()]
+            task_id = self.generate_task_id()
+            self.active_task_ids.append(task_id)
+            self.task_manager.schedule(name="Dumping Files", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=output_folder)
+    
+    @task
+    def dump_as_wav_setup_task(self, task_id, file_ids, output_location):
+        if len(file_ids) == 1:
+            self.mod_handler.get_active_mod().dump_as_wav(task_id, output_file=output_location, muted=False)
+        else:
+            task_folder = os.path.join(output_location, f"dump{task_id}")
+            os.mkdir(task_folder)
             
+            self.mod_handler.get_active_mod().create_dummy_bank(file_ids, os.path.join(task_folder, "temp.bnk"))
+            self.task_manager.schedule_async(name="Dumping Files", callback=self.dump_as_wav_finished, task=self.dump_as_wav_task, file_ids=file_ids, output_folder=task_folder, bank_filepath=os.path.join(task_folder, "temp.bnk"), task_id=task_id)
+            
+    @async_task 
+    async def dump_as_wav_task(self, file_ids, output_folder, bank_filepath, task_id):
+        await self.mod_handler.get_active_mod().dump_from_bank_file(output_folder=output_folder, bank_filepath=bank_filepath)
+        os.remove(bank_filepath)
+        for audio_source in [self.mod_handler.get_active_mod().get_audio_source(source_id) for source_id in file_ids]:
+            if audio_source.get_resource_id() != 0:
+                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{audio_source.get_resource_id()}.wav"))
+
+        return task_id
+
+    @callback
+    def dump_as_wav_finished(self, task_id):
+        self.active_task_ids.remove(task_id)
+        
     def dump_single_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_file: str = ""):
         self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
                 
@@ -2285,7 +2326,6 @@ class MainWindow:
     @callback
     def load_archive_task_finished(self, results):
         new_game_archives = []
-        print(results)
         for result in results:
             success = result[0]
             archive_file = result[1]
@@ -2454,7 +2494,6 @@ class MainWindow:
     
     @callback
     def import_patch_finished(self, success):
-        print(success)
         self.check_modified()
         self.show_info_window()
 
