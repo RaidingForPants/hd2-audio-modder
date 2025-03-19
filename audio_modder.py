@@ -1502,10 +1502,10 @@ class MainWindow:
                 return
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
-            self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=lambda arg: None, task=task(mod.load_archive_file), archive_file=archive)
+            self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=None, task=task(mod.load_archive_file), archive_file=archive)
         for file in files:
-            self.task_manager.schedule(name=f"Applying Patch {file}", callback=lambda arg: None, task=task(mod.import_patch), patch_file=file)
-        self.task_manager.schedule(name="Saving Output File", callback=lambda arg: None, task=self.combine_mods_write_output, mod=mod)
+            self.task_manager.schedule(name=f"Applying Patch {file}", callback=None, task=task(mod.import_patch), patch_file=file)
+        self.task_manager.schedule(name="Saving Output File", callback=None, task=self.combine_mods_write_output, mod=mod)
         
     @task    
     def combine_mods_write_output(self, mod):
@@ -2067,18 +2067,14 @@ class MainWindow:
             file_ids = [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()]
             task_id = self.generate_task_id()
             self.active_task_ids.append(task_id)
-            self.task_manager.schedule(name="Dumping Files", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=output_folder)
+            task_folder = os.path.join(output_folder, f"dump_{task_id}")
+            os.mkdir(task_folder)
+            self.task_manager.schedule(name="Dumping Files", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=task_folder)
     
     @task
     def dump_as_wav_setup_task(self, task_id, file_ids, output_location):
-        if len(file_ids) == 1:
-            self.mod_handler.get_active_mod().dump_as_wav(task_id, output_file=output_location, muted=False)
-        else:
-            task_folder = os.path.join(output_location, f"dump{task_id}")
-            os.mkdir(task_folder)
-            
-            self.mod_handler.get_active_mod().create_dummy_bank(file_ids, os.path.join(task_folder, "temp.bnk"))
-            self.task_manager.schedule_async(name="Dumping Files", callback=self.dump_as_wav_finished, task=self.dump_as_wav_task, file_ids=file_ids, output_folder=task_folder, bank_filepath=os.path.join(task_folder, "temp.bnk"), task_id=task_id)
+        self.mod_handler.get_active_mod().create_dummy_bank(file_ids, os.path.join(output_location, "temp.bnk"))
+        self.task_manager.schedule_async(name="Dumping Files", callback=self.dump_as_wav_finished, task=self.dump_as_wav_task, file_ids=file_ids, output_folder=output_location, bank_filepath=os.path.join(output_location, "temp.bnk"), task_id=task_id)
             
     @async_task 
     async def dump_as_wav_task(self, file_ids, output_folder, bank_filepath, task_id):
@@ -2094,19 +2090,6 @@ class MainWindow:
     def dump_as_wav_finished(self, task_id):
         self.active_task_ids.remove(task_id)
         
-    def dump_single_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_file: str = ""):
-        self.mod_handler.get_active_mod().dump_as_wav(self.right_click_id, output_file=output_file, muted=muted)
-                
-    def dump_multiple_as_wav_async(self, muted: bool = False, with_seq: bool = False, output_folder: str = ""):
-        if not os.path.exists(output_folder):
-            return
-        self.mod_handler.get_active_mod().dump_multiple_as_wav(
-            [int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()],
-            muted=muted,
-            with_seq=with_seq,
-            output_folder=output_folder
-        )
-
     def create_treeview_entry(self, entry, parent_item=""): #if HircEntry, add id of parent bank to the tags
         if entry is None: return
         if isinstance(entry, GameArchive):
@@ -2344,9 +2327,6 @@ class MainWindow:
             for child in self.entry_info_panel.winfo_children():
                 child.forget()
         
-    def create_callback(self, callback):
-        return lambda args: self.root.after_idle(callback, *args)
-
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select location to save combined mod")
         if output_folder and os.path.exists(output_folder):
@@ -2428,17 +2408,22 @@ class MainWindow:
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
-        self.mod_handler.get_active_mod().dump_all_as_wem(output_folder)
+        self.task_manager.schedule(name="Dumping Files", callback=None, task=task(self.mod_handler.get_active_mod().dump_all_as_wem), output_folder=output_folder)
         
     def dump_all_as_wav(self):
         self.sound_handler.kill_sound()
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
-        self.task_manager.schedule_async("Dumping Files", None, self.dump_all_as_wav_async, output_folder)
-            
-    def dump_all_as_wav_async(self, output_folder):
-        self.mod_handler.get_active_mod().dump_all_as_wav(output_folder)
+        #1. queue tasks for creating each dummy bank
+        #2. schedule tasks to dump each dummy bank
+        for bank in self.mod_handler.get_active_mod().get_wwise_banks().values():
+            bank_folder = os.path.join(output_folder, bank.dep.data.replace("\x00", "").split("/")[-1])
+            os.mkdir(bank_folder)
+            file_ids = [audio_source.get_short_id() for audio_source in bank.get_content()]
+            task_id = self.generate_task_id()
+            self.active_task_ids.append(task_id)
+            self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder)
         
     def play_audio(self, file_id: int, callback=None):
         audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
@@ -2459,7 +2444,7 @@ class MainWindow:
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
-        self.mod_handler.get_active_mod().write_patch(output_folder)
+        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder)
         
     def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
@@ -2489,7 +2474,7 @@ class MainWindow:
                     archives.add(r.archive)
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
-            self.task_manager.schedule(name="Loading Archive {archive}", callback=lambda arg: None, task=task(self.mod_handler.get_active_mod().load_archive_file), archive_file=archive)
+            self.task_manager.schedule(name="Loading Archive {archive}", callback=None, task=task(self.mod_handler.get_active_mod().load_archive_file), archive_file=archive)
         self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
     
     @callback
