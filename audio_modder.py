@@ -1429,6 +1429,9 @@ class MainWindow:
         #async_mainloop(self.root)
         self.root.mainloop()
         
+    def on_close(self):
+        self.root.destroy()
+        
     def drop_position(self, event):
         if event.data:
             if len(event.widget.tk.splitlist(event.data)) != 1:
