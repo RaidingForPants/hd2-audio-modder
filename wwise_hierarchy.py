@@ -446,7 +446,7 @@ class Action(HircEntry):
         return header + data
 
     def set_data(self, entry: Union['Action', None] = None, **data):
-        assert_not_none(f"No WwiseBank is attached to Action {self.hierarchy_id}", self.soundbank)
+        assert len(self.soundbanks) > 0, f"No WwiseBank is attached to Action {self.hierarchy_id}"
 
         if not self.modified:
             self.data_old = self.get_data()
@@ -465,7 +465,7 @@ class Action(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1690,17 +1690,15 @@ class Event(HircEntry):
         return header + data
 
     def set_data(self, entry: Union['Event', None] = None, **data):
-        assert_not_none(
-            f"No WwiseBank is attached to Event {self.hierarchy_id}",
-            self.soundbank
-        )
+        assert len(self.soundbanks) > 0, f"No WwiseBank is attached to Event {self.hierarchy_id}"
 
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -1712,7 +1710,7 @@ class Event(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1834,14 +1832,15 @@ class RandomSequenceContainer(HircEntry):
         return header + data 
 
     def set_data(self, entry: Union['RandomSequenceContainer', None] = None, **data):
-        assert_not_none(f"No WwiseBank is attached to RandomSequenceContainer {self.hierarchy_id}", self.soundbank)
+        assert len(self.soundbanks) > 0, f"No WwiseBank is attached to RandomSequenceContainer {self.hierarchy_id}"
 
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -1853,7 +1852,7 @@ class RandomSequenceContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -2003,13 +2002,14 @@ class Sound(HircEntry):
         return header + data
 
     def set_data(self, entry: Union['Sound', None] = None, **data):
-        assert_not_none(f"No WwiseBank is attached to Sound {self.hierarchy_id}", self.soundbank)
+        assert len(self.soundbanks) > 0, f"No WwiseBank is attached to Sound {self.hierarchy_id}"
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -2021,7 +2021,7 @@ class Sound(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3298,14 +3298,15 @@ class LayerContainer(HircEntry):
         return header + data
 
     def set_data(self, entry: Union['LayerContainer', None] = None, **data):
-        assert_not_none(f"No WwiseBank is attached to Sound {self.hierarchy_id}", self.soundbank)
+        assert len(self.soundbanks) > 0, f"No WwiseBank is attached to LayerContainer {self.hierarchy_id}"
 
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -3317,7 +3318,7 @@ class LayerContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3405,14 +3406,15 @@ class ActorMixer(HircEntry):
         return header + data
 
     def set_data(self, entry: Union['ActorMixer', None] = None, **data):
-        assert_not_none(f"No WwiseBank is attached to Sound {self.hierarchy_id}", self.soundbank)
+        assert len(self.soundbanks) > 0, f"No WwiseBank is attached to Actor-Mixer {self.hierarchy_id}"
 
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -3424,7 +3426,7 @@ class ActorMixer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3634,14 +3636,15 @@ class SwitchContainer(HircEntry):
         return header + data
 
     def set_data(self, entry: Union['SwitchContainer', None] = None, **data):
-        assert_not_none(f"No WwiseBank is attached to SwitchContainer {self.hierarchy_id}", self.soundbank)
+        assert len(self.soundbanks) > 0, f"No WwiseBank is attached to SwitchContainer {self.hierarchy_id}"
 
         if not self.modified:
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
             else:
-                self.soundbank.raise_modified()
+                for bank in self.soundbanks:
+                    bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -3653,7 +3656,7 @@ class SwitchContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbank.hierarchy
+        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)

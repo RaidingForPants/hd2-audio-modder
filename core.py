@@ -1783,7 +1783,8 @@ class Mod:
                 )
             try:
                 self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
-            except:
+            except Exception as e:
+                logger.error(e)
                 logger.warning(f"Unable to import heirarchy information for {bank.dep.data}")
 
         for text_bank in patch_game_archive.get_text_banks().values():
