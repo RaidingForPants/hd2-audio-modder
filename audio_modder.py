@@ -2537,7 +2537,7 @@ if __name__ == "__main__":
             " Audio archive search is disabled.")
     try:
         if os.path.exists(FRIENDLYNAMES_DB):
-            current_version = db.get_db_version(FRIENDLYNAMES_DB) + 1
+            current_version = db.get_db_version(FRIENDLYNAMES_DB)
         else:
             current_version = -1
         r = requests.get("https://api.github.com/repos/raidingforpants/helldivers_audio_db/releases/latest")
