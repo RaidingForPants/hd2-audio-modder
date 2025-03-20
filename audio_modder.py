@@ -1129,7 +1129,6 @@ class TaskManager:
             def wrapper(*args, **kwargs):
                 try:
                     result = task(*args, **kwargs)
-                    self.sync_task_finished()
                     callback(*result)
                 finally:
                     self.sync_task_finished()
