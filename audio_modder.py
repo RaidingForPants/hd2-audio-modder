@@ -2166,7 +2166,7 @@ class MainWindow:
                                         pass
                     elif isinstance(hierarchy_entry, RandomSequenceContainer):
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
-                        for s_id in hierarchy_entry.children:
+                        for s_id in hierarchy_entry.containerChildren.children:
                             sound = bank.hierarchy.entries[s_id]
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
