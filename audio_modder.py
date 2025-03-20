@@ -2465,13 +2465,13 @@ class MainWindow:
     def import_patch_task(self, archive_file: str = ""):
         new_archive = GameArchive.from_file(archive_file)
         missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
-        if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
-            self.mod_handler.get_active_mod().load_archive_file(archive_file=os.path.join(self.app_state.game_data_path, "9ba626afa44a3aa3"))
         return missing_soundbank_ids, new_archive, archive_file
     
     @callback
     def import_patch_soundbank_lookup(self, missing_soundbank_ids, new_archive, patch_file):
         archives = set()
+        if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
+            archives.add("9ba626afa44a3aa3")
         if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
             for soundbank_id in missing_soundbank_ids:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)
