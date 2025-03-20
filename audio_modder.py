@@ -2167,6 +2167,8 @@ class MainWindow:
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for s_id in hierarchy_entry.containerChildren.children:
                             sound = bank.hierarchy.entries[s_id]
+                            if not isinstance(sound, Sound):
+                                continue
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
                                 try:
@@ -2477,8 +2479,25 @@ class MainWindow:
                     archives.add(r.archive)
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
-            self.task_manager.schedule(name="Loading Archive {archive}", callback=None, task=task(self.mod_handler.get_active_mod().load_archive_file), archive_file=archive)
+            self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=self.import_patch_load_archive_finished, task=self.load_archive_task, archive_files=[archive])
         self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
+        
+    @callback
+    def import_patch_load_archive_finished(self, results):
+        new_game_archives = []
+        for result in results:
+            success = result[0]
+            archive_file = result[1]
+            if success:
+                archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
+                new_game_archives.append(archive)
+        for archive in new_game_archives:
+            if self.selected_view.get() == "SourceView":
+                self.create_source_view(new_game_archive=archive)
+            else:
+                self.create_hierarchy_view(new_game_archive=archive)
+        if "9ba626afa44a3aa3" in [archive.name for archive in new_game_archives]:
+            self.update_language_menu()
 
     @callback
     def import_patch_finished(self, success):
