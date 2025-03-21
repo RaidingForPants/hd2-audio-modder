@@ -1901,7 +1901,6 @@ class MainWindow:
                 )
 
                 tags = self.treeview.item(selects[-1], option="tags")
-                assert(len(tags) == 1)
                 self.right_click_id = int(tags[0])
                 
                 self.right_click_menu.add_command(
