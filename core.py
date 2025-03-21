@@ -1723,7 +1723,7 @@ class Mod:
                 self.audio_count[key] = 1
                 self.get_audio_sources()[key] = game_archive.audio_sources[key]
             
-    def import_patch(self, patch_file: str = ""):
+    def import_patch(self, patch_file: str = "", import_hierarchy=True):
         """
         @exception
         - OSError
@@ -1775,17 +1775,18 @@ class Mod:
                                 t.play_at = 0
                                 break
                         item.set_data(track_info=tracks)
-                            
-        for bank in patch_game_archive.get_wwise_banks().values():
-            if bank.hierarchy == None:
-                raise AssertionError(
-                    f"WwiseBank {bank.file_id} has no WwiseHierarchy"
-                )
-            try:
-                self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
-            except Exception as e:
-                logger.error(e)
-                logger.warning(f"Unable to import heirarchy information for {bank.dep.data}")
+        
+        if import_hierarchy:
+            for bank in patch_game_archive.get_wwise_banks().values():
+                if bank.hierarchy == None:
+                    raise AssertionError(
+                        f"WwiseBank {bank.file_id} has no WwiseHierarchy"
+                    )
+                try:
+                    self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+                except Exception as e:
+                    logger.error(e)
+                    logger.warning(f"Unable to import heirarchy information for {bank.dep.data}")
 
         for text_bank in patch_game_archive.get_text_banks().values():
             try:

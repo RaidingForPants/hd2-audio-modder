@@ -589,7 +589,7 @@ class MusicTrackWindow:
         clip_automations = copy.deepcopy(self.track.clip_automations)
         for index, tab in enumerate(self.graph_notebook.tabs()):
             graph = self.graph_notebook.nametowidget(tab)
-            x, y = self.graph.get_data()
+            x, y = graph.get_data()
             clip_automations[index].num_graph_points = len(x)
             clip_automations[index].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
         self.track.set_data(track_info=tracks, clip_automations=clip_automations)
@@ -1503,7 +1503,7 @@ class MainWindow:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=None, task=task(mod.load_archive_file), archive_file=archive)
         for file in files:
-            self.task_manager.schedule(name=f"Applying Patch {file}", callback=None, task=task(mod.import_patch), patch_file=file)
+            self.task_manager.schedule(name=f"Applying Patch {file}", callback=None, task=task(mod.import_patch), patch_file=file, import_hierarchy=False)
         self.task_manager.schedule(name="Saving Output File", callback=None, task=self.combine_mods_write_output, mod=mod)
         
     @task    
@@ -2480,7 +2480,7 @@ class MainWindow:
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=self.import_patch_load_archive_finished, task=self.load_archive_task, archive_files=[archive])
-        self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
+        self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file, import_hierarchy=False)
         
     @callback
     def import_patch_load_archive_finished(self, results):
