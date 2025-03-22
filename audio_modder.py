@@ -589,7 +589,7 @@ class MusicTrackWindow:
         clip_automations = copy.deepcopy(self.track.clip_automations)
         for index, tab in enumerate(self.graph_notebook.tabs()):
             graph = self.graph_notebook.nametowidget(tab)
-            x, y = self.graph.get_data()
+            x, y = graph.get_data()
             clip_automations[index].num_graph_points = len(x)
             clip_automations[index].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
         self.track.set_data(track_info=tracks, clip_automations=clip_automations)
@@ -1309,7 +1309,7 @@ class MainWindow:
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
         
-        self.root.title("Helldivers 2 Audio Modder")
+        self.root.title(f"Helldivers 2 Audio Modder {VERSION}")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
         self.right_click_menu = Menu(self.treeview, tearoff=0)
@@ -1503,7 +1503,7 @@ class MainWindow:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=None, task=task(mod.load_archive_file), archive_file=archive)
         for file in files:
-            self.task_manager.schedule(name=f"Applying Patch {file}", callback=None, task=task(mod.import_patch), patch_file=file)
+            self.task_manager.schedule(name=f"Applying Patch {file}", callback=None, task=task(mod.import_patch), patch_file=file, import_hierarchy=False)
         self.task_manager.schedule(name="Saving Output File", callback=None, task=self.combine_mods_write_output, mod=mod)
         
     @task    
@@ -1901,7 +1901,6 @@ class MainWindow:
                 )
 
                 tags = self.treeview.item(selects[-1], option="tags")
-                assert(len(tags) == 1)
                 self.right_click_id = int(tags[0])
                 
                 self.right_click_menu.add_command(
@@ -2480,7 +2479,7 @@ class MainWindow:
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=self.import_patch_load_archive_finished, task=self.load_archive_task, archive_files=[archive])
-        self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
+        self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file, import_hierarchy=False)
         
     @callback
     def import_patch_load_archive_finished(self, results):
@@ -2531,8 +2530,8 @@ if __name__ == "__main__":
                     "Audio playback is disabled.")
                      
     if not os.path.exists(WWISE_CLI) and SYSTEM != "Linux":
-        logger.warning("Wwise installation not found. WAV file import is disabled.")
-        showwarning(title="Missing Plugin", message="Wwise installation not found. WAV file import is disabled.")
+        logger.warning("Wwise installation not found. The only file type available for import is WEM.")
+        showwarning(title="Missing Plugin", message="Wwise installation not found. The only file type available for import is WEM.")
     
     if os.path.exists(WWISE_CLI) and not os.path.exists(DEFAULT_WWISE_PROJECT):
         process = subprocess.run([
