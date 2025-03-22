@@ -1309,7 +1309,7 @@ class MainWindow:
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
         
-        self.root.title("Helldivers 2 Audio Modder")
+        self.root.title(f"Helldivers 2 Audio Modder {VERSION}")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         
         self.right_click_menu = Menu(self.treeview, tearoff=0)
