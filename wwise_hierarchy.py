@@ -120,9 +120,8 @@ class HircEntry:
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -148,9 +147,8 @@ class HircEntry:
             self.modified = False
             if self.parent:
                 self.parent.lower_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.lower_modified()
+            for bank in self.soundbanks:
+                bank.lower_modified()
         
     def import_entry(self, new_entry):
         if (
@@ -172,9 +170,8 @@ class HircEntry:
         self.modified_children+=1
         if self.parent:
             self.parent.raise_modified()
-        else:
-            for bank in self.soundbanks:
-                bank.raise_modified()
+        for bank in self.soundbanks:
+            bank.raise_modified()
         
     def lower_modified(self):
         if self.soundbanks == []:
@@ -185,9 +182,8 @@ class HircEntry:
         self.modified_children-=1
         if self.parent:
             self.parent.lower_modified()
-        else:
-            for bank in self.soundbanks:
-                bank.lower_modified()
+        for bank in self.soundbanks:
+            bank.lower_modified()
                       
     def update_size(self):
         """
@@ -296,9 +292,8 @@ class MusicSegment(HircEntry):
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -452,9 +447,8 @@ class Action(HircEntry):
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
         if entry:
             for value in self.import_values:
                 setattr(self, value, getattr(entry, value))
@@ -1696,9 +1690,8 @@ class Event(HircEntry):
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -1838,9 +1831,8 @@ class RandomSequenceContainer(HircEntry):
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -2007,9 +1999,8 @@ class Sound(HircEntry):
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -3304,9 +3295,8 @@ class LayerContainer(HircEntry):
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -3412,9 +3402,8 @@ class ActorMixer(HircEntry):
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
 
         if entry:
             for value in self.import_values:
@@ -3642,9 +3631,8 @@ class SwitchContainer(HircEntry):
             self.data_old = self.get_data()
             if self.parent:
                 self.parent.raise_modified()
-            else:
-                for bank in self.soundbanks:
-                    bank.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
 
         if entry:
             for value in self.import_values:
