@@ -1651,6 +1651,8 @@ class Mod:
                             existing_entry.size += 4
                 for bank in entry.soundbanks:
                     bank.hierarchy.entries[key] = existing_entry
+                    if existing_entry.modified:
+                        bank.raise_modified()
                     if bank not in existing_entry.soundbanks:
                         existing_entry.soundbanks.append(bank)
             else:
@@ -1717,7 +1719,8 @@ class Mod:
             if key in self.get_audio_sources().keys():
                 self.audio_count[key] += 1
                 for parent in game_archive.audio_sources[key].parents:
-                    self.get_audio_sources()[key].parents.add(parent)
+                    if parent.get_id() not in [p.get_id() for p in self.audio_sources[key].parents]:
+                        self.get_audio_sources()[key].parents.add(parent)
                 game_archive.audio_sources[key] = self.get_audio_sources()[key]
             else:
                 self.audio_count[key] = 1

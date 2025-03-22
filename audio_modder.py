@@ -2530,8 +2530,8 @@ if __name__ == "__main__":
                     "Audio playback is disabled.")
                      
     if not os.path.exists(WWISE_CLI) and SYSTEM != "Linux":
-        logger.warning("Wwise installation not found. WAV file import is disabled.")
-        showwarning(title="Missing Plugin", message="Wwise installation not found. WAV file import is disabled.")
+        logger.warning("Wwise installation not found. The only file type available for import is WEM.")
+        showwarning(title="Missing Plugin", message="Wwise installation not found. The only file type available for import is WEM.")
     
     if os.path.exists(WWISE_CLI) and not os.path.exists(DEFAULT_WWISE_PROJECT):
         process = subprocess.run([
