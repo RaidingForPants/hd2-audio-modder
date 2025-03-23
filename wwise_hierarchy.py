@@ -2106,10 +2106,11 @@ class WwiseHierarchy:
                 
     def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy'):
         for entry in new_hierarchy.get_entries():
-            if entry.hierarchy_id in self.entries:
-                self.entries[entry.hierarchy_id].import_entry(entry)
-            else:
-                self.add_entry(entry)
+            if isinstance(entry, (MusicSegment, MusicTrack)):
+                if entry.hierarchy_id in self.entries:
+                    self.entries[entry.hierarchy_id].import_entry(entry)
+                else:
+                    self.add_entry(entry)
                 
     def revert_modifications(self, entry_id: int = 0):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
