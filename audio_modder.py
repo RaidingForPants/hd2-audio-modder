@@ -1095,6 +1095,10 @@ class TaskManager:
         task = self.sync_wrapper(task, callback)
         t = threading.Thread(target=task, args=args, kwargs=kwargs)
         t.start()
+        
+    def shutdown_async_tasks(self):
+        for item in self.async_task_list:
+            item.get_future().cancel()
             
     def start_task(self, task_item):
         assert not self.sync_thread_running, "Tried to start new sync task with task already running!"
@@ -1458,6 +1462,7 @@ class MainWindow:
         self.root.mainloop()
         
     def on_close(self):
+        self.task_manager.shutdown_async_tasks()
         self.root.destroy()
         
     def drop_position(self, event):
