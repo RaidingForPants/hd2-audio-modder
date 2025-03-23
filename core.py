@@ -43,6 +43,9 @@ class AudioSource:
             for item in self.parents:
                 if not self.modified:
                     item.raise_modified()
+                    if isinstance(item, HircEntry):
+                        for bank in item.soundbanks:
+                            bank.raise_modified()
         if set_modified:
             self.modified = True
             
@@ -77,6 +80,9 @@ class AudioSource:
             if notify_subscribers:
                 for item in self.parents:
                     item.lower_modified()
+                    if isinstance(item, HircEntry):
+                        for bank in item.soundbanks:
+                            bank.lower_modified()
                 
 
 class TocHeader:
