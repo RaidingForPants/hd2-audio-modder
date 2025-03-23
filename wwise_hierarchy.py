@@ -170,8 +170,6 @@ class HircEntry:
         self.modified_children+=1
         if self.parent:
             self.parent.raise_modified()
-        for bank in self.soundbanks:
-            bank.raise_modified()
         
     def lower_modified(self):
         if self.soundbanks == []:
