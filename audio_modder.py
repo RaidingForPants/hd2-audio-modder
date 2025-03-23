@@ -1060,11 +1060,23 @@ class TaskItem:
     def get_name(self):
         return self.name
         
+class AsyncTaskItem:
+    
+    def __init__(self, future, name):
+        self.future = future
+        self.name = name
+        
+    def get_name(self):
+        return self.name
+        
+    def get_future(self):
+        return self.future
+        
 class TaskManager:
     
     def __init__(self):
         self.async_event_loop = EventLoop()
-        self.async_task_queue = queue.Queue()
+        self.async_task_list = []
         self.sync_task_queue = queue.Queue()
         self.sync_thread_running = False
         self.sync_thread = None
@@ -1110,7 +1122,8 @@ class TaskManager:
         
     def schedule_async(self, name, callback, task, *args, **kwargs):
         callback = self.async_wrapper(callback)
-        self.async_event_loop.start_task(callback, task, *args, **kwargs)
+        future = self.async_event_loop.start_task(callback, task, *args, **kwargs)
+        self.async_task_list.append(AsyncTaskItem(future, name))
     
     def async_wrapper(self, callback):
         if callback is not None:
@@ -1141,7 +1154,17 @@ class TaskManager:
         return wrapper
         
     def async_task_finished(self, future):
-        pass
+        for index, item in enumerate(self.async_task_list):
+            if item.get_future() is future:
+                break
+        self.async_task_list.remove(item)
+        if index == 0 and not self.sync_thread_running:
+            if len(self.async_task_list) > 0:
+                task_item = self.async_task_list[0]
+                self.start_progress_frame()
+                self.set_progress_frame_text(task_item.get_name())
+            else:
+                self.stop_progress_frame()
         
     def sync_task_finished(self):
         self.sync_thread_running = False
@@ -1150,7 +1173,12 @@ class TaskManager:
             self.start_task(task_item)
         else:
             self.sync_thread = None
-            self.stop_progress_frame()
+            if len(self.async_task_list) > 0:
+                task_item = self.async_task_list[0]
+                self.start_progress_frame()
+                self.set_progress_frame_text(task_item.get_name())
+            else:
+                self.stop_progress_frame()
     
 class EventLoop:
     
@@ -1160,8 +1188,9 @@ class EventLoop:
         self.thread.start()
     
     def start_task(self, callback, coroutine, *args, **kwargs):
-        task = asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), self.loop)
-        task.add_done_callback(callback)
+        future = asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), self.loop)
+        future.add_done_callback(callback)
+        return future
     
     def run_asyncio_loop(self, loop):
         asyncio.set_event_loop(loop)
