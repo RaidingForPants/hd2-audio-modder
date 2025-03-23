@@ -2420,10 +2420,14 @@ class MainWindow:
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
+        task_id = self.generate_task_id()
+        self.active_task_ids.append(task_id)
+        task_folder = os.path.join(output_folder, f"dump_{task_id}")
+        os.mkdir(task_folder)
         #1. queue tasks for creating each dummy bank
         #2. schedule tasks to dump each dummy bank
         for bank in self.mod_handler.get_active_mod().get_wwise_banks().values():
-            bank_folder = os.path.join(output_folder, bank.dep.data.replace("\x00", "").split("/")[-1])
+            bank_folder = os.path.join(task_folder, bank.dep.data.replace("\x00", "").split("/")[-1])
             os.mkdir(bank_folder)
             file_ids = [audio_source.get_short_id() for audio_source in bank.get_content()]
             task_id = self.generate_task_id()
