@@ -558,7 +558,8 @@ class MusicTrackWindow:
                 source_id = murmur64_hash(f"content/audio/{source_id}".encode("utf-8"))
             if track.clip_automations[i].auto_type == 0: #VOLUME
                 g.set_xlabel("time (s)")
-                g.set_ylabel("dB")
+                g.set_ylabel("Volume Adjustment")
+                g.set_axis_format("y", "percent")
                 g.set_title(f"Volume for Audio {source_id}")
             elif track.clip_automations[i].auto_type == 3: #FADE-IN
                 g.set_xlabel("time (s)")

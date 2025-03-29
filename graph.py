@@ -49,6 +49,23 @@ class Graph(Frame):
     def set_title(self, title):
         self.ax.set_title(title)
         
+    def set_axis_format(self, axis, format):
+        if axis not in ["x", "y"]:
+            raise ValueError(f"Unknown axis {axis}")
+        if format not in ["decimal", "percent"]:
+            raise ValueError(f"Unknown axis format {format}")
+            
+        if axis == "x":
+            if format == "percent":
+                self.ax.xaxis.set_major_formatter(mpl.ticker.PercentFormatter(xmax=1.0))
+            elif format == "decimal":
+                self.ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+        elif axis == "y":
+            if format == "percent":
+                self.ax.yaxis.set_major_formatter(mpl.ticker.PercentFormatter(xmax=1.0))
+            elif format == "decimal":
+                self.ax.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter())
+        
     def set_data(self, xdata, ydata):
         self.x = xdata
         self.y = ydata
