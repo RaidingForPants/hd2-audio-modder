@@ -47,7 +47,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.17.0"
+VERSION = "1.17.1"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -556,15 +556,18 @@ class MusicTrackWindow:
                 source_id = murmur64_hash(f"content/audio/{source_id}".encode("utf-8"))
             if track.clip_automations[i].auto_type == 0: #VOLUME
                 g.set_xlabel("time (s)")
-                g.set_ylabel("dB")
+                g.set_ylabel("Volume Adjustment")
+                g.set_axis_format("y", "percent")
                 g.set_title(f"Volume for Audio {source_id}")
             elif track.clip_automations[i].auto_type == 3: #FADE-IN
                 g.set_xlabel("time (s)")
-                g.set_ylabel("dB")
+                g.set_ylabel("Volume")
+                g.set_axis_format("y", "percent")
                 g.set_title(f"Fade-In for Audio {source_id}")
             elif track.clip_automations[i].auto_type == 4: #FADE-OUT
                 g.set_xlabel("time (s)")
-                g.set_ylabel("dB")
+                g.set_ylabel("Volume")
+                g.set_axis_format("y", "percent")
                 g.set_title(f"Fade-Out for Audio {source_id}")
             else:
                 g.set_xlabel("")
@@ -1510,7 +1513,11 @@ class MainWindow:
         patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
         
         for index, mod_file in enumerate(zip_files):
-            zip = zipfile.ZipFile(mod_file)
+            try:
+                zip = zipfile.ZipFile(mod_file)
+            except zipfile.BadZipFile:
+                showwarning(title="Invalid Zip File", message=f"File {mod_file} is not a valid zip file.")
+                continue
             extract_location = os.path.join(CACHE, str(index))
             os.mkdir(extract_location)
             zip.extractall(path=extract_location)
@@ -1532,6 +1539,16 @@ class MainWindow:
                 archives.add(r.archive)
             else:
                 showerror(title="", message="Unable to complete automated mod merging; please merge manually.")
+                self.mod_handler.delete_mod("combined_mods_temp")
+                for file in os.listdir(CACHE):
+                    file = os.path.join(CACHE, file)
+                    try:
+                        if os.path.isfile(file):
+                            os.remove(file)
+                        elif os.path.isdir(file):
+                            shutil.rmtree(file)
+                    except:
+                        pass
                 return
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
@@ -2483,10 +2500,12 @@ class MainWindow:
         
     def write_patch(self):
         self.sound_handler.kill_sound()
-        output_folder = filedialog.askdirectory(title="Select folder to save files to")
-        if not output_folder:
+        output_file = filedialog.asksaveasfilename(title="Select", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
+        if not output_file:
             return
-        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder)
+        output_folder = os.path.dirname(output_file)
+        output_file = os.path.basename(output_file)
+        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder, output_filename=output_file)
         
     def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
@@ -2507,6 +2526,7 @@ class MainWindow:
     @callback
     def import_patch_soundbank_lookup(self, missing_soundbank_ids, new_archive, patch_file):
         archives = set()
+        missing_soundbanks = set()
         if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
             archives.add("9ba626afa44a3aa3")
         if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
@@ -2514,6 +2534,10 @@ class MainWindow:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)
                 if r.success:
                     archives.add(r.archive)
+                else:
+                    missing_soundbanks.add(new_archive.get_wwise_banks()[soundbank_id])
+        if len(missing_soundbanks) > 0:
+            showwarning(title="Missing Soundbanks", message="Could not automatically load all soundbanks in the patch; it may be outdated. Please ensure any needed archives are manually loaded before importing this patch.\n" + "\n".join([bank.dep.data.replace("\x00", "") for bank in missing_soundbanks]))
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=self.import_patch_load_archive_finished, task=self.load_archive_task, archive_files=[archive])
