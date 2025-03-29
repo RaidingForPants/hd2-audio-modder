@@ -542,6 +542,8 @@ class MusicTrackWindow:
         info = [x for x in self.track.track_info if x.source_id != 0]
         
         for i in range(len(track.clip_automations)):
+            if track.clip_automations[i].auto_type != 0:
+                continue
             x = [point[0] for point in track.clip_automations[i].graph_points]
             y = [point[1] for point in track.clip_automations[i].graph_points]
             g = Graph(self.graph_notebook)
@@ -556,7 +558,8 @@ class MusicTrackWindow:
                 source_id = murmur64_hash(f"content/audio/{source_id}".encode("utf-8"))
             if track.clip_automations[i].auto_type == 0: #VOLUME
                 g.set_xlabel("time (s)")
-                g.set_ylabel("dB")
+                g.set_ylabel("Volume Adjustment")
+                g.set_axis_format("y", "percent")
                 g.set_title(f"Volume for Audio {source_id}")
             elif track.clip_automations[i].auto_type == 3: #FADE-IN
                 g.set_xlabel("time (s)")
@@ -590,8 +593,9 @@ class MusicTrackWindow:
         for index, tab in enumerate(self.graph_notebook.tabs()):
             graph = self.graph_notebook.nametowidget(tab)
             x, y = graph.get_data()
-            clip_automations[index].num_graph_points = len(x)
-            clip_automations[index].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
+            clip_index = int(self.graph_notebook.tab(index, option="text").split(" ")[1])-1
+            clip_automations[clip_index].num_graph_points = len(x)
+            clip_automations[clip_index].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
         self.track.set_data(track_info=tracks, clip_automations=clip_automations)
         self.update_modified(diff=[self.track])
         
