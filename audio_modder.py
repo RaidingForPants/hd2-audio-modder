@@ -1514,7 +1514,11 @@ class MainWindow:
         patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
         
         for index, mod_file in enumerate(zip_files):
-            zip = zipfile.ZipFile(mod_file)
+            try:
+                zip = zipfile.ZipFile(mod_file)
+            except zipfile.BadZipFile:
+                showwarning(title="Invalid Zip File", message=f"File {mod_file} is not a valid zip file.")
+                continue
             extract_location = os.path.join(CACHE, str(index))
             os.mkdir(extract_location)
             zip.extractall(path=extract_location)
@@ -1536,6 +1540,16 @@ class MainWindow:
                 archives.add(r.archive)
             else:
                 showerror(title="", message="Unable to complete automated mod merging; please merge manually.")
+                self.mod_handler.delete_mod("combined_mods_temp")
+                for file in os.listdir(CACHE):
+                    file = os.path.join(CACHE, file)
+                    try:
+                        if os.path.isfile(file):
+                            os.remove(file)
+                        elif os.path.isdir(file):
+                            shutil.rmtree(file)
+                    except:
+                        pass
                 return
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
