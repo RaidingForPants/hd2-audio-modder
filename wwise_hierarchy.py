@@ -518,11 +518,11 @@ class ClipAutomationStruct:
         s = ClipAutomationStruct()
         s.clip_index, s.auto_type, s.num_graph_points = struct.unpack("<III", stream.read(12))
         for _ in range(s.num_graph_points):
-            s.graph_points.append(struct.unpack("<fff", stream.read(12)))
+            s.graph_points.append(struct.unpack("<ffI", stream.read(12)))
         return s
             
     def get_data(self):
-        return struct.pack("<III", self.clip_index, self.auto_type, self.num_graph_points) + b"".join([struct.pack("<fff", point[0], point[1], point[2]) for point in self.graph_points])
+        return struct.pack("<III", self.clip_index, self.auto_type, self.num_graph_points) + b"".join([struct.pack("<ffI", point[0], point[1], point[2]) for point in self.graph_points])
         
 
 class MusicTrack(HircEntry):
