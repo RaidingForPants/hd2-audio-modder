@@ -2507,6 +2507,7 @@ class MainWindow:
     @callback
     def import_patch_soundbank_lookup(self, missing_soundbank_ids, new_archive, patch_file):
         archives = set()
+        missing_soundbanks = set()
         if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
             archives.add("9ba626afa44a3aa3")
         if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
@@ -2514,6 +2515,10 @@ class MainWindow:
                 r = self.name_lookup.lookup_soundbank(soundbank_id)
                 if r.success:
                     archives.add(r.archive)
+                else:
+                    missing_soundbanks.add(new_archive.get_wwise_banks()[soundbank_id])
+        if len(missing_soundbanks) > 0:
+            showwarning(title="Missing Soundbanks", message="Could not automatically load all soundbanks in the patch; it may be outdated. Please ensure any needed archives are manually loaded before importing this patch.\n" + "\n".join([bank.dep.data.replace("\x00", "") for bank in missing_soundbanks]))
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=self.import_patch_load_archive_finished, task=self.load_archive_task, archive_files=[archive])
