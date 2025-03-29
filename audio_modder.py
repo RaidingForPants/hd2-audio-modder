@@ -2501,10 +2501,12 @@ class MainWindow:
         
     def write_patch(self):
         self.sound_handler.kill_sound()
-        output_folder = filedialog.askdirectory(title="Select folder to save files to")
-        if not output_folder:
+        output_file = filedialog.asksaveasfilename(title="Select", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
+        if not output_file:
             return
-        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder)
+        output_folder = os.path.dirname(output_file)
+        output_file = os.path.basename(output_file)
+        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder, output_filename=output_file)
         
     def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()

@@ -1805,7 +1805,7 @@ class Mod:
         
         return True
 
-    def write_patch(self, output_folder: str = ""):
+    def write_patch(self, output_folder: str = "", output_filename: str = ""):
         """
         @exception
         - OSError
@@ -1814,7 +1814,7 @@ class Mod:
         if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
             raise OSError(f"Invalid output folder '{output_folder}'")
         patch_game_archive = GameArchive()
-        patch_game_archive.name = "9ba626afa44a3aa3.patch_0"
+        patch_game_archive.name = "9ba626afa44a3aa3.patch_0" if output_filename == "" else output_filename
         patch_game_archive.magic = 0xF0000011
         patch_game_archive.num_types = 0
         patch_game_archive.num_files = 0
