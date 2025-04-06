@@ -273,8 +273,11 @@ class FileUploadWindow:
     def __init__(self, parent, callback=None):
         self.root = Toplevel(parent)
         self.root.geometry("500x500")
-        if os.path.exists("icon.ico"):
-            self.root.iconbitmap("icon.ico")
+        try:
+            if os.path.exists("icon.ico"):
+                self.root.iconbitmap("icon.ico")
+        except:
+            pass
         self.root.title("Select Mods to Combine")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.scrollframe = VerticalScrolledFrame(self.root)
@@ -1252,9 +1255,11 @@ class MainWindow:
         self.active_task_ids = []
         
         self.root = TkinterDnD.Tk()
-        if os.path.exists("icon.ico"):
-            self.root.iconbitmap("icon.ico")
-        
+        try:
+            if os.path.exists("icon.ico"):
+                self.root.iconbitmap("icon.ico")
+        except:
+            pass
         self.drag_source_widget = None
         self.workspace_selection = []
         
@@ -1967,14 +1972,14 @@ class MainWindow:
                         label="Dump As .wav with Sequence Number",
                         command=lambda: self.dump_as_wav(with_seq=True)
                     )
-                self.right_click_menu.add_command(
-                    label="Dump muted .wav with same ID",
-                    command=lambda: self.dump_as_wav(muted=True)
-                )
-                self.right_click_menu.add_command(
-                    label="Dump muted .wav with same ID and sequence number",
-                    command=lambda: self.dump_as_wav(muted=True, with_seq=True)
-                )
+                #self.right_click_menu.add_command(
+                #    label="Dump muted .wav with same ID",
+                #    command=lambda: self.dump_as_wav(muted=True)
+                #)
+                #self.right_click_menu.add_command(
+                #    label="Dump muted .wav with same ID and sequence number",
+                #    command=lambda: self.dump_as_wav(muted=True, with_seq=True)
+                #)
             self.right_click_menu.tk_popup(event.x_root, event.y_root)
         except (AttributeError, IndexError):
             pass
@@ -2088,7 +2093,7 @@ class MainWindow:
                 return
             self.mod_handler.get_active_mod().dump_multiple_as_wem([int(self.treeview.item(i, option="tags")[0]) for i in self.treeview.selection()], output_folder)
 
-    def dump_as_wav(self, muted: bool = False, with_seq: int = False):
+    def dump_as_wav(self, muted: bool = False, with_seq: bool = False):
         if len(self.treeview.selection()) == 1:
             output_file = filedialog.asksaveasfilename(
                 title="Save As", 
@@ -2108,20 +2113,25 @@ class MainWindow:
             self.active_task_ids.append(task_id)
             task_folder = os.path.join(output_folder, f"dump_{task_id}")
             os.mkdir(task_folder)
-            self.task_manager.schedule(name="Dumping Files", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=task_folder)
+            self.task_manager.schedule(name="Dumping Files", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=task_folder, with_seq=with_seq)
     
     @task
-    def dump_as_wav_setup_task(self, task_id, file_ids, output_location):
+    def dump_as_wav_setup_task(self, task_id, file_ids, output_location, with_seq):
         self.mod_handler.get_active_mod().create_dummy_bank(file_ids, os.path.join(output_location, "temp.bnk"))
-        self.task_manager.schedule_async(name="Dumping Files", callback=self.dump_as_wav_finished, task=self.dump_as_wav_task, file_ids=file_ids, output_folder=output_location, bank_filepath=os.path.join(output_location, "temp.bnk"), task_id=task_id)
+        self.task_manager.schedule_async(name="Dumping Files", callback=self.dump_as_wav_finished, task=self.dump_as_wav_task, file_ids=file_ids, output_folder=output_location, bank_filepath=os.path.join(output_location, "temp.bnk"), task_id=task_id, with_seq=with_seq)
             
     @async_task 
-    async def dump_as_wav_task(self, file_ids, output_folder, bank_filepath, task_id):
+    async def dump_as_wav_task(self, file_ids, output_folder, bank_filepath, task_id, with_seq):
         await self.mod_handler.get_active_mod().dump_from_bank_file(output_folder=output_folder, bank_filepath=bank_filepath)
         os.remove(bank_filepath)
-        for audio_source in [self.mod_handler.get_active_mod().get_audio_source(source_id) for source_id in file_ids]:
+        for index, audio_source in enumerate([self.mod_handler.get_active_mod().get_audio_source(source_id) for source_id in file_ids]):
             if audio_source.get_resource_id() != 0:
-                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{audio_source.get_resource_id()}.wav"))
+                if with_seq:
+                    os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{index}_{audio_source.get_resource_id()}.wav"))
+                else:
+                    os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{audio_source.get_resource_id()}.wav"))
+            elif with_seq:
+                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{index}_{audio_source.get_short_id()}.wav"))
 
         return task_id
 
