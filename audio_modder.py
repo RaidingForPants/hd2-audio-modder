@@ -47,7 +47,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.17.1"
+VERSION = "1.17.2"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -2573,6 +2573,21 @@ if __name__ == "__main__":
         exit(1)
 
     GAME_FILE_LOCATION = app_state.game_data_path
+    try:
+        if os.path.exists("audio_modder_old.exe"):
+            os.remove("audio_modder_old.exe")
+        if os.path.exists("audio_modder_old"):
+            os.remove("audio_modder_old")
+    except:
+        pass
+    
+    try:
+        if os.path.exists("updater.exe"):
+            os.remove("updater.exe")
+        if os.path.exists("updater"):
+            os.remove("updater")
+    except:
+        pass
 
     try:
         if not os.path.exists(CACHE):
@@ -2665,15 +2680,43 @@ if __name__ == "__main__":
         if update_available:
             response = askyesnocancel(title="Update", message=f"A new version is available ({data['tag_name'].replace('v', '')}). Would you like to install it?")
             if response:
-                subprocess.Popen(
-                    [
-                        updater,
-                        download_url,
-                        str(os.getpid())
-                    ],
-                    creationflags=subprocess.DETACHED_PROCESS
-                )
-                sys.exit()
+                if platform.system() in ["Darwin", "Linux"]:
+                    filename = "audio_modder"
+                    temp_filename = "audio_modder_temp"
+                    os.rename("audio_modder", "audio_modder_old")
+                elif platform.system() == "Windows":
+                    filename = "audio_modder.exe"
+                    temp_filename = "audio_modder_temp.exe"
+                    os.rename("audio_modder.exe", "audio_modder_old.exe")
+                zipfilename = download_url.split("/")[-1]
+                try:
+                    r = requests.get(download_url)
+                    if r.status_code != 200:
+                        showwarning(title="Error", message="Error fetching update")
+                    else:
+                        with open(zipfilename, "wb") as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                f.write(chunk)
+                        z = zipfile.ZipFile(zipfilename)
+                        with z.open(filename, "r") as f:
+                            with open(temp_filename, "wb") as f2:
+                                f2.write(f.read())
+                        z.close()
+                        os.remove(zipfilename)
+                        tkinter.messagebox.showinfo(title="Success", message="The audio modding tool has been updated and will now restart.")
+                        a = subprocess.Popen(
+                            [
+                                temp_filename
+                            ],
+                            creationflags=subprocess.DETACHED_PROCESS
+                        )
+                        sys.exit()
+                except Exception as e:
+                    print(e)
+                    if platform.system() in ["Darwin", "Linux"]:
+                        os.rename("audio_modder_old", "audio_modder")
+                    elif platform.system() == "Windows":
+                        os.rename("audio_modder_old.exe", "audio_modder.exe")
     except Exception as e:
         print(e)
 
@@ -2686,6 +2729,14 @@ if __name__ == "__main__":
             lookup_store = None
     else:
         lookup_store = None
+        
+    try:
+        if os.path.basename(sys.executable) == "audio_modder_temp.exe":
+            os.rename("audio_modder_temp.exe", "audio_modder.exe")
+        if os.path.basename(sys.executable) == "audio_modder_temp":
+            os.rename("audio_modder_temp", "audio_modder")
+    except:
+        pass
         
     language = language_lookup("English (US)")
     window = MainWindow(app_state, lookup_store)
