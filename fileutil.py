@@ -1,5 +1,6 @@
 import os
 import pathlib
+from util import alphanum_key
 
 from const import SUPPORTED_AUDIO_TYPES
 
@@ -24,12 +25,12 @@ def generate_file_tree(path) -> INode | None:
             inodes[dirpath] = curr
         else:
             curr = inodes[dirpath]
-        for dirname in dirnames:
+        for dirname in sorted(dirnames, key=alphanum_key):
             absolute_path = os.path.join(dirpath, dirname)
             inode = INode(True, absolute_path, dirname) 
             inodes[absolute_path] = inode
             curr.nodes.append(inode)
-        for filename in filenames:
+        for filename in sorted(filenames, key=alphanum_key):
             _, ext = os.path.splitext(filename)
             if ext in SUPPORTED_AUDIO_TYPES or "patch" in ext:
                 curr.nodes.append(INode(
