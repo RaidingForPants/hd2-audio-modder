@@ -180,8 +180,6 @@ class HircEntry:
         self.modified_children-=1
         if self.parent:
             self.parent.lower_modified()
-        for bank in self.soundbanks:
-            bank.lower_modified()
                       
     def update_size(self):
         """
