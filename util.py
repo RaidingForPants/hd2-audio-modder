@@ -1,5 +1,6 @@
 import os
 import struct
+import re
 
 from ctypes import c_uint32
 from math import ceil
@@ -156,6 +157,18 @@ def parse_filename(name: str):
     else:
         id_number = get_number_prefix(parts[0])
     return id_number
+
+def tryint(s):
+    try:
+        return int(s)
+    except:
+        return s
+        
+def alphanum_key(s):
+    """ Turn a string into a list of string and number chunks.
+        "z23a" -> ["z", 23, "a"]
+    """
+    return [ tryint(c) for c in re.split('([0-9]+)', s) ]
 
 def murmur64_hash(data: Any, seed: int = 0):
 
