@@ -132,6 +132,32 @@ def get_number_prefix(n: str):
     except:
         return 0
         
+def is_integer(n: str):
+    try:
+        _ = int(n)
+        return True
+    except:
+        return False
+        
+def parse_filename(name: str):
+    '''
+    Options:
+    id_fluff.wav
+    seq_id_fluff.wav
+    *fluff may or may not be separated by an underscore
+    *sequence number will always be separated by an underscore
+    '''
+    id_number = 0
+    parts = name.split("_")
+    if len(parts) > 1:
+        if is_integer(parts[0]) and get_number_prefix(parts[1]) != 0:
+            id_number = get_number_prefix(parts[1])
+        else:
+            id_number = get_number_prefix(parts[0])
+    else:
+        id_number = get_number_prefix(parts[0])
+    return id_number
+
 def tryint(s):
     try:
         return int(s)

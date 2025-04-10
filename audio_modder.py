@@ -1617,7 +1617,7 @@ class MainWindow:
                 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
                 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
             ):
-                audio_id = get_number_prefix(os.path.basename(import_files[0]))
+                audio_id = parse_filename(os.path.basename(import_files[0]))
                 if audio_id != 0 and self.mod_handler.get_active_mod().get_audio_source(audio_id) is not None:
                     answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
                     if answer is None:
@@ -1630,7 +1630,7 @@ class MainWindow:
                     targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                 file_dict = {import_files[0]: targets}
             else:
-                file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
+                file_dict = {file: [parse_filename(os.path.basename(file))] for file in import_files}
             self.import_files(file_dict)
 
     def drop_add_to_workspace(self, event):
@@ -1798,7 +1798,7 @@ class MainWindow:
                 return
             elif tags[0] == "dir":
                 return
-        file_dict = {self.workspace.item(i, option="values")[0]: [get_number_prefix(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
+        file_dict = {self.workspace.item(i, option="values")[0]: [parse_filename(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
         self.workspace_popup_menu.add_command(
             label="Import", 
             command=lambda: self.import_files(file_dict)
@@ -1815,7 +1815,7 @@ class MainWindow:
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
         if not files:
             return
-        file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in files}
+        file_dict = {file: [parse_filename(os.path.basename(file))] for file in files}
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
