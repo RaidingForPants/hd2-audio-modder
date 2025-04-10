@@ -12,10 +12,12 @@ class Config:
                  game_data_path: str,
                  recent_files: list[str] = [],
                  theme: str = "dark_mode",
+                 ui_scale: float = 1.0,
                  workspace_paths: set[str] = set()):
         self.game_data_path = game_data_path
         self.recent_files = recent_files
         self.theme = theme
+        self.ui_scale = ui_scale
         self.workspace_paths = workspace_paths
 
     """
@@ -74,6 +76,10 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
             _ = cfg.theme
         except:
             cfg.theme = "dark_mode"
+        try:
+            _ = cfg.ui_scale
+        except:
+            cfg.ui_scale = 1.0
         try:
             _ = cfg.recent_files
         except:
