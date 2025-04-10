@@ -291,7 +291,7 @@ class FileUploadWindow:
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_rowconfigure(1, weight=1)
         self.root.grid_rowconfigure(2, weight=0)
-        self.label = Label(self.drop_frame, text="Drop Files Here or ", font=('Segoe UI', 12), justify="right")
+        self.label = ttk.Label(self.drop_frame, text="Drop Files Here or ", font=('Segoe UI', 12), justify="right")
         self.label.grid(row=0, column=0, sticky="nse")
         self.drop_frame.grid(row=0, column=0, columnspan=2, sticky="news")
         self.drop_frame.dnd_bind("<<Drop>>", self.drop_add_files)
@@ -1369,11 +1369,22 @@ class MainWindow:
         
         self.selected_theme = StringVar()
         self.selected_theme.set(self.app_state.theme)
-        self.set_theme()
         self.theme_menu = Menu(self.menu, tearoff=0)
         self.theme_menu.add_radiobutton(label="Dark Mode", variable=self.selected_theme, value="dark_mode", command=self.set_theme)
         self.theme_menu.add_radiobutton(label="Light Mode", variable=self.selected_theme, value="light_mode", command=self.set_theme)
+        
+        self.selected_scale = DoubleVar()
+        self.selected_scale.set(self.app_state.ui_scale)
+        self.set_theme()
+        self.scale_menu = Menu(self.menu, tearoff=0)
+        self.scale_menu.add_radiobutton(label="50%", variable=self.selected_scale, value=0.5, command=self.set_ui_scale)
+        self.scale_menu.add_radiobutton(label="75%", variable=self.selected_scale, value=0.75, command=self.set_ui_scale)
+        self.scale_menu.add_radiobutton(label="100%", variable=self.selected_scale, value=1.0, command=self.set_ui_scale)
+        self.scale_menu.add_radiobutton(label="150%", variable=self.selected_scale, value=1.5, command=self.set_ui_scale)
+        self.scale_menu.add_radiobutton(label="200%", variable=self.selected_scale, value=2.0, command=self.set_ui_scale)
+        
         self.options_menu.add_cascade(menu=self.theme_menu, label="Set Theme")
+        self.options_menu.add_cascade(menu=self.scale_menu, label="Set UI Scale")
         
         self.language_menu = Menu(self.options_menu, tearoff=0)
         
@@ -1483,6 +1494,15 @@ class MainWindow:
         selected_item = self.workspace.identify_row(event.y)
         if selected_item in self.workspace_selection:
             self.workspace.selection_set(self.workspace_selection)
+            
+    def set_ui_scale(self):
+        scale = self.selected_scale.get()
+        self.app_state.ui_scale = scale
+        style = ttk.Style()
+        style.configure("Treeview", rowheight=int(20*scale))
+        style.configure('TButton', font=("Segoe UI", int(12*scale)))
+        style.configure("Treeview.Heading", font=("Segoe UI", int(10*scale)))
+        style.configure("Treeview", font=("Segoe UI", int(10*scale)))
 
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
@@ -1617,7 +1637,7 @@ class MainWindow:
                 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
                 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
             ):
-                audio_id = get_number_prefix(os.path.basename(import_files[0]))
+                audio_id = parse_filename(os.path.basename(import_files[0]))
                 if audio_id != 0 and self.mod_handler.get_active_mod().get_audio_source(audio_id) is not None:
                     answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
                     if answer is None:
@@ -1630,7 +1650,7 @@ class MainWindow:
                     targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                 file_dict = {import_files[0]: targets}
             else:
-                file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in import_files}
+                file_dict = {file: [parse_filename(os.path.basename(file))] for file in import_files}
             self.import_files(file_dict)
 
     def drop_add_to_workspace(self, event):
@@ -1664,7 +1684,7 @@ class MainWindow:
                 graphs_set_light_mode()
                 self.window.configure(background="black")
                 self.treeview.tag_configure("modified", background=MainWindow.light_mode_modified_bg, foreground=MainWindow.light_mode_modified_fg)
-            
+            self.set_ui_scale()
         except Exception as e:
             logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
         self.app_state.theme = theme
@@ -1798,7 +1818,7 @@ class MainWindow:
                 return
             elif tags[0] == "dir":
                 return
-        file_dict = {self.workspace.item(i, option="values")[0]: [get_number_prefix(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
+        file_dict = {self.workspace.item(i, option="values")[0]: [parse_filename(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
         self.workspace_popup_menu.add_command(
             label="Import", 
             command=lambda: self.import_files(file_dict)
@@ -1815,7 +1835,7 @@ class MainWindow:
         files = filedialog.askopenfilenames(title="Choose files to import", filetypes=available_filetypes)
         if not files:
             return
-        file_dict = {file: [get_number_prefix(os.path.basename(file))] for file in files}
+        file_dict = {file: [parse_filename(os.path.basename(file))] for file in files}
         self.import_files(file_dict)
         
     def import_files(self, file_dict):

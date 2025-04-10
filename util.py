@@ -1,5 +1,6 @@
 import os
 import struct
+import re
 
 from ctypes import c_uint32
 from math import ceil
@@ -130,6 +131,44 @@ def get_number_prefix(n: str):
         return int(number)
     except:
         return 0
+        
+def is_integer(n: str):
+    try:
+        _ = int(n)
+        return True
+    except:
+        return False
+        
+def parse_filename(name: str):
+    '''
+    Options:
+    id_fluff.wav
+    seq_id_fluff.wav
+    *fluff may or may not be separated by an underscore
+    *sequence number will always be separated by an underscore
+    '''
+    id_number = 0
+    parts = name.split("_")
+    if len(parts) > 1:
+        if is_integer(parts[0]) and get_number_prefix(parts[1]) != 0:
+            id_number = get_number_prefix(parts[1])
+        else:
+            id_number = get_number_prefix(parts[0])
+    else:
+        id_number = get_number_prefix(parts[0])
+    return id_number
+
+def tryint(s):
+    try:
+        return int(s)
+    except:
+        return s
+        
+def alphanum_key(s):
+    """ Turn a string into a list of string and number chunks.
+        "z23a" -> ["z", 23, "a"]
+    """
+    return [ tryint(c) for c in re.split('([0-9]+)', s) ]
 
 def murmur64_hash(data: Any, seed: int = 0):
 
