@@ -47,6 +47,9 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
+BASE_DPI = 96.04726735598227
+SCREEN_DPI = 1
+DPI_SCALE = 1
 VERSION = "1.17.3"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
@@ -1255,6 +1258,10 @@ class MainWindow:
         self.active_task_ids = []
         
         self.root = TkinterDnD.Tk()
+        
+        SCREEN_DPI = self.root.winfo_fpixels('1i')
+        DPI_SCALE = float(SCREEN_DPI/BASE_DPI)
+        
         try:
             if os.path.exists("icon.ico"):
                 self.root.iconbitmap("icon.ico")
@@ -1499,7 +1506,7 @@ class MainWindow:
         scale = self.selected_scale.get()
         self.app_state.ui_scale = scale
         style = ttk.Style()
-        style.configure("Treeview", rowheight=int(20*scale))
+        style.configure("Treeview", rowheight=int(20*scale*DPI_SCALE))
         style.configure('TButton', font=("Segoe UI", int(12*scale)))
         style.configure("Treeview.Heading", font=("Segoe UI", int(10*scale)))
         style.configure("Treeview", font=("Segoe UI", int(10*scale)))
@@ -2342,7 +2349,7 @@ class MainWindow:
             )
 
     def update_language_menu(self):
-        self.options_menu.delete(1, "end") #change to delete only the language select menu
+        self.options_menu.delete(2, "end") #change to delete only the language select menu
         if len(self.mod_handler.get_active_mod().text_banks) > 0:
             self.language_menu.delete(0, "end")
             first = ""
