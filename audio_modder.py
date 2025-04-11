@@ -50,7 +50,7 @@ WINDOW_HEIGHT = 848
 BASE_DPI = 96.04726735598227
 SCREEN_DPI = 1
 DPI_SCALE = 1
-VERSION = "1.17.3"
+VERSION = "1.17.4"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
