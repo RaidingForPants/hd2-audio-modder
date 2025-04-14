@@ -1866,8 +1866,8 @@ class Mod:
                     continue
             if set_duration:
                 try:
-                    sample_rate = int.from_bytes(audio_data[24:28], byteorder="little")
-                    total_samples = int.from_bytes(audio_data[44:48], byteorder="little")
+                    sample_rate = float(int.from_bytes(audio_data[24:28], byteorder="little"))
+                    total_samples = float(int.from_bytes(audio_data[44:48], byteorder="little"))
                     len_ms = total_samples * 1000 / sample_rate
                 except Exception as e:
                     print(e)
