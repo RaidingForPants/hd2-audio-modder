@@ -1866,14 +1866,8 @@ class Mod:
                     continue
             if set_duration:
                 try:
-                    process = subprocess.run([VGMSTREAM, "-m", filepath], capture_output=True)
-                    if process.returncode != 0:
-                        raise Exception("")
-                    for line in process.stdout.decode(locale.getpreferredencoding()).split("\n"):
-                        if "sample rate" in line:
-                            sample_rate = float(line[13:line.index("Hz")-1])
-                        if "stream total samples" in line:
-                            total_samples = int(line[22:line.index("(")-1])
+                    sample_rate = int.from_bytes(audio_data[24:28], byteorder="little")
+                    total_samples = int.from_bytes(audio_data[44:48], byteorder="little")
                     len_ms = total_samples * 1000 / sample_rate
                 except Exception as e:
                     print(e)
