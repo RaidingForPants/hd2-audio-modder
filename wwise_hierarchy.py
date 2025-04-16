@@ -2056,8 +2056,10 @@ class HircEntryFactory:
                 entry = LayerContainer.from_memory_stream(stream)
             case 0x0A: # music segment
                 entry = MusicSegment.from_memory_stream(stream)
-            case 0X0B: # music track
+            case 0x0B: # music track
                 entry = MusicTrack.from_memory_stream(stream)
+            case 0x0C:
+                entry = MusicSwitchContainer.from_memory_stream(stream)
             case _:
                 entry = HircEntry.from_memory_stream(stream)
         return entry
@@ -2076,6 +2078,7 @@ class WwiseHierarchy:
         self.random_sequence_containers: list[RandomSequenceContainer] = []
         self.sounds: list[Sound] = []
         self.switch_containers: list[SwitchContainer] = []
+        self.music_switch_containers: list[MusicSwitchContainer] = []
         self.uncategorized: list[HircEntry] = []
 
         self.soundbank = soundbank # WwiseBank
@@ -2214,6 +2217,9 @@ class WwiseHierarchy:
 
     def get_switches_container(self):
         return self.switch_containers
+        
+    def get_music_switch_containers(self):
+        return self.music_switch_containers
 
     def get_entries(self):
         return self.entries.values()
@@ -2221,7 +2227,7 @@ class WwiseHierarchy:
     def get_data(self):
         old_child_lists = {}
         old_size = {}
-        for mixer in self.get_actor_mixers():
+        for mixer in self.get_actor_mixers() + self.get_switches_container() + self.get_random_sequence_containers() + self.get_layer_containers() + self.get_music_switch_containers():
             old_child_lists[mixer.hierarchy_id] = mixer.children
             old_size[mixer.hierarchy_id] = mixer.size
             new_child_list = copy.deepcopy(mixer.children)
@@ -2237,7 +2243,7 @@ class WwiseHierarchy:
             
         arr = [entry.get_data() for entry in self.entries.values()]
         
-        for mixer in self.get_actor_mixers():
+        for mixer in self.get_actor_mixers() + self.get_switches_container() + self.get_random_sequence_containers() + self.get_layer_containers() + self.get_music_switch_containers():
             mixer.children = old_child_lists[mixer.hierarchy_id]
             mixer.size = old_size[mixer.hierarchy_id]
         
@@ -2272,6 +2278,9 @@ class WwiseHierarchy:
             case 0x0B:
                 assert(isinstance(entry, MusicTrack))
                 self.music_tracks.append(entry)
+            case 0x0C:
+                assert(isinstance(entry, MusicSwitchContainer))
+                self.music_switch_containers.append(entry)
             case _:
                 self.uncategorized.append(entry)
 
@@ -2304,6 +2313,9 @@ class WwiseHierarchy:
             case 0x0B:
                 assert(isinstance(entry, MusicTrack))
                 self.music_tracks.remove(entry)
+            case 0x0C:
+                assert(isinstance(entry, MusicSwitchContainer))
+                self.music_switch_containers.remove(entry)
             case _:
                 self.uncategorized.remove(entry)
 
@@ -3517,6 +3529,61 @@ class SwitchParam:
             4 + 1 + 1 + 4 + 4
         )
         return b
+        
+        
+class MusicSwitchContainer(HircEntry):
+    
+    import_values = [
+        "unused_sections",
+        "children",
+        "baseParam"
+    ]
+    
+    def __init__(self):
+        super().__init__()
+        self.baseParam: BaseParam | None = None
+        self.children: ContainerChildren = ContainerChildren()
+        self.unused_sections = []
+        
+    @classmethod
+    def from_memory_stream(cls, stream: MemoryStream):
+        c = MusicSwitchContainer()
+        
+        c.hierarchy_type = stream.uint8_read()
+        c.size = stream.uint32_read()
+        
+        start = stream.tell()
+        
+        c.hierarchy_id = stream.uint32_read()
+        
+        c.unused_sections.append(stream.read(1))
+        
+        c.baseParam = BaseParam.from_memory_stream(stream)
+        
+        # [Children]
+        c.children.numChildren = stream.uint32_read()
+        c.children.children = [
+            stream.uint32_read() for _ in range(c.children.numChildren)
+        ]
+        
+        c.unused_sections.append(stream.read(c.size-(stream.tell()-start)))
+        
+        return c
+        
+    def get_parent_id(self):
+        if self.baseParam != None:
+            return self.baseParam.directParentID
+        return None
+        
+    def get_data(self):
+        return b"".join([
+            struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
+            self.unused_sections[0],
+            self.baseParam.get_data(),
+            self.children.get_data(),
+            self.unused_sections[1]
+        ])
+    
 
 
 class SwitchContainer(HircEntry):

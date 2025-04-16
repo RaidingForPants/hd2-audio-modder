@@ -713,7 +713,7 @@ class GameArchive:
                     if hirc_id in self.hierarchy_entries:
                         existing_entry = self.hierarchy_entries[hirc_id]
                         # rearrange stuff
-                        if isinstance(hirc_entry, ActorMixer):
+                        if isinstance(hirc_entry, (ActorMixer, SwitchContainer, RandomSequenceContainer, LayerContainer, MusicSwitchContainer)):
                             for child in hirc_entry.children.children:
                                 if child not in existing_entry.children.children:
                                     existing_entry.children.children.append(child)
