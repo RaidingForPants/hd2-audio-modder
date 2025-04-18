@@ -47,9 +47,6 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-BASE_DPI = 96.04726735598227
-SCREEN_DPI = 1
-DPI_SCALE = 1
 VERSION = "1.17.4"
     
 class WorkspaceEventHandler(FileSystemEventHandler):
@@ -1404,9 +1401,6 @@ class MainWindow:
         self.active_task_ids = []
         
         self.root = TkinterDnD.Tk()
-        
-        SCREEN_DPI = self.root.winfo_fpixels('1i')
-        DPI_SCALE = float(SCREEN_DPI/BASE_DPI)
         
         try:
             if os.path.exists("icon.ico"):
