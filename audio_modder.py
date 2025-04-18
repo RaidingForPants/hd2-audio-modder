@@ -334,7 +334,153 @@ class FileUploadWindow:
         self.root.destroy()
         if self.callback is not None:
             self.callback([])
+            
+class OptionsWindow:
     
+    def __init__(self, parent, config, callback=None):
+        self.config = config
+        self.callback = callback
+        self.slider_increment = 0.1
+        self.root = Toplevel(parent)
+        self.root.title("Settings")
+        self.frame = Frame(self.root)
+        self.frame.pack(fill="both", expand=True)
+        self.config_frame = Frame(self.frame)
+        self.config_frame.grid_columnconfigure(1, weight=1)
+        self.root.protocol("WM_DELETE_WINDOW", self.close_window)
+        
+        self.rowheight_scale_var = DoubleVar()
+        self.rowheight_scale_frame = Frame(self.config_frame)
+        self.rowheight_scale_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="Tree Row Height:")
+        self.rowheight_scale_label = ttk.Label(self.rowheight_scale_frame, font=('Segoe UI', 12), text=str(self.config.rowheight_scale))
+        self.rowheight_scale = ttk.Scale(self.rowheight_scale_frame, from_=0.1, to=2, orient="horizontal", variable=self.rowheight_scale_var, command=self.rowheight_slider_changed)
+        self.rowheight_scale.set(self.config.rowheight_scale)
+        self.rowheight_scale_var.set(self.config.rowheight_scale)
+        self.rowheight_scale_title.grid(row=1, column=0, sticky="e")
+        self.rowheight_scale_label.grid(row=0, column=0)
+        self.rowheight_scale.grid(row=0, column=1, sticky="we")
+        self.rowheight_scale_frame.grid_columnconfigure(1, weight=1)
+        self.rowheight_scale_frame.grid(row=1, column=1, columnspan=2, sticky="we")
+        
+        self.treeview_text_scale_var = DoubleVar()
+        self.treeview_text_scale_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="Font Size:")
+        self.treeview_text_scale_frame = Frame(self.config_frame)
+        self.treeview_text_scale_label = ttk.Label(self.treeview_text_scale_frame, font=('Segoe UI', 12), text=str(self.config.ui_scale))
+        self.treeview_text_scale = ttk.Scale(self.treeview_text_scale_frame, from_=0.1, to=2, orient="horizontal", variable=self.treeview_text_scale_var, command=self.text_scale_slider_changed)
+        self.treeview_text_scale.set(self.config.ui_scale)
+        self.treeview_text_scale_var.set(self.config.ui_scale)
+        self.treeview_text_scale_title.grid(row=2, column=0, sticky="e")
+        self.treeview_text_scale_label.grid(row=0, column=0)
+        self.treeview_text_scale.grid(row=0, column=1, sticky="we")
+        self.treeview_text_scale_frame.grid_columnconfigure(1, weight=1)
+        self.treeview_text_scale_frame.grid(row=2, column=1, columnspan=2, sticky="we")
+        
+        self.theme_var = StringVar()
+        self.theme_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="Theme:")
+        self.theme_frame = Frame(self.config_frame)
+        self.light_mode_button = ttk.Radiobutton(self.theme_frame, text="Light Mode", variable=self.theme_var, value="light_mode")
+        self.dark_mode_button = ttk.Radiobutton(self.theme_frame, text="Dark Mode", variable=self.theme_var, value="dark_mode")
+        self.theme_var.set(self.config.theme)
+        self.dark_mode_button.grid(row=0, column=0)
+        self.light_mode_button.grid(row=0, column=1)
+        self.theme_frame.grid_columnconfigure(1, weight=1)
+        self.theme_frame.grid_columnconfigure(0, weight=1)
+        self.theme_title.grid(row=3, column=0, sticky="e")
+        self.theme_frame.grid(row=3, column=1, columnspan=2, sticky="we")
+        
+        self.game_data_path_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="Game Data Path:")
+        self.game_data_path = ttk.Label(self.config_frame, font=('Segoe UI', 12), text=os.path.normpath(self.config.game_data_path))
+        self.game_data_path_button = ttk.Button(self.config_frame, text="Change path", command=self.change_path_button_pressed)
+        self.game_data_path_title.grid(row=4, column=0, sticky="e")
+        self.game_data_path.grid(row=4, column=1)
+        self.game_data_path_button.grid(row=4, column=2, pady=2, padx=2)
+        
+        
+        self.button_frame = Frame(self.frame)
+        self.apply_button = ttk.Button(self.button_frame, text="Apply", command=self.apply_button_pressed)
+        self.ok_button = ttk.Button(self.button_frame, text="Ok", command=self.ok_button_pressed)
+        self.close_button = ttk.Button(self.button_frame, text="Cancel", command=self.close_button_pressed)
+        self.close_button.pack(side="right", pady=2, padx=2)
+        #self.apply_button.pack(side="right")
+        self.ok_button.pack(side="right", pady=2, padx=2)
+        
+        self.config_frame.pack(anchor="n", expand=True, fill='x')
+        self.button_frame.pack(side="bottom", anchor="se")
+        
+    def rowheight_slider_changed(self, event):
+        new_value = self.rowheight_scale_var.get()
+        new_value = round(round(new_value / self.slider_increment) * self.slider_increment, 2)
+        self.rowheight_scale_var.set(new_value)
+        #self.rowheight_scale.set(new_value)
+        self.rowheight_scale_label.config(text=str(self.rowheight_scale_var.get()))
+        
+    def text_scale_slider_changed(self, event):
+        new_value = self.treeview_text_scale_var.get()
+        new_value = round(round(new_value / self.slider_increment) * self.slider_increment, 2)
+        self.treeview_text_scale_var.set(new_value)
+        #self.treeview_text_scale.set(new_value)
+        self.treeview_text_scale_label.config(text=str(self.treeview_text_scale_var.get()))
+        
+    def select_game_data_path(self):
+        while True:
+            game_data_path: str = filedialog.askdirectory(
+                parent=self.root,
+                mustexist=True,
+                title="Locate game data directory for Helldivers 2"
+            )
+            if os.path.exists(game_data_path):
+                path = pathlib.Path(game_data_path)
+                if path.match("*/steamapps/common/Helldivers 2/data"):
+                    return game_data_path
+                elif path.match("*/steamapps/common/Helldivers 2/*") or path.match("*/steamapps/common/Helldivers 2/*/*"):
+                    for parent_path in path.parents:
+                        if parent_path.match("*/steamapps/common/Helldivers 2") and os.path.exists(os.path.join(str(parent_path), "data")):
+                            return os.path.join(str(parent_path), "data")
+                elif path.match("*/steamapps/common/Helldivers 2"):
+                    if os.path.exists(os.path.join(str(path), "data")):
+                        return os.path.join(str(path), "data")
+                elif path.match("*/steamapps/common"):
+                    if os.path.exists(os.path.join(str(path), "data")):
+                        return os.path.join(str(path), "data")
+                elif path.match("*/steamapps"):
+                    if os.path.exists(os.path.join(str(path), "common", "Helldivers 2", "data")):
+                        return os.path.join(str(path), "common", "Helldivers 2", "data")
+            if not game_data_path:
+                return ""
+            response = askyesnocancel(parent=self.root, title="Unexpected folder location", message=f"{game_data_path} does not appear to be the default install location for Helldivers 2. Would you like to use this as your game data folder?")
+            if response == None or response == ():
+                return ""
+            if response:
+                return game_data_path
+            if not response:
+                pass
+            
+    def change_path_button_pressed(self):
+        new_path = self.select_game_data_path()
+        new_path = os.path.normpath(new_path)
+        if new_path and new_path != ".":
+            self.game_data_path.config(text=new_path)
+        
+    def apply_button_pressed(self):
+        self.apply_changes()
+        
+    def ok_button_pressed(self):
+        self.apply_changes()
+        self.close_window()
+        
+    def close_button_pressed(self):
+        self.close_window()
+        
+    def apply_changes(self):
+        self.config.rowheight_scale = self.rowheight_scale_var.get()
+        self.config.ui_scale = self.treeview_text_scale_var.get()
+        self.config.game_data_path = self.game_data_path.cget("text")
+        self.config.theme = self.theme_var.get()
+        
+    def close_window(self):
+        self.root.destroy()
+        if self.callback is not None:
+            self.callback()
 
 class PopupWindow:
     def __init__(self, message, title="Missing Data!"):
@@ -1271,6 +1417,7 @@ class MainWindow:
         self.workspace_selection = []
         
         self.file_upload_window = None
+        self.options_window = None
         
         try:
             self.root.tk.call("source", "azure.tcl")
@@ -1373,27 +1520,17 @@ class MainWindow:
         
         self.selected_language = StringVar()
         self.options_menu = Menu(self.menu, tearoff=0)
-        
-        self.selected_theme = StringVar()
-        self.selected_theme.set(self.app_state.theme)
-        self.theme_menu = Menu(self.menu, tearoff=0)
-        self.theme_menu.add_radiobutton(label="Dark Mode", variable=self.selected_theme, value="dark_mode", command=self.set_theme)
-        self.theme_menu.add_radiobutton(label="Light Mode", variable=self.selected_theme, value="light_mode", command=self.set_theme)
-        
-        self.selected_scale = DoubleVar()
-        self.selected_scale.set(self.app_state.ui_scale)
+
         self.set_theme()
-        self.scale_menu = Menu(self.menu, tearoff=0)
-        self.scale_menu.add_radiobutton(label="50%", variable=self.selected_scale, value=0.5, command=self.set_ui_scale)
-        self.scale_menu.add_radiobutton(label="75%", variable=self.selected_scale, value=0.75, command=self.set_ui_scale)
-        self.scale_menu.add_radiobutton(label="100%", variable=self.selected_scale, value=1.0, command=self.set_ui_scale)
-        self.scale_menu.add_radiobutton(label="150%", variable=self.selected_scale, value=1.5, command=self.set_ui_scale)
-        self.scale_menu.add_radiobutton(label="200%", variable=self.selected_scale, value=2.0, command=self.set_ui_scale)
+        self.set_ui_scale()
         
-        self.options_menu.add_cascade(menu=self.theme_menu, label="Set Theme")
-        self.options_menu.add_cascade(menu=self.scale_menu, label="Set UI Scale")
+        self.options_menu.add_command(
+            label="Settings",
+            command=self.show_options_window
+        )
         
         self.language_menu = Menu(self.options_menu, tearoff=0)
+        self.options_menu.add_cascade(menu=self.language_menu, label="Game Text Language")
         
         self.file_menu = Menu(self.menu, tearoff=0)
 
@@ -1503,13 +1640,14 @@ class MainWindow:
             self.workspace.selection_set(self.workspace_selection)
             
     def set_ui_scale(self):
-        scale = self.selected_scale.get()
-        self.app_state.ui_scale = scale
+        #scale = self.selected_scale.get()
+        text_scale = self.app_state.ui_scale
+        row_scale = self.app_state.rowheight_scale
         style = ttk.Style()
-        style.configure("Treeview", rowheight=int(20*scale*DPI_SCALE))
-        style.configure('TButton', font=("Segoe UI", int(12*scale)))
-        style.configure("Treeview.Heading", font=("Segoe UI", int(10*scale)))
-        style.configure("Treeview", font=("Segoe UI", int(10*scale)))
+        style.configure("Treeview", rowheight=int(20*row_scale))
+        #style.configure('TButton', font=("Segoe UI", int(12*text_scale)))
+        style.configure("Treeview.Heading", font=("Segoe UI", int(10*text_scale)))
+        style.configure("Treeview", font=("Segoe UI", int(10*text_scale)))
 
     def workspace_save_selection(self, event):
         self.workspace_selection = self.workspace.selection()
@@ -1520,6 +1658,15 @@ class MainWindow:
             if id not in self.active_task_ids:
                 break
         return id
+        
+    def show_options_window(self):
+        if self.options_window is None:
+            self.options_window = OptionsWindow(self.root, self.app_state, callback=self.options_window_closed)
+            
+    def options_window_closed(self):
+        self.options_window = None
+        self.set_ui_scale()
+        self.set_theme()
         
     def combine_mods(self):
         if not os.path.exists(self.app_state.game_data_path):
@@ -1679,7 +1826,7 @@ class MainWindow:
         self.search()
         
     def set_theme(self):
-        theme = self.selected_theme.get()
+        theme = self.app_state.theme
         try:
             if theme == "dark_mode":
                 self.root.tk.call("set_theme", "dark")
@@ -1691,10 +1838,8 @@ class MainWindow:
                 graphs_set_light_mode()
                 self.window.configure(background="black")
                 self.treeview.tag_configure("modified", background=MainWindow.light_mode_modified_bg, foreground=MainWindow.light_mode_modified_fg)
-            self.set_ui_scale()
         except Exception as e:
             logger.error(f"Error occurred when loading themes: {e}. Ensure azure.tcl and the themes folder are in the same folder as the executable")
-        self.app_state.theme = theme
         self.workspace.column("#0", width=256+16)
         self.treeview.column("#0", width=250)
         self.treeview.column("type", width=100)
@@ -2349,11 +2494,9 @@ class MainWindow:
             )
 
     def update_language_menu(self):
-        self.options_menu.delete(2, "end") #change to delete only the language select menu
         if len(self.mod_handler.get_active_mod().text_banks) > 0:
             self.language_menu.delete(0, "end")
             first = ""
-            self.options_menu.add_cascade(label="Game text language", menu=self.language_menu)
             for name, lang_id in LANGUAGE_MAPPING.items():
                 if first == "": first = name
                 for text_bank in self.mod_handler.get_active_mod().text_banks.values():
