@@ -1740,15 +1740,13 @@ class RandomSequenceContainer(HircEntry):
     import_values = [
         "baseParam",
         "children",
-        "containerChildren",
         "playListSetting",
         "ulPlayListItem",
         "playListItems",
     ]
     def __init__(self):
         super().__init__()
-        self.children: list[int] = []
-        self.containerChildren: ContainerChildren = ContainerChildren()
+        self.children: ContainerChildren = ContainerChildren()
         self.playListSetting = PlayListSetting()
         self.ulPlayListItem = 0
         self.playListItems: list[PlayListItem] = []
@@ -1781,9 +1779,9 @@ class RandomSequenceContainer(HircEntry):
         cntr.playListSetting.byBitVectorPlayList = stream.uint8_read()
 
         # [Children]
-        cntr.containerChildren.numChildren = stream.uint32_read()
-        for _ in range(cntr.containerChildren.numChildren):
-            cntr.containerChildren.children.append(stream.uint32_read())
+        cntr.children.numChildren = stream.uint32_read()
+        for _ in range(cntr.children.numChildren):
+            cntr.children.children.append(stream.uint32_read())
 
         # [PlayListItem]
         cntr.ulPlayListItem = stream.uint16_read()
@@ -1863,7 +1861,7 @@ class RandomSequenceContainer(HircEntry):
 
         data += self.playListSetting.get_data()
 
-        data += self.containerChildren.get_data()
+        data += self.children.get_data()
 
         assert_equal(
             "# of playlist item mismatch # of item in the playlist item array",
