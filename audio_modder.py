@@ -2391,7 +2391,7 @@ class MainWindow:
                                         pass
                     elif isinstance(hierarchy_entry, RandomSequenceContainer):
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
-                        for s_id in hierarchy_entry.containerChildren.children:
+                        for s_id in hierarchy_entry.children.children:
                             sound = bank.hierarchy.entries[s_id]
                             if not isinstance(sound, Sound):
                                 continue
