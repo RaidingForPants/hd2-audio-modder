@@ -1402,6 +1402,8 @@ class MainWindow:
         
         self.root = TkinterDnD.Tk()
         
+        self.unsaved_changes = False
+        
         try:
             if os.path.exists("icon.ico"):
                 self.root.iconbitmap("icon.ico")
@@ -1628,7 +1630,13 @@ class MainWindow:
         #async_mainloop(self.root)
         self.root.mainloop()
         
-    def check_unsaved(self):
+    def check_unsaved(self, message: str):
+        if self.unsaved_changes:
+            response = tkinter.messagebox.askyesno(title="Unsaved Changes", message=message)
+            if response:
+                return True
+            else:
+                return False
         return True
 
     def on_ctrl_v(self, event):
@@ -1640,7 +1648,7 @@ class MainWindow:
             self.create_source_view()
 
     def on_ctrl_n(self, event):
-        if not self.check_unsaved():
+        if not self.check_unsaved("You have unsaved changes, are you sure you want to clear?"):
             return
         self.mod_handler.delete_mod(self.mod_handler.get_active_mod())
         self.mod_handler.create_new_mod("default")
@@ -1665,9 +1673,10 @@ class MainWindow:
         self.import_audio_files()
         
     def on_close(self):
-        self.task_manager.shutdown_async_tasks()
-        self.root.destroy()
-        # add in check for saving
+        if self.check_unsaved("You have unsaved changes, are you sure you want to exit?"):
+            self.task_manager.shutdown_async_tasks()
+            self.root.destroy()
+            # add in check for saving
         
     def drop_position(self, event):
         if event.data:
@@ -2586,10 +2595,11 @@ class MainWindow:
                 child.forget()
 
     def save_mod(self):
-        output_folder = filedialog.askdirectory(title="Select location to save combined mod")
+        output_folder = filedialog.askdirectory(title="Select save location")
         if output_folder and os.path.exists(output_folder):
             self.sound_handler.kill_sound()
             self.mod_handler.get_active_mod().save(output_folder)
+            self.reset_unsaved_changes()
         
     """
     TO-DO:
@@ -2606,6 +2616,7 @@ class MainWindow:
             self.treeview.item(item, tags=tags)
     
     def mark_modified(self, entry, item=None):
+        self.unsaved_changes = True
         if isinstance(entry, HircEntry):
             modified = entry.modified or entry.has_modified_children()
         else:
@@ -2718,6 +2729,7 @@ class MainWindow:
         self.mod_handler.get_active_mod().revert_all()
         self.clear_modified()
         self.show_info_window()
+        self.reset_unsaved_changes()
         
     def write_patch(self):
         self.sound_handler.kill_sound()
@@ -2726,7 +2738,14 @@ class MainWindow:
             return
         output_folder = os.path.dirname(output_file)
         output_file = os.path.basename(output_file)
-        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder, output_filename=output_file)
+        self.task_manager.schedule(name="Saving Patch File", callback=self.reset_unsaved_callback, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder, output_filename=output_file)
+
+    def reset_unsaved_changes(self):
+        self.unsaved_changes = False
+
+    @callback
+    def reset_unsaved_callback(self, none):
+        self.unsaved_changes = False
         
     def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
