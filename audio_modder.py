@@ -1609,6 +1609,16 @@ class MainWindow:
         self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
+
+        # keyboard shortcuts
+        self.root.bind("<Control-f>", self.on_ctrl_f)
+        self.root.bind("<Control-o>", self.on_ctrl_o)
+        self.root.bind("<Control-s>", self.on_ctrl_s)
+        self.root.bind("<Control-a>", self.on_ctrl_a)
+        self.root.bind("<Control-i>", self.on_ctrl_i)
+        #self.root.bind("<Control-v>", self.on_ctrl_v)
+        self.root.bind("<Control-n>", self.on_ctrl_n)
+        #self.root.bind("<Control-r>", self.on_ctrl_r)
         
         self.task_manager.set_progress_frame(self.progress_frame)
         
@@ -1618,9 +1628,46 @@ class MainWindow:
         #async_mainloop(self.root)
         self.root.mainloop()
         
+    def check_unsaved(self):
+        return True
+
+    def on_ctrl_v(self, event):
+        if self.selected_view.get() == "SourceView":
+            self.selected_view.set("HierarchyView")
+            self.create_hierarchy_view()
+        else:
+            self.selected_view.set("SourceView")
+            self.create_source_view()
+
+    def on_ctrl_n(self, event):
+        if not self.check_unsaved():
+            return
+        self.mod_handler.delete_mod(self.mod_handler.get_active_mod())
+        self.mod_handler.create_new_mod("default")
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
+
+    def on_ctrl_a(self, event):
+        self.archive_search.focus_set()
+
+    def on_ctrl_o(self, event):
+        self.load_archive(initialdir=self.app_state.game_data_path)
+
+    def on_ctrl_s(self, event):
+        self.write_patch()
+
+    def on_ctrl_f(self, event):
+        self.search_bar.focus_set()
+
+    def on_ctrl_i(self, event):
+        self.import_audio_files()
+        
     def on_close(self):
         self.task_manager.shutdown_async_tasks()
         self.root.destroy()
+        # add in check for saving
         
     def drop_position(self, event):
         if event.data:
