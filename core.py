@@ -21,6 +21,37 @@ from wwise_hierarchy import *
 
 from log import logger
 
+class VideoSource:
+
+    def __init__(self):
+        self.replacement_filepath: str = ""
+        self.filepath: str = ""
+        self.video_size: int = 0
+        self.replacement_video_size: int = 0
+        self.stream_offset: int = 0
+        self.file_id: int = 0
+        self.modified: bool = False
+
+    def revert_modifications(self):
+        self.modified = False
+
+    def get_data(self):
+        if not self.modified:
+            with open(self.filepath+".stream", "rb") as f:
+                f.seek(self.stream_offset)
+                return f.read(self.video_size)
+        else:
+            with open(self.replacement_filepath, "rb") as f:
+                return f.read()
+
+    def set_data(self, replacement_filepath: str):
+        self.replacement_filepath = replacement_filepath
+        self.replacement_video_size = os.path.getsize(replacement_filepath)
+        self.modified = True
+
+    def get_id(self):
+        return self.file_id
+
 class AudioSource:
 
     def __init__(self):
@@ -515,6 +546,7 @@ class GameArchive:
         self.wwise_banks: dict[int, WwiseBank] = {}
         self.audio_sources: dict[int, AudioSource] = {}
         self.hierarchy_entries: dict[int, HircEntry] = {}
+        self.video_sources: dict[int, VideoSource] = {}
         self.text_banks = {}
     
     @classmethod
@@ -555,8 +587,8 @@ class GameArchive:
     def to_file(self, path: str):
         toc_file = MemoryStream()
         stream_file = MemoryStream()
-        self.num_files = len(self.wwise_streams) + 2*len(self.wwise_banks) + len(self.text_banks)
-        self.num_types = (1 if self.wwise_streams else 0) + (1 if self.text_banks else 0) + (2 if self.wwise_banks else 0)
+        self.num_files = len(self.wwise_streams) + 2*len(self.wwise_banks) + len(self.text_banks) + len(self.video_sources)
+        self.num_types = (1 if self.wwise_streams else 0) + (1 if self.text_banks else 0) + (2 if self.wwise_banks else 0) + (1 if self.video_sources else 0)
         
         # write header
         toc_file.write(struct.pack("<IIII56s", self.magic, self.num_types, self.num_files, self.unknown, self.unk4Data))
@@ -565,6 +597,7 @@ class GameArchive:
         self.write_type_header(toc_file, WWISE_BANK, len(self.wwise_banks))
         self.write_type_header(toc_file, WWISE_DEP, len(self.wwise_banks))
         self.write_type_header(toc_file, TEXT_BANK, len(self.text_banks))
+        self.write_type_header(toc_file, BINK_VIDEO, len(self.video_sources))
         
         toc_data_offset = toc_file.tell() + 80 * self.num_files + 8
         stream_file_offset = 0
@@ -647,6 +680,25 @@ class GameArchive:
             
             toc_data_offset += len(dep_data)
             entry_index += 1
+
+        for video in self.video_sources.values():
+            data = video.get_data()
+            s_data = pad_to_16_byte_align(data)
+            t_data = bytes.fromhex("E9030000000000000000000000000000")
+            toc_entry = TocHeader()
+            toc_entry.file_id = video.file_id
+            toc_entry.type_id = BINK_VIDEO
+            toc_entry.toc_data_offset = toc_data_offset
+            toc_entry.stream_file_offset = stream_file_offset
+            toc_entry.toc_data_size = 0x10
+            toc_entry.stream_size = len(data)
+            toc_entry.entry_index = entry_index
+            stream_data.append(s_data)
+            toc_data.append(t_data)
+            toc_entries.append(toc_entry)
+            entry_index += 1
+            stream_file_offset += len(s_data)
+            toc_data_offset += 16
             
         toc_file.write(b"".join([entry.get_data() for entry in toc_entries]))
         toc_file.advance(8)
@@ -664,6 +716,7 @@ class GameArchive:
         self.wwise_streams.clear()
         self.wwise_banks.clear()
         self.audio_sources.clear()
+        self.video_sources.clear()
         self.text_banks.clear()
         self.hierarchy_entries.clear()
         
@@ -753,6 +806,14 @@ class GameArchive:
                 text_bank.file_id = toc_header.file_id
                 text_bank.set_data(data)
                 self.text_banks[text_bank.get_id()] = text_bank
+            elif toc_header.type_id == BINK_VIDEO:
+                new_video_source = VideoSource()
+                new_video_source.file_id = toc_header.file_id
+                new_video_source.stream_offset = toc_header.stream_file_offset
+                new_video_source.video_size = toc_header.stream_size
+                new_video_source.filepath = self.path
+                self.video_sources[new_video_source.file_id] = new_video_source
+
         
         # Create all AudioSource objects
 
@@ -1119,6 +1180,7 @@ class Mod:
         self.audio_count: dict[int, int] = {}
         self.text_banks: dict[int, TextBank] = {}
         self.text_count = {}
+        self.video_sources: dict[int, VideoSource] = {}
         self.hierarchy_entries: dict[int, HircEntry] = {}
         self.hierarchy_count: dict[int, int] = {}
         self.game_archives: dict[str, GameArchive] = {}
@@ -1135,10 +1197,19 @@ class Mod:
             bank.hierarchy.revert_modifications()
         for bank in self.text_banks.values():
             bank.revert_modifications()
+        for video in self.video_sources.values():
+            video.revert_modifications()
         
     def revert_audio(self, file_id: int):
         audio = self.get_audio_source(file_id)
         audio.revert_modifications()
+
+    def revert_video(self, file_id: int):
+        video = self.get_video_source(file_id)
+        video.revert_modifications()
+
+    def get_video_source(self, file_id: int):
+        return self.video_sources[file_id]
         
     def add_new_hierarchy_entry(self, soundbank_id: int, entry: HircEntry):
         bank = self.get_wwise_bank(soundbank_id)
@@ -1148,7 +1219,7 @@ class Mod:
             raise Exception(f"Entry {entry.hierarchy_id} already exists in soundbank {soundbank_id}!")
         if entry.hierarchy_id in self.hierarchy_entries:
             entry = self.hierarchy_entries[entry.hierarchy_id]
-            self.hierarchy_count[entry_id] = self.hierarchy_count[entry_id] + 1
+            self.hierarchy_count[entry.hierarchy_id] = self.hierarchy_count[entry.hierarchy_id] + 1
         else:
             self.hierarchy_count[entry.hierarchy_id] = 1
             self.hierarchy_entries[entry.hierarchy_id] = entry
@@ -1529,6 +1600,9 @@ class Mod:
         
     def get_wwise_streams(self) -> dict[int, WwiseStream]:
         return self.wwise_streams
+
+    def get_video_sources(self) -> dict[int, VideoSource]:
+        return self.video_sources
         
     def get_wwise_banks(self) -> dict[int, WwiseBank]:
         return self.wwise_banks
@@ -1580,6 +1654,9 @@ class Mod:
             raise AssertionError(f"Archive {archive_name} not in mod!")
             
         game_archive = self.game_archives[archive_name]
+
+        for key in game_archive.video_sources.keys():
+            del self.video_sources[key]
             
         for key in game_archive.wwise_banks.keys():
             if key in self.get_wwise_banks().keys():
@@ -1642,6 +1719,9 @@ class Mod:
             return
 
         self.game_archives[key] = game_archive
+
+        for key, entry in game_archive.video_sources.items():
+            self.video_sources[key] = entry
         
         replacements = {}
         for key, entry in game_archive.get_hierarchy_entries().items():
@@ -1824,6 +1904,7 @@ class Mod:
         patch_game_archive.wwise_banks = {}
         patch_game_archive.wwise_streams = {}
         patch_game_archive.text_banks = {}
+        patch_game_archive.video_sources = {}
             
         for key, value in self.get_wwise_streams().items():
             if value.modified:
@@ -1836,8 +1917,22 @@ class Mod:
         for key, value in self.get_text_banks().items():
             if value.modified:
                 patch_game_archive.text_banks[key] = value
+
+        for key, value in self.get_video_sources().items():
+            if value.modified:
+                patch_game_archive.video_sources[key] = value
  
         patch_game_archive.to_file(output_folder)
+
+    def import_video(self, video_path: str, video_id: int):
+        self.get_video_sources()[video_id].set_data(video_path)
+
+    def dump_video(self, output_path: str, video_id: int):
+        with open(output_path, "wb") as output_file:
+            output_file.write(self.get_video(video_id).get_data())
+
+    def get_video(self, video_id: int):
+        return self.get_video_sources()[video_id]
 
     def import_wems(self, wems: dict[str, list[int]] | None = None, set_duration=True): 
         """

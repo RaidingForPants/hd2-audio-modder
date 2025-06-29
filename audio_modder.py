@@ -1,6 +1,7 @@
 import os
 import subprocess
 import struct
+import time
 import tkinter
 import shutil
 import pathlib
@@ -133,37 +134,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                 return self.get_item_by_path_recursion(item, path)
             elif str(child_path) == str(path):
                 return item
-        
-class ProgressWindow:
-    def __init__(self, title, max_progress):
-        self.title = title
-        self.max_progress = max_progress
-        
-    def show(self):
-        self.root = Tk()
-        self.root.title(self.title)
-        self.root.geometry("410x45")
-        self.root.attributes('-topmost', True)
-        self.progress_bar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.max_progress)
-        self.progress_bar_text = Text(self.root)
-        self.progress_bar.pack()
-        self.progress_bar_text.pack()
-        self.root.resizable(False, False)
-        
-    def step(self):
-        self.progress_bar.step()
-        self.root.update_idletasks()
-        self.root.update()
-        
-    def set_text(self, s):
-        self.progress_bar_text.delete('1.0', END)
-        self.progress_bar_text.insert(INSERT, s)
-        self.root.update_idletasks()
-        self.root.update()
-        
-    def destroy(self):
-        self.root.destroy()
-        
+
 class ProgressFrame(Frame):
     
     DETERMINATE = 0
@@ -387,10 +358,19 @@ class OptionsWindow:
         
         self.game_data_path_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="Game Data Path:")
         self.game_data_path = ttk.Label(self.config_frame, font=('Segoe UI', 12), text=os.path.normpath(self.config.game_data_path))
-        self.game_data_path_button = ttk.Button(self.config_frame, text="Change path", command=self.change_path_button_pressed)
+        self.game_data_path_button = ttk.Button(self.config_frame, text="Change path", command=self.change_game_data_path_button_pressed)
         self.game_data_path_title.grid(row=4, column=0, sticky="e")
         self.game_data_path.grid(row=4, column=1)
         self.game_data_path_button.grid(row=4, column=2, pady=2, padx=2)
+
+        self.rad_tools_path_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="RAD Video Tools Path:")
+        self.rad_tools_path = ttk.Label(self.config_frame, font=('Segoe UI', 12),
+                                        text=os.path.normpath(self.config.rad_tools_path))
+        self.rad_tools_path_button = ttk.Button(self.config_frame, text="Change path",
+                                                command=self.change_rad_tools_path_button_pressed)
+        self.rad_tools_path_title.grid(row=5, column=0, sticky="e")
+        self.rad_tools_path.grid(row=5, column=1)
+        self.rad_tools_path_button.grid(row=5, column=2, pady=2, padx=2)
         
         
         self.button_frame = Frame(self.frame)
@@ -452,11 +432,24 @@ class OptionsWindow:
             if not response:
                 pass
             
-    def change_path_button_pressed(self):
+    def change_game_data_path_button_pressed(self):
         new_path = self.select_game_data_path()
         new_path = os.path.normpath(new_path)
         if new_path and new_path != ".":
             self.game_data_path.config(text=new_path)
+
+    def change_rad_tools_path_button_pressed(self):
+        folder_path = filedialog.askdirectory(
+            parent=self.root,
+            mustexist=True,
+            title="Locate RAD Video Tools"
+        )
+        if not os.path.exists(os.path.join(folder_path, RAD_TOOLS)):
+            showerror(title="Missing Files", message="Unable to locate RAD Video Tools in this folder")
+            return
+        new_path = os.path.normpath(folder_path)
+        if new_path and new_path != ".":
+            self.rad_tools_path.config(text=new_path)
         
     def apply_button_pressed(self):
         self.apply_changes()
@@ -472,6 +465,7 @@ class OptionsWindow:
         self.config.rowheight_scale = self.rowheight_scale_var.get()
         self.config.ui_scale = self.treeview_text_scale_var.get()
         self.config.game_data_path = self.game_data_path.cget("text")
+        self.config.rad_tools_path = self.rad_tools_path.cget("text")
         self.config.theme = self.theme_var.get()
         
     def close_window(self):
@@ -1231,6 +1225,7 @@ class TaskManager:
         self.async_task_list = []
         self.sync_task_queue = queue.Queue()
         self.sync_thread_running = False
+        self.async_task_running = False
         self.sync_thread = None
         self.progress_frame = None
         
@@ -1279,7 +1274,11 @@ class TaskManager:
     def schedule_async(self, name, callback, task, *args, **kwargs):
         callback = self.async_wrapper(callback)
         future = self.async_event_loop.start_task(callback, task, *args, **kwargs)
+        if not self.sync_thread_running and not self.async_task_running:
+            self.start_progress_frame()
+            self.set_progress_frame_text(name)
         self.async_task_list.append(AsyncTaskItem(future, name))
+        self.async_task_running = True
     
     def async_wrapper(self, callback):
         if callback is not None:
@@ -1321,6 +1320,7 @@ class TaskManager:
                 self.set_progress_frame_text(task_item.get_name())
             else:
                 self.stop_progress_frame()
+                self.async_task_running = False
         
     def sync_task_finished(self):
         self.sync_thread_running = False
@@ -1347,7 +1347,7 @@ class EventLoop:
         future = asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), self.loop)
         future.add_done_callback(callback)
         return future
-    
+
     def run_asyncio_loop(self, loop):
         asyncio.set_event_loop(loop)
         loop.run_forever()
@@ -1971,9 +1971,56 @@ class MainWindow:
         )
         self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
         self.workspace_popup_menu.grab_release()
+
+    def import_video(self, video_id: int):
+        if RAD_TOOLS and os.path.exists(os.path.join(app_state.rad_tools_path, RAD_TOOLS)):
+            video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Video Files", "*.mp4 *.mov *.bik")])
+        else:
+            video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Bink Video", "*.bik")])
+        if not video_file:
+            return
+        if os.path.splitext(video_file)[1] != ".bik":
+            # convert to bik
+            self.task_manager.schedule_async(name=f"Converting {os.path.basename(video_file)}", callback=self.bik_conversion_callback, task=self.convert_to_bik, video_file=video_file, video_id=video_id)
+            return
+        self.mod_handler.get_active_mod().import_video(video_file, video_id)
+        self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id)])
+
+    @async_task
+    async def convert_to_bik(self, video_file: str, video_id: int):
+        timestamp = int(time.time() * 1000)
+        converted_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bik"))
+        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_CONVERT, video_file, converted_filename, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await p.wait()
+        return converted_filename, video_id
+
+    @callback
+    def bik_conversion_callback(self, video_file: str, video_id: int):
+        self.mod_handler.get_active_mod().import_video(video_file, video_id)
+        self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id)])
+
+    def dump_video(self, video_id: int, output_file: str = ""):
+        if not output_file:
+            output_file = filedialog.asksaveasfilename(title="Save video file", filetypes=[("Bink Video", "*.bik")])
+        with open(output_file, "wb") as f:
+            f.write(self.mod_handler.get_active_mod().get_video(video_id).get_data())
+
+    def play_video(self, video_id: int):
+        timestamp = int(time.time()*1000)
+        output_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bik"))
+        self.dump_video(video_id, output_file = output_filename)
+        t = threading.Thread(target=self.play_bik, args=(output_filename,))
+        t.start()
+
+    def play_bik(self, video_file: str):
+        subprocess.run([os.path.join(app_state.rad_tools_path, RAD_PLAY), video_file], stdout=subprocess.DEVNULL)
+        try:
+            os.remove(video_file)
+        except:
+            pass
         
     def import_audio_files(self):
-        
+
         if os.path.exists(WWISE_CLI):
             available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
@@ -2115,6 +2162,22 @@ class MainWindow:
                     label="Remove Archive",
                     command=lambda: self.remove_game_archive(self.treeview.item(self.treeview.selection()[0], option="tags")[0])
                 )
+
+            if is_single and self.treeview.item(self.treeview.selection()[0], option="values")[0] == "Bink Video":
+                self.right_click_menu.add_command(
+                    label="Import Video",
+                    command=lambda: self.import_video(int(self.treeview.item(self.treeview.selection()[0], option="tags")[0]))
+                )
+                self.right_click_menu.add_command(
+                    label="Dump Video",
+                    command=lambda: self.dump_video(int(self.treeview.item(self.treeview.selection()[0], option="tags")[0]))
+                )
+                if RAD_PLAY and os.path.exists(os.path.join(self.app_state.rad_tools_path, RAD_PLAY)):
+                    self.right_click_menu.add_command(
+                        label="Play Video",
+                        command=lambda: self.play_video(
+                            int(self.treeview.item(self.treeview.selection()[0], option="tags")[0]))
+                    )
 
             if all_audio:
                 self.right_click_menu.add_command(
@@ -2353,6 +2416,9 @@ class MainWindow:
             name = entry.name
             entry_type = "Archive File"
             self.treeview.item(tree_entry, open=True)
+        elif isinstance(entry, VideoSource):
+            name = f"Video {entry.file_id}"
+            entry_type = "Bink Video"
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -2413,6 +2479,8 @@ class MainWindow:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
                     for string_entry in text_bank.entries.values():
                         self.create_treeview_entry(string_entry, bank_entry)
+            for video_source in archive.video_sources.values():
+                self.create_treeview_entry(video_source, archive_entry)
                 
     def create_source_view(self, new_game_archive=None):
         self.clear_search()
@@ -2441,6 +2509,8 @@ class MainWindow:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
                     for string_entry in text_bank.entries.values():
                         self.create_treeview_entry(string_entry, bank_entry)
+            for video_source in archive.video_sources.values():
+                self.create_treeview_entry(video_source, archive_entry)
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":

@@ -26,10 +26,15 @@ VGMSTREAM = ""
 SYS_CLIPBOARD = ""
 WWISE_CLI = ""
 WWISE_VERSION = ""
+RAD_TOOLS = ""
+RAD_CONVERT = "binkc"
+RAD_PLAY = ""
 
 match SYSTEM:
     case "Windows":
         FFMPEG = "ffmpeg.exe"
+        RAD_TOOLS = "radvideo64.exe"
+        RAD_PLAY = "binkplay.exe"
         VGMSTREAM = "vgmstream-win64/vgmstream-cli.exe"
         if "WWISEROOT" in os.environ:
             WWISE_CLI = posixpath.join(
