@@ -1651,6 +1651,7 @@ class MainWindow:
         if not self.check_unsaved("You have unsaved changes, are you sure you want to clear?"):
             return
         self.mod_handler.delete_mod(self.mod_handler.get_active_mod())
+        self.reset_unsaved_changes()
         self.mod_handler.create_new_mod("default")
         if self.selected_view.get() == "SourceView":
             self.create_source_view()
