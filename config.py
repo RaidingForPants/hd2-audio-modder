@@ -14,8 +14,10 @@ class Config:
                  theme: str = "dark_mode",
                  ui_scale: float = 1.0,
                  rowheight_scale: float = 1.0,
+                 rad_tools_path: str = "",
                  workspace_paths: set[str] = set()):
         self.game_data_path = game_data_path
+        self.rad_tools_path = rad_tools_path
         self.recent_files = recent_files
         self.theme = theme
         self.ui_scale = ui_scale
@@ -48,6 +50,9 @@ class Config:
                                     if os.path.exists(p)])
         return self.workspace_paths
 
+    def get(self, attr: str, default=None):
+        return getattr(self, attr, default)
+
 def load_config(config_path: str = "config.pickle") -> Config | None:
     if os.path.exists(config_path):
         cfg: Config | None = None
@@ -74,22 +79,11 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
                                    if os.path.exists(p)])
         # For backwards compatibility with configuration created before these 
         # were added
-        try: 
-            _ = cfg.theme
-        except:
-            cfg.theme = "dark_mode"
-        try:
-            _ = cfg.ui_scale
-        except:
-            cfg.ui_scale = 1.0
-        try:
-            _ = cfg.rowheight_scale
-        except:
-            cfg.rowheight_scale = 1.0
-        try:
-            _ = cfg.recent_files
-        except:
-            cfg.recent_files = []
+        cfg.theme = cfg.get("theme", "dark_mode")
+        cfg.ui_scale = cfg.get("ui_scale", 1.0)
+        cfg.rad_tools_path = cfg.get("rad_tools_path", "")
+        cfg.rowheight_scale = cfg.get("rowheight_scale", 1.0)
+        cfg.recent_files = cfg.get("recent_files", [])
         cfg.recent_files = [file for file in cfg.recent_files if os.path.exists(file)]
         cfg.save_config()
         return cfg
