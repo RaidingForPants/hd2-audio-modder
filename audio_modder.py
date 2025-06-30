@@ -3,6 +3,7 @@ import subprocess
 import struct
 import tkinter
 import shutil
+import webbrowser
 import pathlib
 import zipfile
 import xml.etree.ElementTree as etree
@@ -10,6 +11,8 @@ import requests
 import json
 import logging
 import queue
+import PIL.Image
+import PIL.ImageTk
 import random
 
 from functools import partial
@@ -48,6 +51,15 @@ from log import logger
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
 VERSION = "1.17.5"
+
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -1595,6 +1607,10 @@ class MainWindow:
         self.menu.add_cascade(label="Dump", menu=self.dump_menu)
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
+        self.menu.add_command(
+            label = "About",
+            command=self.open_about_window
+        )
         self.root.config(menu=self.menu)
         
         self.treeview.drop_target_register(DND_FILES)
@@ -1629,6 +1645,33 @@ class MainWindow:
         self.root.resizable(True, True)
         #async_mainloop(self.root)
         self.root.mainloop()
+
+    def open_about_window(self):
+        image1 = PIL.Image.open(str(resource_path("support_me_on_kofi_blue.png"))).resize((164, 33))
+        ko_fi_image = PIL.ImageTk.PhotoImage(image1)
+        if self.app_state.theme == "dark_mode":
+            image1 = PIL.Image.open(str(resource_path("github-mark-white.png"))).resize((35, 35))
+        else:
+            image1 = PIL.Image.open(str(resource_path("github-mark.png"))).resize((35, 35))
+        github_image = PIL.ImageTk.PhotoImage(image1)
+        new_window = Toplevel(self.root)
+        new_window.resizable(False, False)
+        new_window.title("About")
+        frame = Frame(new_window)
+        frame.pack(fill="both", expand=True)
+
+        copyright_label = Label(frame, text = "Helldivers 2 Audio Modding Tool\n© 2025 RaidingForPants (Evelyn), all rights reserved.\n")
+        copyright_label.pack()
+
+        ko_fi_link = Label(frame, image=ko_fi_image, cursor="hand2")
+        ko_fi_link.image = ko_fi_image
+        ko_fi_link.pack(side="left")
+        ko_fi_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://ko-fi.com/raidinforpants"))
+        github_link = Label(frame, image=github_image, cursor="hand2")
+        github_link.image = github_image
+        github_link.pack(side="left")
+        github_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://github.com/raidingforpants"))
+
         
     def check_unsaved(self, message: str):
         if self.unsaved_changes:
