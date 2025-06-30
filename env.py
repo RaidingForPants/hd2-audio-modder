@@ -27,7 +27,8 @@ SYS_CLIPBOARD = ""
 WWISE_CLI = ""
 WWISE_VERSION = ""
 RAD_TOOLS = ""
-RAD_CONVERT = "binkc"
+RAD_COMPRESS = "binkc"
+RAD_CONVERT = "binkconv"
 RAD_PLAY = ""
 
 match SYSTEM:

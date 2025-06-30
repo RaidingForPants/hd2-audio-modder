@@ -1990,7 +1990,7 @@ class MainWindow:
     async def convert_to_bik(self, video_file: str, video_id: int):
         timestamp = int(time.time() * 1000)
         converted_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bik"))
-        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_CONVERT, video_file, converted_filename, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await p.wait()
         return converted_filename, video_id
 
@@ -1998,12 +1998,39 @@ class MainWindow:
     def bik_conversion_callback(self, video_file: str, video_id: int):
         self.mod_handler.get_active_mod().import_video(video_file, video_id)
         self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id)])
+        try:
+            os.remove(video_file)
+        except:
+            pass
 
     def dump_video(self, video_id: int, output_file: str = ""):
         if not output_file:
-            output_file = filedialog.asksaveasfilename(title="Save video file", filetypes=[("Bink Video", "*.bik")])
-        with open(output_file, "wb") as f:
-            f.write(self.mod_handler.get_active_mod().get_video(video_id).get_data())
+            if RAD_TOOLS and os.path.exists(os.path.join(app_state.rad_tools_path, RAD_TOOLS)):
+                output_file = filedialog.asksaveasfilename(title="Save video file",
+                                                        filetypes=[("MP4", "*.mp4"), ("Bink Video", "*.bik")])
+            else:
+                output_file = filedialog.asksaveasfilename(title="Save video file", filetypes=[("Bink Video", "*.bik")])
+        if os.path.splitext(output_file)[1] != ".bik":
+            temp_filename = os.path.normpath(os.path.join(CACHE, f"{int(time.time() * 1000)}.bik"))
+            with open(temp_filename, "wb") as f:
+                f.write(self.mod_handler.get_active_mod().get_video(video_id).get_data())
+            self.task_manager.schedule_async(name=f"Converting video {video_id} to mp4", callback=None,
+                                             task=self.convert_from_bik, bik_file=temp_filename, output_file=output_file)
+        else:
+            with open(output_file, "wb") as f:
+                f.write(self.mod_handler.get_active_mod().get_video(video_id).get_data())
+
+    @async_task
+    async def convert_from_bik(self, bik_file: str, output_file: str):
+        print(bik_file)
+        print(output_file)
+        output_file = os.path.normpath(output_file)
+        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_CONVERT, bik_file, output_file, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await p.wait()
+        try:
+            os.remove(bik_file)
+        except:
+            pass
 
     def play_video(self, video_id: int):
         timestamp = int(time.time()*1000)
