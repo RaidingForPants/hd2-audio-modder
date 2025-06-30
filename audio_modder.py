@@ -3,6 +3,7 @@ import subprocess
 import struct
 import tkinter
 import shutil
+import webbrowser
 import pathlib
 import zipfile
 import xml.etree.ElementTree as etree
@@ -10,6 +11,8 @@ import requests
 import json
 import logging
 import queue
+import PIL.Image
+import PIL.ImageTk
 import random
 
 from functools import partial
@@ -48,6 +51,14 @@ from log import logger
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
 VERSION = "1.18.0"
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -1402,6 +1413,8 @@ class MainWindow:
         
         self.root = TkinterDnD.Tk()
         
+        self.unsaved_changes = False
+        
         try:
             if os.path.exists("icon.ico"):
                 self.root.iconbitmap("icon.ico")
@@ -1593,6 +1606,10 @@ class MainWindow:
         self.menu.add_cascade(label="Dump", menu=self.dump_menu)
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
+        self.menu.add_command(
+            label = "About",
+            command=self.open_about_window
+        )
         self.root.config(menu=self.menu)
         
         self.treeview.drop_target_register(DND_FILES)
@@ -1609,6 +1626,16 @@ class MainWindow:
         self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
+
+        # keyboard shortcuts
+        self.root.bind("<Control-f>", self.on_ctrl_f)
+        self.root.bind("<Control-o>", self.on_ctrl_o)
+        self.root.bind("<Control-s>", self.on_ctrl_s)
+        self.root.bind("<Control-a>", self.on_ctrl_a)
+        self.root.bind("<Control-i>", self.on_ctrl_i)
+        #self.root.bind("<Control-v>", self.on_ctrl_v)
+        self.root.bind("<Control-n>", self.on_ctrl_n)
+        #self.root.bind("<Control-r>", self.on_ctrl_r)
         
         self.task_manager.set_progress_frame(self.progress_frame)
         
@@ -1617,10 +1644,82 @@ class MainWindow:
         self.root.resizable(True, True)
         #async_mainloop(self.root)
         self.root.mainloop()
+
+    def open_about_window(self):
+        image1 = PIL.Image.open(str(resource_path("support_me_on_kofi_blue.png"))).resize((164, 33))
+        ko_fi_image = PIL.ImageTk.PhotoImage(image1)
+        if self.app_state.theme == "dark_mode":
+            image1 = PIL.Image.open(str(resource_path("github-mark-white.png"))).resize((35, 35))
+        else:
+            image1 = PIL.Image.open(str(resource_path("github-mark.png"))).resize((35, 35))
+        github_image = PIL.ImageTk.PhotoImage(image1)
+        new_window = Toplevel(self.root)
+        new_window.resizable(False, False)
+        new_window.title("About")
+        frame = Frame(new_window)
+        frame.pack(fill="both", expand=True)
+
+        copyright_label = Label(frame, text = "Helldivers 2 Audio Modding Tool\n© 2025 RaidingForPants (Evelyn), all rights reserved.\n")
+        copyright_label.pack()
+
+        ko_fi_link = Label(frame, image=ko_fi_image, cursor="hand2")
+        ko_fi_link.image = ko_fi_image
+        ko_fi_link.pack(side="left")
+        ko_fi_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://ko-fi.com/raidinforpants"))
+        github_link = Label(frame, image=github_image, cursor="hand2")
+        github_link.image = github_image
+        github_link.pack(side="left")
+        github_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://github.com/raidingforpants"))
+
+        
+    def check_unsaved(self, message: str):
+        if self.unsaved_changes:
+            response = tkinter.messagebox.askyesno(title="Unsaved Changes", message=message)
+            if response:
+                return True
+            else:
+                return False
+        return True
+
+    def on_ctrl_v(self, event):
+        if self.selected_view.get() == "SourceView":
+            self.selected_view.set("HierarchyView")
+            self.create_hierarchy_view()
+        else:
+            self.selected_view.set("SourceView")
+            self.create_source_view()
+
+    def on_ctrl_n(self, event):
+        if not self.check_unsaved("You have unsaved changes, are you sure you want to clear?"):
+            return
+        self.mod_handler.delete_mod(self.mod_handler.get_active_mod())
+        self.reset_unsaved_changes()
+        self.mod_handler.create_new_mod("default")
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
+
+    def on_ctrl_a(self, event):
+        self.archive_search.focus_set()
+
+    def on_ctrl_o(self, event):
+        self.load_archive(initialdir=self.app_state.game_data_path)
+
+    def on_ctrl_s(self, event):
+        self.write_patch()
+
+    def on_ctrl_f(self, event):
+        self.search_bar.focus_set()
+
+    def on_ctrl_i(self, event):
+        self.import_audio_files()
         
     def on_close(self):
-        self.task_manager.shutdown_async_tasks()
-        self.root.destroy()
+        if self.check_unsaved("You have unsaved changes, are you sure you want to exit?"):
+            self.task_manager.shutdown_async_tasks()
+            self.root.destroy()
+            # add in check for saving
         
     def drop_position(self, event):
         if event.data:
@@ -2539,10 +2638,11 @@ class MainWindow:
                 child.forget()
 
     def save_mod(self):
-        output_folder = filedialog.askdirectory(title="Select location to save combined mod")
+        output_folder = filedialog.askdirectory(title="Select save location")
         if output_folder and os.path.exists(output_folder):
             self.sound_handler.kill_sound()
             self.mod_handler.get_active_mod().save(output_folder)
+            self.reset_unsaved_changes()
         
     """
     TO-DO:
@@ -2559,6 +2659,7 @@ class MainWindow:
             self.treeview.item(item, tags=tags)
     
     def mark_modified(self, entry, item=None):
+        self.unsaved_changes = True
         if isinstance(entry, HircEntry):
             modified = entry.modified or entry.has_modified_children()
         else:
@@ -2671,15 +2772,23 @@ class MainWindow:
         self.mod_handler.get_active_mod().revert_all()
         self.clear_modified()
         self.show_info_window()
+        self.reset_unsaved_changes()
         
     def write_patch(self):
         self.sound_handler.kill_sound()
-        output_file = filedialog.asksaveasfilename(title="Select", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
+        output_file = filedialog.asksaveasfilename(title="Save Patch File", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
         if not output_file:
             return
         output_folder = os.path.dirname(output_file)
         output_file = os.path.basename(output_file)
-        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder, output_filename=output_file)
+        self.task_manager.schedule(name="Saving Patch File", callback=self.reset_unsaved_callback, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder, output_filename=output_file)
+
+    def reset_unsaved_changes(self):
+        self.unsaved_changes = False
+
+    @callback
+    def reset_unsaved_callback(self, none):
+        self.unsaved_changes = False
         
     def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
