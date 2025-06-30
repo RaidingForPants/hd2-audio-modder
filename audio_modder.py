@@ -2777,7 +2777,7 @@ class MainWindow:
         
     def write_patch(self):
         self.sound_handler.kill_sound()
-        output_file = filedialog.asksaveasfilename(title="Select", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
+        output_file = filedialog.asksaveasfilename(title="Save Patch File", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
         if not output_file:
             return
         output_folder = os.path.dirname(output_file)
