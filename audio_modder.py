@@ -1,8 +1,11 @@
 import os
 import subprocess
 import struct
+import time
 import tkinter
 import shutil
+import webbrowser
+import py7zr
 import pathlib
 import zipfile
 import xml.etree.ElementTree as etree
@@ -10,6 +13,8 @@ import requests
 import json
 import logging
 import queue
+import PIL.Image
+import PIL.ImageTk
 import random
 
 from functools import partial
@@ -47,7 +52,15 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.17.5"
+VERSION = "1.18.0"
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
     
 class WorkspaceEventHandler(FileSystemEventHandler):
 
@@ -133,37 +146,7 @@ class WorkspaceEventHandler(FileSystemEventHandler):
                 return self.get_item_by_path_recursion(item, path)
             elif str(child_path) == str(path):
                 return item
-        
-class ProgressWindow:
-    def __init__(self, title, max_progress):
-        self.title = title
-        self.max_progress = max_progress
-        
-    def show(self):
-        self.root = Tk()
-        self.root.title(self.title)
-        self.root.geometry("410x45")
-        self.root.attributes('-topmost', True)
-        self.progress_bar = tkinter.ttk.Progressbar(self.root, orient=HORIZONTAL, length=400, mode="determinate", maximum=self.max_progress)
-        self.progress_bar_text = Text(self.root)
-        self.progress_bar.pack()
-        self.progress_bar_text.pack()
-        self.root.resizable(False, False)
-        
-    def step(self):
-        self.progress_bar.step()
-        self.root.update_idletasks()
-        self.root.update()
-        
-    def set_text(self, s):
-        self.progress_bar_text.delete('1.0', END)
-        self.progress_bar_text.insert(INSERT, s)
-        self.root.update_idletasks()
-        self.root.update()
-        
-    def destroy(self):
-        self.root.destroy()
-        
+
 class ProgressFrame(Frame):
     
     DETERMINATE = 0
@@ -307,14 +290,14 @@ class FileUploadWindow:
     def drop_add_files(self, event):
         if event.data:
             dropped_files = event.widget.tk.splitlist(event.data)
-            dropped_files = [file for file in dropped_files if os.path.splitext(file)[1].lower() == ".zip" or ".patch_" in os.path.splitext(file)[1]]
+            dropped_files = [file for file in dropped_files if os.path.splitext(file)[1].lower() in [".zip", ".7z"] or ".patch_" in os.path.splitext(file)[1]]
             for file in dropped_files:
                 pending_file = PendingFile(self.scrollframe.interior)
                 pending_file.set_filepath(file)
                 pending_file.pack(side="top", expand=True, fill="x", pady=2)
         
     def add_files(self):
-        filenames = filedialog.askopenfilenames(parent=self.root, title="Choose mod files to combine", filetypes=[("Mod Files", "*.zip *.patch*")])
+        filenames = filedialog.askopenfilenames(parent=self.root, title="Choose mod files to combine", filetypes=[("Mod Files", "*.zip *.7z *.patch*")])
         for name in filenames:
             pending_file = PendingFile(self.scrollframe.interior)
             pending_file.set_filepath(name)
@@ -387,10 +370,19 @@ class OptionsWindow:
         
         self.game_data_path_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="Game Data Path:")
         self.game_data_path = ttk.Label(self.config_frame, font=('Segoe UI', 12), text=os.path.normpath(self.config.game_data_path))
-        self.game_data_path_button = ttk.Button(self.config_frame, text="Change path", command=self.change_path_button_pressed)
+        self.game_data_path_button = ttk.Button(self.config_frame, text="Change path", command=self.change_game_data_path_button_pressed)
         self.game_data_path_title.grid(row=4, column=0, sticky="e")
         self.game_data_path.grid(row=4, column=1)
         self.game_data_path_button.grid(row=4, column=2, pady=2, padx=2)
+
+        self.rad_tools_path_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="RAD Video Tools Path:")
+        self.rad_tools_path = ttk.Label(self.config_frame, font=('Segoe UI', 12),
+                                        text=os.path.normpath(self.config.rad_tools_path))
+        self.rad_tools_path_button = ttk.Button(self.config_frame, text="Change path",
+                                                command=self.change_rad_tools_path_button_pressed)
+        self.rad_tools_path_title.grid(row=5, column=0, sticky="e")
+        self.rad_tools_path.grid(row=5, column=1)
+        self.rad_tools_path_button.grid(row=5, column=2, pady=2, padx=2)
         
         
         self.button_frame = Frame(self.frame)
@@ -452,11 +444,24 @@ class OptionsWindow:
             if not response:
                 pass
             
-    def change_path_button_pressed(self):
+    def change_game_data_path_button_pressed(self):
         new_path = self.select_game_data_path()
         new_path = os.path.normpath(new_path)
         if new_path and new_path != ".":
             self.game_data_path.config(text=new_path)
+
+    def change_rad_tools_path_button_pressed(self):
+        folder_path = filedialog.askdirectory(
+            parent=self.root,
+            mustexist=True,
+            title="Locate RAD Video Tools"
+        )
+        if not os.path.exists(os.path.join(folder_path, RAD_TOOLS)):
+            showerror(title="Missing Files", message="Unable to locate RAD Video Tools in this folder")
+            return
+        new_path = os.path.normpath(folder_path)
+        if new_path and new_path != ".":
+            self.rad_tools_path.config(text=new_path)
         
     def apply_button_pressed(self):
         self.apply_changes()
@@ -472,6 +477,7 @@ class OptionsWindow:
         self.config.rowheight_scale = self.rowheight_scale_var.get()
         self.config.ui_scale = self.treeview_text_scale_var.get()
         self.config.game_data_path = self.game_data_path.cget("text")
+        self.config.rad_tools_path = self.rad_tools_path.cget("text")
         self.config.theme = self.theme_var.get()
         
     def close_window(self):
@@ -797,14 +803,32 @@ class AudioSourceWindow:
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack(pady=5)
+
+        self.parent_text_box = Text(self.frame, font=('Segoe UI', 12), highlightthickness=0, borderwidth=0)
+        self.parent_text_box.configure(state="disabled")
+        self.parent_text_box.bind("<1>", lambda event: self.parent_text_box.focus_set())
+        self.parent_text_box.pack(pady=5, side="bottom")
         
     def set_audio(self, audio):
+
+        self.parent_text_box.configure(state="normal")
+        self.parent_text_box.delete(1.0, tk.END)
+        if len([p for p in audio.parents if isinstance(p, Sound)]) > 0:
+            self.parent_text_box.insert(tk.END, f"Parent Wwise Source object id(s):")
+            for parent in [p for p in audio.parents if isinstance(p, Sound)]:
+                self.parent_text_box.insert(tk.END, "\n"+f"{parent.get_id()}")
+            self.parent_text_box.insert(tk.END, "\n\n")
+        if audio.stream_type != BANK:
+            self.parent_text_box.insert(tk.END, "Wwise Short ID: \n" + f"{audio.get_short_id()}")
+        self.parent_text_box.configure(state="disabled")
+
         self.audio = audio
         self.title_label.configure(text=f"Info for {audio.get_id()}.wem")
         self.play_button.configure(text= '\u23f5')
         self.revert_button.pack_forget()
         self.play_button.pack_forget()
         self.apply_button.pack_forget()
+        self.parent_text_box.pack_forget()
         def reset_button_icon(button):
             button.configure(text= '\u23f5')
         def press_button(button, file_id, callback):
@@ -824,7 +848,7 @@ class AudioSourceWindow:
             self.audio.data = temp
         self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
         self.play_original_button.configure(command=partial(play_original_audio, self.play_original_button, audio.get_short_id(), partial(reset_button_icon, self.play_original_button)))
-        
+        self.parent_text_box.pack(side="bottom", pady=5)
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left")
         
@@ -834,6 +858,8 @@ class AudioSourceWindow:
         else:
             self.play_original_label.forget()
             self.play_original_button.forget()
+
+
             
     def revert(self):
         self.audio.revert_modifications()
@@ -1231,6 +1257,7 @@ class TaskManager:
         self.async_task_list = []
         self.sync_task_queue = queue.Queue()
         self.sync_thread_running = False
+        self.async_task_running = False
         self.sync_thread = None
         self.progress_frame = None
         
@@ -1279,7 +1306,11 @@ class TaskManager:
     def schedule_async(self, name, callback, task, *args, **kwargs):
         callback = self.async_wrapper(callback)
         future = self.async_event_loop.start_task(callback, task, *args, **kwargs)
+        if not self.sync_thread_running and not self.async_task_running:
+            self.start_progress_frame()
+            self.set_progress_frame_text(name)
         self.async_task_list.append(AsyncTaskItem(future, name))
+        self.async_task_running = True
     
     def async_wrapper(self, callback):
         if callback is not None:
@@ -1321,6 +1352,7 @@ class TaskManager:
                 self.set_progress_frame_text(task_item.get_name())
             else:
                 self.stop_progress_frame()
+                self.async_task_running = False
         
     def sync_task_finished(self):
         self.sync_thread_running = False
@@ -1347,7 +1379,7 @@ class EventLoop:
         future = asyncio.run_coroutine_threadsafe(coroutine(*args, **kwargs), self.loop)
         future.add_done_callback(callback)
         return future
-    
+
     def run_asyncio_loop(self, loop):
         asyncio.set_event_loop(loop)
         loop.run_forever()
@@ -1401,6 +1433,8 @@ class MainWindow:
         self.active_task_ids = []
         
         self.root = TkinterDnD.Tk()
+        
+        self.unsaved_changes = False
         
         try:
             if os.path.exists("icon.ico"):
@@ -1576,6 +1610,7 @@ class MainWindow:
         
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
+        self.file_menu.add_command(label="Write Separate Patches", command=self.write_separate_patches)
         
         self.file_menu.add_command(label="Add a Folder to Workspace",
                                    command=self.add_new_workspace)
@@ -1593,6 +1628,10 @@ class MainWindow:
         self.menu.add_cascade(label="Dump", menu=self.dump_menu)
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
+        self.menu.add_command(
+            label = "About",
+            command=self.open_about_window
+        )
         self.root.config(menu=self.menu)
         
         self.treeview.drop_target_register(DND_FILES)
@@ -1609,6 +1648,16 @@ class MainWindow:
         self.workspace.dnd_bind("<<DragInitCmd>>", self.drag_init_workspace)
         self.workspace.bind("<B1-Motion>", self.workspace_drag_assist)
         self.workspace.bind("<Button-1>", self.workspace_save_selection)
+
+        # keyboard shortcuts
+        self.root.bind("<Control-f>", self.on_ctrl_f)
+        self.root.bind("<Control-o>", self.on_ctrl_o)
+        self.root.bind("<Control-s>", self.on_ctrl_s)
+        self.root.bind("<Control-a>", self.on_ctrl_a)
+        self.root.bind("<Control-i>", self.on_ctrl_i)
+        #self.root.bind("<Control-v>", self.on_ctrl_v)
+        self.root.bind("<Control-n>", self.on_ctrl_n)
+        #self.root.bind("<Control-r>", self.on_ctrl_r)
         
         self.task_manager.set_progress_frame(self.progress_frame)
         
@@ -1617,10 +1666,82 @@ class MainWindow:
         self.root.resizable(True, True)
         #async_mainloop(self.root)
         self.root.mainloop()
+
+    def open_about_window(self):
+        image1 = PIL.Image.open(str(resource_path("support_me_on_kofi_blue.png"))).resize((164, 33))
+        ko_fi_image = PIL.ImageTk.PhotoImage(image1)
+        if self.app_state.theme == "dark_mode":
+            image1 = PIL.Image.open(str(resource_path("github-mark-white.png"))).resize((35, 35))
+        else:
+            image1 = PIL.Image.open(str(resource_path("github-mark.png"))).resize((35, 35))
+        github_image = PIL.ImageTk.PhotoImage(image1)
+        new_window = Toplevel(self.root)
+        new_window.resizable(False, False)
+        new_window.title("About")
+        frame = Frame(new_window)
+        frame.pack(fill="both", expand=True)
+
+        copyright_label = Label(frame, text = "Helldivers 2 Audio Modding Tool\n© 2025 RaidingForPants (Evelyn), all rights reserved.\n")
+        copyright_label.pack()
+
+        ko_fi_link = Label(frame, image=ko_fi_image, cursor="hand2")
+        ko_fi_link.image = ko_fi_image
+        ko_fi_link.pack(side="left")
+        ko_fi_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://ko-fi.com/raidinforpants"))
+        github_link = Label(frame, image=github_image, cursor="hand2")
+        github_link.image = github_image
+        github_link.pack(side="left", padx=10)
+        github_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://github.com/raidingforpants"))
+
+        
+    def check_unsaved(self, message: str):
+        if self.unsaved_changes:
+            response = tkinter.messagebox.askyesno(title="Unsaved Changes", message=message)
+            if response:
+                return True
+            else:
+                return False
+        return True
+
+    def on_ctrl_v(self, event):
+        if self.selected_view.get() == "SourceView":
+            self.selected_view.set("HierarchyView")
+            self.create_hierarchy_view()
+        else:
+            self.selected_view.set("SourceView")
+            self.create_source_view()
+
+    def on_ctrl_n(self, event):
+        if not self.check_unsaved("You have unsaved changes, are you sure you want to clear?"):
+            return
+        self.mod_handler.delete_mod(self.mod_handler.get_active_mod())
+        self.reset_unsaved_changes()
+        self.mod_handler.create_new_mod("default")
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
+
+    def on_ctrl_a(self, event):
+        self.archive_search.focus_set()
+
+    def on_ctrl_o(self, event):
+        self.load_archive(initialdir=self.app_state.game_data_path)
+
+    def on_ctrl_s(self, event):
+        self.write_patch()
+
+    def on_ctrl_f(self, event):
+        self.search_bar.focus_set()
+
+    def on_ctrl_i(self, event):
+        self.import_audio_files()
         
     def on_close(self):
-        self.task_manager.shutdown_async_tasks()
-        self.root.destroy()
+        if self.check_unsaved("You have unsaved changes, are you sure you want to exit?"):
+            self.task_manager.shutdown_async_tasks()
+            self.root.destroy()
+            # add in check for saving
         
     def drop_position(self, event):
         if event.data:
@@ -1683,6 +1804,7 @@ class MainWindow:
     @task
     def combine_mods_task(self, files, mod):
         zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
+        seven_z_files = [file for file in files if os.path.splitext(file)[1].lower() == ".7z"]
         patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
         
         for index, mod_file in enumerate(zip_files):
@@ -1694,7 +1816,15 @@ class MainWindow:
             extract_location = os.path.join(CACHE, str(index))
             os.mkdir(extract_location)
             zip.extractall(path=extract_location)
-            patch_files.extend([os.path.join(extract_location, file) for file in os.listdir(extract_location) if os.path.isfile(os.path.join(extract_location, file)) and "patch" in os.path.splitext(file)[1]])
+            files = [file for file in list_files_recursive(extract_location) if "patch" in os.path.splitext(file)[1]]
+            patch_files.extend(files)
+        for index, mod_file in enumerate(seven_z_files, start=index+1):
+            zip = py7zr.SevenZipFile(mod_file)
+            extract_location = os.path.join(CACHE, str(index))
+            os.mkdir(extract_location)
+            zip.extractall(path=extract_location)
+            files = [file for file in list_files_recursive(extract_location) if "patch" in os.path.splitext(file)[1]]
+            patch_files.extend(files)
         missing_soundbank_ids = []
         archives = set()
         for index, file in enumerate(patch_files):
@@ -1751,6 +1881,8 @@ class MainWindow:
         #self.mod_handler.set_active_mod(current_mod.name)
         
         for file in os.listdir(CACHE):
+            if os.path.splitext(file)[1] == ".bik":
+                continue
             file = os.path.join(CACHE, file)
             try:
                 if os.path.isfile(file):
@@ -1776,29 +1908,49 @@ class MainWindow:
             for file in patch_files:
                 self.import_patch(file)
             if os.path.exists(WWISE_CLI):
-                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
+                audio_files = [file for file in import_files if os.path.splitext(file)[1].lower() in SUPPORTED_AUDIO_TYPES]
             else:
-                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
+                audio_files = [file for file in import_files if os.path.splitext(file)[1].lower() == ".wem"]
+            if os.path.exists(os.path.join(self.app_state.rad_tools_path, RAD_TOOLS)):
+                video_files = [file for file in import_files if os.path.splitext(file)[1].lower() in SUPPORTED_VIDEO_TYPES]
+            else:
+                video_files = [file for file in import_files if os.path.splitext(file)[1].lower() == ".bik"]
+            import_files = audio_files + video_files
             if (
-                len(import_files) == 1 
-                and os.path.splitext(import_files[0])[1] in SUPPORTED_AUDIO_TYPES
-                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
-                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
+                self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
+                and len(import_files) == 1
+                and (
+                    # dropping 1 audio file on an audio source, or dropping 1 video file on a video source
+                    (len(audio_files) == 1 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source")
+                    or
+                    (len(video_files) == 1 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Bink Video")
+                )
             ):
-                audio_id = parse_filename(os.path.basename(import_files[0]))
-                if audio_id != 0 and self.mod_handler.get_active_mod().get_audio_source(audio_id) is not None:
+                file_id = parse_filename(os.path.basename(import_files[0]))
+                found_match = False
+                try:
+                    self.mod_handler.get_active_mod().get_audio_source(file_id)
+                    found_match = True
+                except KeyError:
+                    pass
+                try:
+                    self.mod_handler.get_active_mod().get_video_source(file_id)
+                    found_match = True
+                except KeyError:
+                    pass
+                if file_id != 0 and found_match:
                     answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
                     if answer is None:
                         return
                     if not answer:
                         targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                     else:
-                        targets = [audio_id]
+                        targets = [file_id]
                 else:
                     targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                 file_dict = {import_files[0]: targets}
             else:
-                file_dict = {file: [parse_filename(os.path.basename(file))] for file in import_files}
+                file_dict = {file: [parse_filename(os.path.basename(file))] for file in import_files if parse_filename(os.path.basename(file)) != 0}
             self.import_files(file_dict)
 
     def drop_add_to_workspace(self, event):
@@ -1971,9 +2123,84 @@ class MainWindow:
         )
         self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
         self.workspace_popup_menu.grab_release()
+
+    def import_video(self, video_ids: list[int], video_file: str = ""):
+        if not video_file:
+            if RAD_TOOLS and os.path.exists(os.path.join(app_state.rad_tools_path, RAD_TOOLS)):
+                video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Video Files", "*.mp4 *.mov *.bik")])
+            else:
+                video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Bink Video", "*.bik")])
+        if not video_file:
+            return
+        if os.path.splitext(video_file)[1].lower() != ".bik":
+            # convert to bik
+            self.task_manager.schedule_async(name=f"Converting {os.path.basename(video_file)}", callback=self.bik_conversion_callback, task=self.convert_to_bik, video_file=video_file, video_ids=video_ids)
+            return
+        for video_id in video_ids:
+            self.mod_handler.get_active_mod().import_video(video_file, video_id)
+        self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id) for video_id in video_ids])
+
+    @async_task
+    async def convert_to_bik(self, video_file: str, video_ids: list[int]):
+        timestamp = int(time.time() * 1000)
+        converted_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bik"))
+        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await p.wait()
+        return converted_filename, video_ids
+
+    @callback
+    def bik_conversion_callback(self, video_file: str, video_ids: list[int]):
+        for video_id in video_ids:
+            self.mod_handler.get_active_mod().import_video(video_file, video_id)
+        self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id) for video_id in video_ids])
+
+    def dump_video(self, video_id: int, output_file: str = ""):
+        if not output_file:
+            if RAD_TOOLS and os.path.exists(os.path.join(app_state.rad_tools_path, RAD_TOOLS)):
+                output_file = filedialog.asksaveasfilename(title="Save video file",
+                                                        filetypes=[("MP4", "*.mp4"), ("Bink Video", "*.bik")])
+            else:
+                output_file = filedialog.asksaveasfilename(title="Save video file", filetypes=[("Bink Video", "*.bik")])
+        if not output_file:
+            return
+        if os.path.splitext(output_file)[1].lower() != ".bik":
+            temp_filename = os.path.normpath(os.path.join(CACHE, f"{int(time.time() * 1000)}.bik"))
+            with open(temp_filename, "wb") as f:
+                f.write(self.mod_handler.get_active_mod().get_video(video_id).get_data())
+            self.task_manager.schedule_async(name=f"Converting video {video_id} to mp4", callback=None,
+                                             task=self.convert_from_bik, bik_file=temp_filename, output_file=output_file)
+        else:
+            with open(output_file, "wb") as f:
+                f.write(self.mod_handler.get_active_mod().get_video(video_id).get_data())
+
+    @async_task
+    async def convert_from_bik(self, bik_file: str, output_file: str):
+        print(bik_file)
+        print(output_file)
+        output_file = os.path.normpath(output_file)
+        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_CONVERT, bik_file, output_file, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await p.wait()
+        try:
+            os.remove(bik_file)
+        except:
+            pass
+
+    def play_video(self, video_id: int):
+        timestamp = int(time.time()*1000)
+        output_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bik"))
+        self.dump_video(video_id, output_file = output_filename)
+        t = threading.Thread(target=self.play_bik, args=(output_filename,))
+        t.start()
+
+    def play_bik(self, video_file: str):
+        subprocess.run([os.path.join(app_state.rad_tools_path, RAD_PLAY), video_file], stdout=subprocess.DEVNULL)
+        try:
+            os.remove(video_file)
+        except:
+            pass
         
     def import_audio_files(self):
-        
+
         if os.path.exists(WWISE_CLI):
             available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
@@ -1985,6 +2212,10 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
+        # separate out video files
+        videos = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in SUPPORTED_VIDEO_TYPES}
+        for video, targets in videos.items():
+            self.import_video(targets, video)
         self.task_manager.schedule(name="Importing Files", callback=self.import_files_callback, task=self.import_files_task, file_dict=file_dict)
         
     @task
@@ -2116,6 +2347,22 @@ class MainWindow:
                     command=lambda: self.remove_game_archive(self.treeview.item(self.treeview.selection()[0], option="tags")[0])
                 )
 
+            if is_single and self.treeview.item(self.treeview.selection()[0], option="values")[0] == "Bink Video":
+                self.right_click_menu.add_command(
+                    label="Import Video",
+                    command=lambda: self.import_video([int(self.treeview.item(self.treeview.selection()[0], option="tags")[0])])
+                )
+                self.right_click_menu.add_command(
+                    label="Dump Video",
+                    command=lambda: self.dump_video(int(self.treeview.item(self.treeview.selection()[0], option="tags")[0]))
+                )
+                if RAD_PLAY and os.path.exists(os.path.join(self.app_state.rad_tools_path, RAD_PLAY)):
+                    self.right_click_menu.add_command(
+                        label="Play Video",
+                        command=lambda: self.play_video(
+                            int(self.treeview.item(self.treeview.selection()[0], option="tags")[0]))
+                    )
+
             if all_audio:
                 self.right_click_menu.add_command(
                     label="Import audio",
@@ -2164,9 +2411,10 @@ class MainWindow:
         for select in selects:
             values = self.treeview.item(select, option="values")
             tags = self.treeview.item(select, option="tags")
-            if values[0] != "Audio Source":
-                continue
-            self.play_audio(int(tags[0]))
+            if values[0] == "Audio Source":
+                self.play_audio(int(tags[0]))
+            if values[0] == "Bink Video" and os.path.exists(os.path.join(self.app_state.rad_tools_path, RAD_TOOLS)):
+                self.play_video(int(tags[0]))
 
     def workspace_on_double_click(self, event):
         selects = self.workspace.selection()
@@ -2175,7 +2423,7 @@ class MainWindow:
             values = self.workspace.item(select, option="values")
             tags = self.workspace.item(select, option="tags")
             assert(len(values) == 1 and len(tags) == 1)
-            if tags[0] == "file" and os.path.splitext(values[0])[1] in SUPPORTED_AUDIO_TYPES and os.path.exists(values[0]):
+            if tags[0] == "file" and os.path.splitext(values[0])[1].lower() in SUPPORTED_AUDIO_TYPES and os.path.exists(values[0]):
                 audio_data = None
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
@@ -2353,6 +2601,9 @@ class MainWindow:
             name = entry.name
             entry_type = "Archive File"
             self.treeview.item(tree_entry, open=True)
+        elif isinstance(entry, VideoSource):
+            name = f"Video {entry.file_id}"
+            entry_type = "Bink Video"
         self.treeview.item(tree_entry, text=name)
         self.treeview.item(tree_entry, values=(entry_type,))
         return tree_entry
@@ -2413,6 +2664,8 @@ class MainWindow:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
                     for string_entry in text_bank.entries.values():
                         self.create_treeview_entry(string_entry, bank_entry)
+            for video_source in archive.video_sources.values():
+                self.create_treeview_entry(video_source, archive_entry)
                 
     def create_source_view(self, new_game_archive=None):
         self.clear_search()
@@ -2441,6 +2694,8 @@ class MainWindow:
                     bank_entry = self.create_treeview_entry(text_bank, archive_entry)
                     for string_entry in text_bank.entries.values():
                         self.create_treeview_entry(string_entry, bank_entry)
+            for video_source in archive.video_sources.values():
+                self.create_treeview_entry(video_source, archive_entry)
                 
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":
@@ -2539,10 +2794,11 @@ class MainWindow:
                 child.forget()
 
     def save_mod(self):
-        output_folder = filedialog.askdirectory(title="Select location to save combined mod")
+        output_folder = filedialog.askdirectory(title="Select save location")
         if output_folder and os.path.exists(output_folder):
             self.sound_handler.kill_sound()
             self.mod_handler.get_active_mod().save(output_folder)
+            self.reset_unsaved_changes()
         
     """
     TO-DO:
@@ -2563,6 +2819,8 @@ class MainWindow:
             modified = entry.modified or entry.has_modified_children()
         else:
             modified = entry.modified
+        if modified:
+            self.unsaved_changes = True
         if item is None:
             if isinstance(entry, AudioSource):
                 i = self.treeview.tag_has(entry.get_short_id())
@@ -2629,6 +2887,9 @@ class MainWindow:
                     tags = self.treeview.item(item, option="tags")
                     string_entry = self.mod_handler.get_active_mod().get_string_entry(int(tags[1]), int(tags[0]))
                     self.mark_modified(string_entry, item)
+                elif item_type == "Bink Video":
+                    video = self.mod_handler.get_active_mod().get_video(int(self.treeview.item(item, option="tags")[0]))
+                    self.mark_modified(video, item)
                 else: #HircEntry
                     entry = self.mod_handler.get_active_mod().get_hierarchy_entry(int(self.treeview.item(item, option="tags")[0]))
                     self.mark_modified(entry, item)
@@ -2671,15 +2932,32 @@ class MainWindow:
         self.mod_handler.get_active_mod().revert_all()
         self.clear_modified()
         self.show_info_window()
+        self.reset_unsaved_changes()
+
+    def write_separate_patches(self):
+        self.sound_handler.kill_sound()
+        output_folder = filedialog.askdirectory(title="Save Patch File", mustexist=True)
+        if not output_folder:
+            return
+        self.task_manager.schedule(name="Saving Patch Files", callback=self.reset_unsaved_callback,
+                                   task=task(self.mod_handler.get_active_mod().write_separate_patches),
+                                   output_folder=output_folder)
         
     def write_patch(self):
         self.sound_handler.kill_sound()
-        output_file = filedialog.asksaveasfilename(title="Select", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
+        output_file = filedialog.asksaveasfilename(title="Save Patch File", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
         if not output_file:
             return
         output_folder = os.path.dirname(output_file)
         output_file = os.path.basename(output_file)
-        self.task_manager.schedule(name="Saving Patch File", callback=None, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder, output_filename=output_file)
+        self.task_manager.schedule(name="Saving Patch File", callback=self.reset_unsaved_callback, task=task(self.mod_handler.get_active_mod().write_patch), output_folder=output_folder, output_filename=output_file)
+
+    def reset_unsaved_changes(self):
+        self.unsaved_changes = False
+
+    @callback
+    def reset_unsaved_callback(self, none):
+        self.unsaved_changes = False
         
     def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
