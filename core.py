@@ -576,7 +576,10 @@ class GameArchive:
         
     def get_audio_sources(self) -> dict[int, AudioSource]:
         return self.audio_sources
-        
+
+    def get_video_sources(self) -> dict[int, VideoSource]:
+        return self.video_sources
+
     def get_text_banks(self) -> dict[int, TextBank]:
         return self.text_banks
 
@@ -1897,6 +1900,46 @@ class Mod:
                 logger.warning("Unable to import some text data")
         
         return True
+
+    def write_separate_patches(self, output_folder: str = ""):
+        """
+        @exception
+        - OSError
+            - output folder path does not exists
+        """
+        if not os.path.exists(output_folder) or not os.path.isdir(output_folder):
+            raise OSError(f"Invalid output folder '{output_folder}'")
+        for archive in self.game_archives.values():
+            patch_game_archive = GameArchive()
+            patch_game_archive.name = f"{archive.name}.patch_0"
+            patch_game_archive.magic = 0xF0000011
+            patch_game_archive.num_types = 0
+            patch_game_archive.num_files = 0
+            patch_game_archive.unknown = archive.unknown
+            patch_game_archive.unk4Data = archive.unk4Data
+            patch_game_archive.audio_sources = archive.audio_sources
+            patch_game_archive.wwise_banks = {}
+            patch_game_archive.wwise_streams = {}
+            patch_game_archive.text_banks = {}
+            patch_game_archive.video_sources = {}
+
+            for key, value in archive.get_wwise_streams().items():
+                if value.modified:
+                    patch_game_archive.wwise_streams[key] = value
+
+            for key, value in archive.get_wwise_banks().items():
+                if value.modified:
+                    patch_game_archive.wwise_banks[key] = value
+
+            for key, value in archive.get_text_banks().items():
+                if value.modified:
+                    patch_game_archive.text_banks[key] = value
+
+            for key, value in archive.get_video_sources().items():
+                if value.modified:
+                    patch_game_archive.video_sources[key] = value
+
+            patch_game_archive.to_file(output_folder)
 
     def write_patch(self, output_folder: str = "", output_filename: str = ""):
         """

@@ -1609,6 +1609,7 @@ class MainWindow:
         
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
+        self.file_menu.add_command(label="Write Separate Patches", command=self.write_separate_patches)
         
         self.file_menu.add_command(label="Add a Folder to Workspace",
                                    command=self.add_new_workspace)
@@ -2920,6 +2921,15 @@ class MainWindow:
         self.clear_modified()
         self.show_info_window()
         self.reset_unsaved_changes()
+
+    def write_separate_patches(self):
+        self.sound_handler.kill_sound()
+        output_folder = filedialog.askdirectory(title="Save Patch File", mustexist=True)
+        if not output_folder:
+            return
+        self.task_manager.schedule(name="Saving Patch Files", callback=self.reset_unsaved_callback,
+                                   task=task(self.mod_handler.get_active_mod().write_separate_patches),
+                                   output_folder=output_folder)
         
     def write_patch(self):
         self.sound_handler.kill_sound()
