@@ -1896,13 +1896,13 @@ class MainWindow:
             for file in patch_files:
                 self.import_patch(file)
             if os.path.exists(WWISE_CLI):
-                audio_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
+                audio_files = [file for file in import_files if os.path.splitext(file)[1].lower() in SUPPORTED_AUDIO_TYPES]
             else:
-                audio_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
+                audio_files = [file for file in import_files if os.path.splitext(file)[1].lower() == ".wem"]
             if os.path.exists(os.path.join(self.app_state.rad_tools_path, RAD_TOOLS)):
-                video_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_VIDEO_TYPES]
+                video_files = [file for file in import_files if os.path.splitext(file)[1].lower() in SUPPORTED_VIDEO_TYPES]
             else:
-                video_files = [file for file in import_files if os.path.splitext(file)[1] == ".bik"]
+                video_files = [file for file in import_files if os.path.splitext(file)[1].lower() == ".bik"]
             import_files = audio_files + video_files
             if (
                 self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
@@ -2120,7 +2120,7 @@ class MainWindow:
                 video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Bink Video", "*.bik")])
         if not video_file:
             return
-        if os.path.splitext(video_file)[1] != ".bik":
+        if os.path.splitext(video_file)[1].lower() != ".bik":
             # convert to bik
             self.task_manager.schedule_async(name=f"Converting {os.path.basename(video_file)}", callback=self.bik_conversion_callback, task=self.convert_to_bik, video_file=video_file, video_ids=video_ids)
             return
@@ -2151,7 +2151,7 @@ class MainWindow:
                 output_file = filedialog.asksaveasfilename(title="Save video file", filetypes=[("Bink Video", "*.bik")])
         if not output_file:
             return
-        if os.path.splitext(output_file)[1] != ".bik":
+        if os.path.splitext(output_file)[1].lower() != ".bik":
             temp_filename = os.path.normpath(os.path.join(CACHE, f"{int(time.time() * 1000)}.bik"))
             with open(temp_filename, "wb") as f:
                 f.write(self.mod_handler.get_active_mod().get_video(video_id).get_data())
@@ -2411,7 +2411,7 @@ class MainWindow:
             values = self.workspace.item(select, option="values")
             tags = self.workspace.item(select, option="tags")
             assert(len(values) == 1 and len(tags) == 1)
-            if tags[0] == "file" and os.path.splitext(values[0])[1] in SUPPORTED_AUDIO_TYPES and os.path.exists(values[0]):
+            if tags[0] == "file" and os.path.splitext(values[0])[1].lower() in SUPPORTED_AUDIO_TYPES and os.path.exists(values[0]):
                 audio_data = None
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
