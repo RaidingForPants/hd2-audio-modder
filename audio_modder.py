@@ -813,7 +813,7 @@ class AudioSourceWindow:
         self.parent_text_box.configure(state="normal")
         self.parent_text_box.delete(1.0, tk.END)
         if len([p for p in audio.parents if isinstance(p, Sound)]) > 0:
-            self.parent_text_box.insert(tk.END, f"Parent Source object id(s):")
+            self.parent_text_box.insert(tk.END, f"Parent Wwise Source object id(s):")
             for parent in [p for p in audio.parents if isinstance(p, Sound)]:
                 self.parent_text_box.insert(tk.END, "\n"+f"{parent.get_id()}")
             self.parent_text_box.insert(tk.END, "\n\n")
