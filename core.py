@@ -161,11 +161,14 @@ class WwiseDep:
 
     def __init__(self):
         self.data: str = ""
+        self.skip = True
+        self.file_id = 0
         
     def from_memory_stream(self, stream: MemoryStream):
         self.offset = stream.tell()
         self.tag = stream.uint32_read()
         self.data_size = stream.uint32_read()
+        self.skip = False
         self.data = stream.read(self.data_size).decode('utf-8')
         
     def get_data(self) -> bytes:
@@ -587,15 +590,19 @@ class GameArchive:
     def to_file(self, path: str):
         toc_file = MemoryStream()
         stream_file = MemoryStream()
-        self.num_files = len(self.wwise_streams) + 2*len(self.wwise_banks) + len(self.text_banks) + len(self.video_sources)
-        self.num_types = (1 if self.wwise_streams else 0) + (1 if self.text_banks else 0) + (2 if self.wwise_banks else 0) + (1 if self.video_sources else 0)
+        wwise_deps = [bank.dep for bank in self.wwise_banks.values() if not bank.dep.skip]
+        self.num_files = len(self.wwise_streams) + len(self.wwise_banks) + len(wwise_deps) + len(self.text_banks) + len(self.video_sources)
+        self.num_types = 0
+        for item in [self.wwise_streams, self.wwise_banks, self.text_banks, self.video_sources, wwise_deps]:
+            if item:
+                self.num_types += 1
         
         # write header
         toc_file.write(struct.pack("<IIII56s", self.magic, self.num_types, self.num_files, self.unknown, self.unk4Data))
         
         self.write_type_header(toc_file, WWISE_STREAM, len(self.wwise_streams))
         self.write_type_header(toc_file, WWISE_BANK, len(self.wwise_banks))
-        self.write_type_header(toc_file, WWISE_DEP, len(self.wwise_banks))
+        self.write_type_header(toc_file, WWISE_DEP, len(wwise_deps))
         self.write_type_header(toc_file, TEXT_BANK, len(self.text_banks))
         self.write_type_header(toc_file, BINK_VIDEO, len(self.video_sources))
         
@@ -660,15 +667,10 @@ class GameArchive:
             toc_data_offset += len(text_data)
             entry_index += 1
         
-        for bank in self.wwise_banks.values():
-            if bank.dep == None:
-                raise AssertionError(
-                    f"WwiseBank {bank.file_id} does not has a WwsieDep."
-                )
-
-            dep_data = bank.dep.get_data()
+        for dep in wwise_deps:
+            dep_data = dep.get_data()
             toc_entry = TocHeader()
-            toc_entry.file_id = bank.get_id()
+            toc_entry.file_id = dep.file_id
             toc_entry.type_id = WWISE_DEP
             toc_entry.toc_data_offset = toc_data_offset
             toc_entry.stream_file_offset = stream_file_offset
@@ -789,10 +791,18 @@ class GameArchive:
                 for chunk in bank.chunks.keys():
                     if chunk not in ["BKHD", "DATA", "DIDX", "HIRC"]:
                         entry.bank_misc_data = entry.bank_misc_data + chunk.encode('utf-8') + len(bank.chunks[chunk]).to_bytes(4, byteorder='little') + bank.chunks[chunk]
-                        
+
+                # create default dependency
+                dep = WwiseDep()
+                dep.skip = True
+                dep.data = f"Bank {entry.get_id()}"
+                dep.file_id = toc_header.file_id
+                entry.dep = dep
+
                 self.wwise_banks[entry.get_id()] = entry
             elif toc_header.type_id == WWISE_DEP: #wwise dep
                 dep = WwiseDep()
+                dep.file_id = toc_header.file_id
                 toc_file.seek(toc_header.toc_data_offset)
                 dep.from_memory_stream(toc_file)
                 try:
