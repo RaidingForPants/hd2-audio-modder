@@ -2378,9 +2378,10 @@ class MainWindow:
         for select in selects:
             values = self.treeview.item(select, option="values")
             tags = self.treeview.item(select, option="tags")
-            if values[0] != "Audio Source":
-                continue
-            self.play_audio(int(tags[0]))
+            if values[0] == "Audio Source":
+                self.play_audio(int(tags[0]))
+            if values[0] == "Bink Video":
+                self.play_video(int(tags[0]))
 
     def workspace_on_double_click(self, event):
         selects = self.workspace.selection()
