@@ -1668,7 +1668,7 @@ class MainWindow:
         ko_fi_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://ko-fi.com/raidinforpants"))
         github_link = Label(frame, image=github_image, cursor="hand2")
         github_link.image = github_image
-        github_link.pack(side="left")
+        github_link.pack(side="left", padx=10)
         github_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://github.com/raidingforpants"))
 
         
@@ -1875,29 +1875,49 @@ class MainWindow:
             for file in patch_files:
                 self.import_patch(file)
             if os.path.exists(WWISE_CLI):
-                import_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
+                audio_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_AUDIO_TYPES]
             else:
-                import_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
+                audio_files = [file for file in import_files if os.path.splitext(file)[1] == ".wem"]
+            if os.path.exists(os.path.join(self.app_state.rad_tools_path, RAD_TOOLS)):
+                video_files = [file for file in import_files if os.path.splitext(file)[1] in SUPPORTED_VIDEO_TYPES]
+            else:
+                video_files = [file for file in import_files if os.path.splitext(file)[1] == ".bik"]
+            import_files = audio_files + video_files
             if (
-                len(import_files) == 1 
-                and os.path.splitext(import_files[0])[1] in SUPPORTED_AUDIO_TYPES
-                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
-                and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source"
+                self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
+                and len(import_files) == 1
+                and (
+                    # dropping 1 audio file on an audio source, or dropping 1 video file on a video source
+                    (len(audio_files) == 1 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Audio Source")
+                    or
+                    (len(video_files) == 1 and self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")[0] == "Bink Video")
+                )
             ):
-                audio_id = parse_filename(os.path.basename(import_files[0]))
-                if audio_id != 0 and self.mod_handler.get_active_mod().get_audio_source(audio_id) is not None:
+                file_id = parse_filename(os.path.basename(import_files[0]))
+                found_match = False
+                try:
+                    self.mod_handler.get_active_mod().get_audio_source(file_id)
+                    found_match = True
+                except KeyError:
+                    pass
+                try:
+                    self.mod_handler.get_active_mod().get_video_source(file_id)
+                    found_match = True
+                except KeyError:
+                    pass
+                if file_id != 0 and found_match:
                     answer = askyesnocancel(title="Import", message="There is a file with the same name, would you like to replace that instead?")
                     if answer is None:
                         return
                     if not answer:
                         targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                     else:
-                        targets = [audio_id]
+                        targets = [file_id]
                 else:
                     targets = [int(self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option='tags')[0])]
                 file_dict = {import_files[0]: targets}
             else:
-                file_dict = {file: [parse_filename(os.path.basename(file))] for file in import_files}
+                file_dict = {file: [parse_filename(os.path.basename(file))] for file in import_files if parse_filename(os.path.basename(file)) != 0}
             self.import_files(file_dict)
 
     def drop_add_to_workspace(self, event):
@@ -2071,36 +2091,35 @@ class MainWindow:
         self.workspace_popup_menu.tk_popup(event.x_root, event.y_root)
         self.workspace_popup_menu.grab_release()
 
-    def import_video(self, video_id: int):
-        if RAD_TOOLS and os.path.exists(os.path.join(app_state.rad_tools_path, RAD_TOOLS)):
-            video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Video Files", "*.mp4 *.mov *.bik")])
-        else:
-            video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Bink Video", "*.bik")])
+    def import_video(self, video_ids: list[int], video_file: str = ""):
+        if not video_file:
+            if RAD_TOOLS and os.path.exists(os.path.join(app_state.rad_tools_path, RAD_TOOLS)):
+                video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Video Files", "*.mp4 *.mov *.bik")])
+            else:
+                video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Bink Video", "*.bik")])
         if not video_file:
             return
         if os.path.splitext(video_file)[1] != ".bik":
             # convert to bik
-            self.task_manager.schedule_async(name=f"Converting {os.path.basename(video_file)}", callback=self.bik_conversion_callback, task=self.convert_to_bik, video_file=video_file, video_id=video_id)
+            self.task_manager.schedule_async(name=f"Converting {os.path.basename(video_file)}", callback=self.bik_conversion_callback, task=self.convert_to_bik, video_file=video_file, video_ids=video_ids)
             return
-        self.mod_handler.get_active_mod().import_video(video_file, video_id)
-        self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id)])
+        for video_id in video_ids:
+            self.mod_handler.get_active_mod().import_video(video_file, video_id)
+        self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id) for video_id in video_ids])
 
     @async_task
-    async def convert_to_bik(self, video_file: str, video_id: int):
+    async def convert_to_bik(self, video_file: str, video_ids: list[int]):
         timestamp = int(time.time() * 1000)
         converted_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bik"))
         p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await p.wait()
-        return converted_filename, video_id
+        return converted_filename, video_ids
 
     @callback
-    def bik_conversion_callback(self, video_file: str, video_id: int):
-        self.mod_handler.get_active_mod().import_video(video_file, video_id)
-        self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id)])
-        try:
-            os.remove(video_file)
-        except:
-            pass
+    def bik_conversion_callback(self, video_file: str, video_ids: list[int]):
+        for video_id in video_ids:
+            self.mod_handler.get_active_mod().import_video(video_file, video_id)
+        self.check_modified(diff=[self.mod_handler.get_active_mod().get_video(video_id) for video_id in video_ids])
 
     def dump_video(self, video_id: int, output_file: str = ""):
         if not output_file:
@@ -2109,6 +2128,8 @@ class MainWindow:
                                                         filetypes=[("MP4", "*.mp4"), ("Bink Video", "*.bik")])
             else:
                 output_file = filedialog.asksaveasfilename(title="Save video file", filetypes=[("Bink Video", "*.bik")])
+        if not output_file:
+            return
         if os.path.splitext(output_file)[1] != ".bik":
             temp_filename = os.path.normpath(os.path.join(CACHE, f"{int(time.time() * 1000)}.bik"))
             with open(temp_filename, "wb") as f:
@@ -2158,6 +2179,10 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
+        # separate out video files
+        videos = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in SUPPORTED_VIDEO_TYPES}
+        for video, targets in videos.items():
+            self.import_video(targets, video)
         self.task_manager.schedule(name="Importing Files", callback=self.import_files_callback, task=self.import_files_task, file_dict=file_dict)
         
     @task
@@ -2292,7 +2317,7 @@ class MainWindow:
             if is_single and self.treeview.item(self.treeview.selection()[0], option="values")[0] == "Bink Video":
                 self.right_click_menu.add_command(
                     label="Import Video",
-                    command=lambda: self.import_video(int(self.treeview.item(self.treeview.selection()[0], option="tags")[0]))
+                    command=lambda: self.import_video([int(self.treeview.item(self.treeview.selection()[0], option="tags")[0])])
                 )
                 self.right_click_menu.add_command(
                     label="Dump Video",
@@ -2827,6 +2852,9 @@ class MainWindow:
                     tags = self.treeview.item(item, option="tags")
                     string_entry = self.mod_handler.get_active_mod().get_string_entry(int(tags[1]), int(tags[0]))
                     self.mark_modified(string_entry, item)
+                elif item_type == "Bink Video":
+                    video = self.mod_handler.get_active_mod().get_video(int(self.treeview.item(item, option="tags")[0]))
+                    self.mark_modified(video, item)
                 else: #HircEntry
                     entry = self.mod_handler.get_active_mod().get_hierarchy_entry(int(self.treeview.item(item, option="tags")[0]))
                     self.mark_modified(entry, item)

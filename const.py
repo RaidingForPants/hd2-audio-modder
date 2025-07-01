@@ -28,5 +28,6 @@ REV_AUDIO = 0x01A01052
 DEFAULT_CONVERSION_SETTING = "Vorbis Quality High"
 
 SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
+SUPPORTED_VIDEO_TYPES = [".bik", ".mp4", ".mov"]
 WWISE_SUPPORTED_SYSTEMS = ["Windows", "Darwin"]
 # [End]

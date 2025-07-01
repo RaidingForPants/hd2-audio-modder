@@ -1209,7 +1209,10 @@ class Mod:
         video.revert_modifications()
 
     def get_video_source(self, file_id: int):
-        return self.video_sources[file_id]
+        try:
+            return self.video_sources[file_id]
+        except KeyError:
+            raise KeyError(f"Cannot find video with id {file_id}")
         
     def add_new_hierarchy_entry(self, soundbank_id: int, entry: HircEntry):
         bank = self.get_wwise_bank(soundbank_id)
