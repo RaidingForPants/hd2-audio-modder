@@ -5,6 +5,7 @@ import time
 import tkinter
 import shutil
 import webbrowser
+import py7zr
 import pathlib
 import zipfile
 import xml.etree.ElementTree as etree
@@ -289,14 +290,14 @@ class FileUploadWindow:
     def drop_add_files(self, event):
         if event.data:
             dropped_files = event.widget.tk.splitlist(event.data)
-            dropped_files = [file for file in dropped_files if os.path.splitext(file)[1].lower() == ".zip" or ".patch_" in os.path.splitext(file)[1]]
+            dropped_files = [file for file in dropped_files if os.path.splitext(file)[1].lower() in [".zip", ".7z"] or ".patch_" in os.path.splitext(file)[1]]
             for file in dropped_files:
                 pending_file = PendingFile(self.scrollframe.interior)
                 pending_file.set_filepath(file)
                 pending_file.pack(side="top", expand=True, fill="x", pady=2)
         
     def add_files(self):
-        filenames = filedialog.askopenfilenames(parent=self.root, title="Choose mod files to combine", filetypes=[("Mod Files", "*.zip *.patch*")])
+        filenames = filedialog.askopenfilenames(parent=self.root, title="Choose mod files to combine", filetypes=[("Mod Files", "*.zip *.7z *.patch*")])
         for name in filenames:
             pending_file = PendingFile(self.scrollframe.interior)
             pending_file.set_filepath(name)
@@ -1803,6 +1804,7 @@ class MainWindow:
     @task
     def combine_mods_task(self, files, mod):
         zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
+        seven_z_files = [file for file in files if os.path.splitext(file)[1].lower() == ".7z"]
         patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
         
         for index, mod_file in enumerate(zip_files):
@@ -1814,7 +1816,15 @@ class MainWindow:
             extract_location = os.path.join(CACHE, str(index))
             os.mkdir(extract_location)
             zip.extractall(path=extract_location)
-            patch_files.extend([os.path.join(extract_location, file) for file in os.listdir(extract_location) if os.path.isfile(os.path.join(extract_location, file)) and "patch" in os.path.splitext(file)[1]])
+            files = [file for file in list_files_recursive(extract_location) if "patch" in os.path.splitext(file)[1]]
+            patch_files.extend(files)
+        for index, mod_file in enumerate(seven_z_files, start=index+1):
+            zip = py7zr.SevenZipFile(mod_file)
+            extract_location = os.path.join(CACHE, str(index))
+            os.mkdir(extract_location)
+            zip.extractall(path=extract_location)
+            files = [file for file in list_files_recursive(extract_location) if "patch" in os.path.splitext(file)[1]]
+            patch_files.extend(files)
         missing_soundbank_ids = []
         archives = set()
         for index, file in enumerate(patch_files):
@@ -1871,6 +1881,8 @@ class MainWindow:
         #self.mod_handler.set_active_mod(current_mod.name)
         
         for file in os.listdir(CACHE):
+            if os.path.splitext(file)[1] == ".bik":
+                continue
             file = os.path.join(CACHE, file)
             try:
                 if os.path.isfile(file):
@@ -2401,7 +2413,7 @@ class MainWindow:
             tags = self.treeview.item(select, option="tags")
             if values[0] == "Audio Source":
                 self.play_audio(int(tags[0]))
-            if values[0] == "Bink Video":
+            if values[0] == "Bink Video" and os.path.exists(os.path.join(self.app_state.rad_tools_path, RAD_TOOLS)):
                 self.play_video(int(tags[0]))
 
     def workspace_on_double_click(self, event):
