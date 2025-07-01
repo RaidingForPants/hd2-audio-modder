@@ -802,14 +802,32 @@ class AudioSourceWindow:
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack(pady=5)
+
+        self.parent_text_box = Text(self.frame, font=('Segoe UI', 12), highlightthickness=0, borderwidth=0)
+        self.parent_text_box.configure(state="disabled")
+        self.parent_text_box.bind("<1>", lambda event: self.parent_text_box.focus_set())
+        self.parent_text_box.pack(pady=5, side="bottom")
         
     def set_audio(self, audio):
+
+        self.parent_text_box.configure(state="normal")
+        self.parent_text_box.delete(1.0, tk.END)
+        if len([p for p in audio.parents if isinstance(p, Sound)]) > 0:
+            self.parent_text_box.insert(tk.END, f"Parent Source object id(s):")
+            for parent in [p for p in audio.parents if isinstance(p, Sound)]:
+                self.parent_text_box.insert(tk.END, "\n"+f"{parent.get_id()}")
+            self.parent_text_box.insert(tk.END, "\n\n")
+        if audio.stream_type != BANK:
+            self.parent_text_box.insert(tk.END, "Wwise Short ID: \n" + f"{audio.get_short_id()}")
+        self.parent_text_box.configure(state="disabled")
+
         self.audio = audio
         self.title_label.configure(text=f"Info for {audio.get_id()}.wem")
         self.play_button.configure(text= '\u23f5')
         self.revert_button.pack_forget()
         self.play_button.pack_forget()
         self.apply_button.pack_forget()
+        self.parent_text_box.pack_forget()
         def reset_button_icon(button):
             button.configure(text= '\u23f5')
         def press_button(button, file_id, callback):
@@ -829,7 +847,7 @@ class AudioSourceWindow:
             self.audio.data = temp
         self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
         self.play_original_button.configure(command=partial(play_original_audio, self.play_original_button, audio.get_short_id(), partial(reset_button_icon, self.play_original_button)))
-        
+        self.parent_text_box.pack(side="bottom", pady=5)
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left")
         
@@ -839,6 +857,8 @@ class AudioSourceWindow:
         else:
             self.play_original_label.forget()
             self.play_original_button.forget()
+
+
             
     def revert(self):
         self.audio.revert_modifications()
@@ -2782,11 +2802,12 @@ class MainWindow:
             self.treeview.item(item, tags=tags)
     
     def mark_modified(self, entry, item=None):
-        self.unsaved_changes = True
         if isinstance(entry, HircEntry):
             modified = entry.modified or entry.has_modified_children()
         else:
             modified = entry.modified
+        if modified:
+            self.unsaved_changes = True
         if item is None:
             if isinstance(entry, AudioSource):
                 i = self.treeview.tag_has(entry.get_short_id())
