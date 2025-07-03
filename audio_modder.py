@@ -2341,6 +2341,10 @@ class MainWindow:
                 label=("Copy File ID" if is_single else "Copy File IDs"),
                 command=self.copy_id
             )
+            self.right_click_menu.add_command(
+                label="Revert Selection",
+                command=lambda: self.revert_selected(self.treeview.selection())
+            )
             if is_single and self.treeview.item(self.treeview.selection()[0], option="values")[0] == "Archive File":
                 self.right_click_menu.add_command(
                     label="Remove Archive",
@@ -2398,6 +2402,32 @@ class MainWindow:
             pass
         finally:
             self.right_click_menu.grab_release()
+
+    def revert_selected(self, treeview_selection):
+        for item in treeview_selection:
+            item_type = self.treeview.item(item, option="values")[0]
+            try:
+                item_id = int(self.treeview.item(item, option="tags")[0])
+            except:
+                item_id = self.treeview.item(item, option="tags")[0]
+            if item_type == "Audio Source":
+                self.mod_handler.get_active_mod().revert_audio(item_id)
+            elif item_type == "Sound Bank":
+                self.mod_handler.get_active_mod().revert_wwise_bank(item_id)
+            elif item_type == "Bink Video":
+                self.mod_handler.get_active_mod().revert_video(item_id)
+            elif item_type == "Text Bank":
+                self.mod_handler.get_active_mod().revert_text_bank(item_id)
+            elif item_type == "String":
+                parent_id = int(self.treeview.item(self.treeview.parent(item), option="tags")[0])
+                self.mod_handler.get_active_mod().revert_string_entry(parent_id, item_id)
+            elif item_type == "Music Segment":
+                parent_id = int(self.treeview.item(self.treeview.parent(item), option="tags")[0])
+                self.mod_handler.get_active_mod().revert_hierarchy_entry(parent_id, item_id)
+            elif item_type == "Music Track":
+                parent_id = int(self.treeview.item(self.treeview.parent(item), option="tags")[0])
+                self.mod_handler.get_active_mod().revert_hierarchy_entry(parent_id, item_id)
+        self.check_modified()
 
     def treeview_on_double_click(self, event):
         """

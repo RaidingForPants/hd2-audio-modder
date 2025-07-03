@@ -1276,6 +1276,7 @@ class Mod:
     def revert_wwise_bank(self, soundbank_id: int):
         self.revert_wwise_hierarchy(soundbank_id)
         for audio in self.get_wwise_bank(soundbank_id).get_content():
+            audio = self.get_audio_source(audio.get_id())
             audio.revert_modifications()
 
     def reroute_sound(self, sound: Sound, audio_data: bytearray):
@@ -1458,6 +1459,7 @@ class Mod:
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
             for audio in bank.get_content():
+                audio = self.get_audio_source(audio.get_id())
                 save_path = os.path.join(subfolder, f"{audio.get_id()}")
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
