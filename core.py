@@ -276,7 +276,7 @@ class WwiseBank:
         self.dep: WwiseDep | None = None
         self.modified_count: int = 0
         self.hierarchy: WwiseHierarchy | None = None
-        self.content: list[AudioSource] = []
+        self.content: list[int] = []
         self.file_id: int = 0
         
     def import_hierarchy(self, new_hierarchy: WwiseHierarchy):
@@ -287,16 +287,16 @@ class WwiseBank:
             )
         self.hierarchy.import_hierarchy(new_hierarchy)
         
-    def add_content(self, content: AudioSource):
+    def add_content(self, content: int):
         self.content.append(content)
         
-    def remove_content(self, content: AudioSource):
+    def remove_content(self, content: int):
         try:
             self.content.remove(content)
         except:
             pass
             
-    def get_content(self) -> list[AudioSource]:
+    def get_content(self) -> list[int]:
         return self.content
         
     def raise_modified(self):
@@ -1029,8 +1029,8 @@ class GameArchive:
                         )
                         continue
                     self.audio_sources[source_id].parents.add(music_track)
-                    if self.audio_sources[source_id] not in bank_audio_sources:
-                        bank.add_content(self.audio_sources[source_id])
+                    if source_id not in bank_audio_sources:
+                        bank.add_content(source_id)
 
             sounds = bank.hierarchy.get_sounds()
             for sound in sounds:
@@ -1054,8 +1054,8 @@ class GameArchive:
                     continue
                 audio_source = self.audio_sources[source_id]
                 audio_source.parents.add(sound)
-                if audio_source not in bank_audio_sources:
-                    bank.add_content(audio_source)
+                if audio_source.get_short_id() not in bank_audio_sources:
+                    bank.add_content(audio_source.get_short_id())
 
         
 class SoundHandler:
@@ -1275,8 +1275,8 @@ class Mod:
         
     def revert_wwise_bank(self, soundbank_id: int):
         self.revert_wwise_hierarchy(soundbank_id)
-        for audio in self.get_wwise_bank(soundbank_id).get_content():
-            audio = self.get_audio_source(audio.get_id())
+        for audio_id in self.get_wwise_bank(soundbank_id).get_content():
+            audio = self.get_audio_source(audio_id)
             audio.revert_modifications()
 
     def reroute_sound(self, sound: Sound, audio_data: bytearray):
@@ -1458,8 +1458,8 @@ class Mod:
             subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
-            for audio in bank.get_content():
-                audio = self.get_audio_source(audio.get_id())
+            for audio_id in bank.get_content():
+                audio = self.get_audio_source(audio_id)
                 save_path = os.path.join(subfolder, f"{audio.get_id()}")
                 with open(save_path+".wem", "wb") as f:
                     f.write(audio.get_data())
@@ -1482,7 +1482,7 @@ class Mod:
             subfolder = os.path.join(output_folder, os.path.basename(bank.dep.data.replace('\x00', '')))
             if not os.path.exists(subfolder):
                 os.mkdir(subfolder)
-            file_ids = [audio.get_id() for audio in bank.get_content()]
+            file_ids = bank.get_content()
             self.dump_multiple_as_wav(file_ids=file_ids, output_folder=subfolder)
 
     def save_archive_file(self, game_archive: GameArchive, output_folder: str = ""):
@@ -1684,7 +1684,8 @@ class Mod:
                 if self.bank_count[key] == 0:
                     for entry in game_archive.get_wwise_banks()[key].hierarchy.entries.values():
                         entry.soundbanks.remove(game_archive.get_wwise_banks()[key])
-                    for audio in self.get_wwise_banks()[key].get_content():
+                    for audio_id in self.get_wwise_banks()[key].get_content():
+                        audio = self.get_audio_source(audio_id)
                         parents = [p for p in audio.parents]
                         for parent in parents:
                             if isinstance(parent, HircEntry) and key in [b.get_id() for b in parent.soundbanks]:
@@ -1780,7 +1781,8 @@ class Mod:
         for key in game_archive.wwise_banks.keys():
             if key in self.get_wwise_banks().keys():
                 self.bank_count[key] += 1
-                for audio in game_archive.wwise_banks[key].get_content():
+                for audio_id in game_archive.wwise_banks[key].get_content():
+                    audio = self.get_audio_source(audio_id)
                     parents = [p for p in audio.parents]
                     for parent in parents:
                         if isinstance(parent, HircEntry) and key in [b.get_id() for b in parent.soundbanks]:

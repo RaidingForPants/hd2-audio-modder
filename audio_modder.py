@@ -2945,7 +2945,7 @@ class MainWindow:
         for bank in self.mod_handler.get_active_mod().get_wwise_banks().values():
             bank_folder = os.path.join(task_folder, bank.dep.data.replace("\x00", "").split("/")[-1])
             os.mkdir(bank_folder)
-            file_ids = [audio_source.get_short_id() for audio_source in bank.get_content()]
+            file_ids = bank.get_content()
             task_id = self.generate_task_id()
             self.active_task_ids.append(task_id)
             self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder)
