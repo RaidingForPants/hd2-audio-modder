@@ -28,6 +28,7 @@ class VideoSource:
         self.filepath: str = ""
         self.video_size: int = 0
         self.replacement_video_size: int = 0
+        self.replacement_video_offset: int = 0
         self.stream_offset: int = 0
         self.file_id: int = 0
         self.modified: bool = False
@@ -42,6 +43,7 @@ class VideoSource:
                 return f.read(self.video_size)
         else:
             with open(self.replacement_filepath, "rb") as f:
+                f.seek(self.replacement_video_offset)
                 return f.read()
 
     def set_data(self, replacement_filepath: str):
@@ -1898,6 +1900,13 @@ class Mod:
                 self.get_text_banks()[text_bank.get_id()].import_text(text_bank)
             except:
                 logger.warning("Unable to import some text data")
+
+        for video in patch_game_archive.get_video_sources().values():
+            try:
+                self.import_video(patch_file+".stream", video.file_id)
+                self.get_video_source(video.file_id).replacement_video_offset = video.stream_offset
+            except Exception as e:
+                logger.warning("Unable to import some video data")
         
         return True
 
@@ -1982,6 +1991,7 @@ class Mod:
 
     def import_video(self, video_path: str, video_id: int):
         self.get_video_sources()[video_id].set_data(video_path)
+        self.get_video(video_id).replacement_video_offset = 0
 
     def dump_video(self, output_path: str, video_id: int):
         with open(output_path, "wb") as output_file:
