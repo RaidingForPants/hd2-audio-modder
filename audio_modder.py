@@ -828,6 +828,8 @@ class AudioSourceWindow:
         self.revert_button.pack_forget()
         self.play_button.pack_forget()
         self.apply_button.pack_forget()
+        self.play_original_label.forget()
+        self.play_original_button.forget()
         self.parent_text_box.pack_forget()
         def reset_button_icon(button):
             button.configure(text= '\u23f5')
@@ -855,9 +857,6 @@ class AudioSourceWindow:
         if self.audio.modified and self.audio.data_old != b"":
             self.play_original_label.pack(side="right")
             self.play_original_button.pack(side="right")
-        else:
-            self.play_original_label.forget()
-            self.play_original_button.forget()
 
 
             
