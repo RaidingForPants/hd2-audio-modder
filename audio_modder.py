@@ -2947,7 +2947,7 @@ class MainWindow:
             file_ids = bank.get_content()
             task_id = self.generate_task_id()
             self.active_task_ids.append(task_id)
-            self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder)
+            self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder, with_seq=False)
         
     def play_audio(self, file_id: int, callback=None):
         audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
