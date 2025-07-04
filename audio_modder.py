@@ -1805,7 +1805,7 @@ class MainWindow:
         zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
         seven_z_files = [file for file in files if os.path.splitext(file)[1].lower() == ".7z"]
         patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
-        
+        index = 0
         for index, mod_file in enumerate(zip_files):
             try:
                 zip = zipfile.ZipFile(mod_file)
