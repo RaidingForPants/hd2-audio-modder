@@ -1324,19 +1324,29 @@ class TaskManager:
         return wrapper
         
     def sync_wrapper(self, task, callback):
-        if callback is not None:
+        if task is not None and callback is not None:
             def wrapper(*args, **kwargs):
                 try:
                     result = task(*args, **kwargs)
                     callback(*result)
                 finally:
                     self.sync_task_finished()
-        else:
+        elif task is not None:
             def wrapper(*args, **kwargs):
                 try:
                     task(*args, **kwargs)
                 finally:
                     self.sync_task_finished()
+        elif callback is not None:
+            def wrapper(*args, **kwargs):
+                try:
+                    args = args + tuple(kwargs.values())
+                    callback(*args)
+                finally:
+                    self.sync_task_finished()
+        else:
+            def wrapper(*args, **kwargs):
+                self.sync_task_finished()
         return wrapper
         
     def async_task_finished(self, future):
@@ -1404,7 +1414,7 @@ def async_task(func):
 
 def callback(callback):
     def wrapper(*args, **kwargs):
-        args[0].root.after_idle(callback, *args, **kwargs)
+        args[0].root.after_idle(callback, *args)
     return wrapper
 
 class MainWindow:
@@ -2174,8 +2184,6 @@ class MainWindow:
 
     @async_task
     async def convert_from_bik(self, bik_file: str, output_file: str):
-        print(bik_file)
-        print(output_file)
         output_file = os.path.normpath(output_file)
         p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_CONVERT, bik_file, output_file, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await p.wait()
@@ -3023,6 +3031,17 @@ class MainWindow:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=self.import_patch_load_archive_finished, task=self.load_archive_task, archive_files=[archive])
         self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
+        for video in new_archive.video_sources.values():
+            if video.file_id not in self.mod_handler.get_active_mod().get_video_sources().keys():
+                self.task_manager.schedule(name="", callback=self.create_view_callback, task=None, new_game_archive=new_archive)
+                break
+
+    @callback
+    def create_view_callback(self, new_game_archive):
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view(new_game_archive)
+        else:
+            self.create_hierarchy_view(new_game_archive)
         
     @callback
     def import_patch_load_archive_finished(self, results):

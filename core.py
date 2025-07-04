@@ -1905,12 +1905,32 @@ class Mod:
             except:
                 logger.warning("Unable to import some text data")
 
-        for video in patch_game_archive.get_video_sources().values():
+        add_patch = False
+        for video in list(patch_game_archive.get_video_sources().values()):
+            has_video_source = False
             try:
-                self.import_video(patch_file+".stream", video.file_id)
-                self.get_video_source(video.file_id).replacement_video_offset = video.stream_offset
-            except Exception as e:
-                logger.warning("Unable to import some video data")
+                self.get_video_source(video.file_id)
+                has_video_source = True
+            except KeyError:
+                pass
+
+            if not has_video_source:
+                self.video_sources[video.file_id] = video
+                add_patch = True
+            else:
+                try:
+                    self.import_video(patch_file+".stream", video.file_id)
+                    self.get_video_source(video.file_id).replacement_video_offset = video.stream_offset
+                except Exception as e:
+                    logger.warning("Unable to import some video data")
+                del patch_game_archive.video_sources[video.file_id]
+        if add_patch:
+            patch_game_archive.audio_sources.clear()
+            patch_game_archive.text_banks.clear()
+            patch_game_archive.wwise_banks.clear()
+            patch_game_archive.wwise_streams.clear()
+            patch_game_archive.hierarchy_entries.clear()
+            self.add_game_archive(patch_game_archive)
         
         return True
 
