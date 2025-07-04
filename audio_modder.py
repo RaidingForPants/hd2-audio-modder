@@ -3033,15 +3033,15 @@ class MainWindow:
         self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
         for video in new_archive.video_sources.values():
             if video.file_id not in self.mod_handler.get_active_mod().get_video_sources().keys():
-                self.task_manager.schedule(name="", callback=self.create_view_callback, task=None, new_game_archive=new_archive)
+                self.task_manager.schedule(name="", callback=self.create_view_callback, task=None)
                 break
 
     @callback
-    def create_view_callback(self, new_game_archive):
+    def create_view_callback(self):
         if self.selected_view.get() == "SourceView":
-            self.create_source_view(new_game_archive)
+            self.create_source_view()
         else:
-            self.create_hierarchy_view(new_game_archive)
+            self.create_hierarchy_view()
         
     @callback
     def import_patch_load_archive_finished(self, results):

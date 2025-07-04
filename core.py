@@ -1196,6 +1196,7 @@ class Mod:
         self.text_banks: dict[int, TextBank] = {}
         self.text_count = {}
         self.video_sources: dict[int, VideoSource] = {}
+        self.video_count: dict[int, int] = {}
         self.hierarchy_entries: dict[int, HircEntry] = {}
         self.hierarchy_count: dict[int, int] = {}
         self.game_archives: dict[str, GameArchive] = {}
@@ -1741,8 +1742,16 @@ class Mod:
 
         self.game_archives[key] = game_archive
 
+        # handle if video already loaded
         for key, entry in game_archive.video_sources.items():
             self.video_sources[key] = entry
+            #if key in self.video_sources.keys():
+            #    self.video_count[key] += 1
+            #    game_archive.video_sources[key] = self.get_video_source(key)
+            #else:
+            #    print(key)
+            #    self.video_sources[key] = entry
+            #    self.video_count[key] = 1
         
         replacements = {}
         for key, entry in game_archive.get_hierarchy_entries().items():
@@ -1916,6 +1925,10 @@ class Mod:
 
             if not has_video_source:
                 self.video_sources[video.file_id] = video
+                video.modified = True
+                video.replacement_video_offset = video.stream_offset
+                video.replacement_video_size = video.video_size
+                video.replacement_filepath = video.filepath
                 add_patch = True
             else:
                 try:
