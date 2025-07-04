@@ -52,7 +52,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.18.0"
+VERSION = "1.18.1"
 
 def resource_path(relative_path):
     try:
@@ -828,6 +828,8 @@ class AudioSourceWindow:
         self.revert_button.pack_forget()
         self.play_button.pack_forget()
         self.apply_button.pack_forget()
+        self.play_original_label.forget()
+        self.play_original_button.forget()
         self.parent_text_box.pack_forget()
         def reset_button_icon(button):
             button.configure(text= '\u23f5')
@@ -855,9 +857,6 @@ class AudioSourceWindow:
         if self.audio.modified and self.audio.data_old != b"":
             self.play_original_label.pack(side="right")
             self.play_original_button.pack(side="right")
-        else:
-            self.play_original_label.forget()
-            self.play_original_button.forget()
 
 
             
@@ -1806,7 +1805,7 @@ class MainWindow:
         zip_files = [file for file in files if os.path.splitext(file)[1].lower() == ".zip"]
         seven_z_files = [file for file in files if os.path.splitext(file)[1].lower() == ".7z"]
         patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
-        
+        index = 0
         for index, mod_file in enumerate(zip_files):
             try:
                 zip = zipfile.ZipFile(mod_file)
@@ -2341,6 +2340,10 @@ class MainWindow:
                 label=("Copy File ID" if is_single else "Copy File IDs"),
                 command=self.copy_id
             )
+            self.right_click_menu.add_command(
+                label="Revert Selection",
+                command=lambda: self.revert_selected(self.treeview.selection())
+            )
             if is_single and self.treeview.item(self.treeview.selection()[0], option="values")[0] == "Archive File":
                 self.right_click_menu.add_command(
                     label="Remove Archive",
@@ -2398,6 +2401,32 @@ class MainWindow:
             pass
         finally:
             self.right_click_menu.grab_release()
+
+    def revert_selected(self, treeview_selection):
+        for item in treeview_selection:
+            item_type = self.treeview.item(item, option="values")[0]
+            try:
+                item_id = int(self.treeview.item(item, option="tags")[0])
+            except:
+                item_id = self.treeview.item(item, option="tags")[0]
+            if item_type == "Audio Source":
+                self.mod_handler.get_active_mod().revert_audio(item_id)
+            elif item_type == "Sound Bank":
+                self.mod_handler.get_active_mod().revert_wwise_bank(item_id)
+            elif item_type == "Bink Video":
+                self.mod_handler.get_active_mod().revert_video(item_id)
+            elif item_type == "Text Bank":
+                self.mod_handler.get_active_mod().revert_text_bank(item_id)
+            elif item_type == "String":
+                parent_id = int(self.treeview.item(self.treeview.parent(item), option="tags")[0])
+                self.mod_handler.get_active_mod().revert_string_entry(parent_id, item_id)
+            elif item_type == "Music Segment":
+                parent_id = int(self.treeview.item(self.treeview.parent(item), option="tags")[0])
+                self.mod_handler.get_active_mod().revert_hierarchy_entry(parent_id, item_id)
+            elif item_type == "Music Track":
+                parent_id = int(self.treeview.item(self.treeview.parent(item), option="tags")[0])
+                self.mod_handler.get_active_mod().revert_hierarchy_entry(parent_id, item_id)
+        self.check_modified()
 
     def treeview_on_double_click(self, event):
         """
@@ -2915,10 +2944,10 @@ class MainWindow:
         for bank in self.mod_handler.get_active_mod().get_wwise_banks().values():
             bank_folder = os.path.join(task_folder, bank.dep.data.replace("\x00", "").split("/")[-1])
             os.mkdir(bank_folder)
-            file_ids = [audio_source.get_short_id() for audio_source in bank.get_content()]
+            file_ids = bank.get_content()
             task_id = self.generate_task_id()
             self.active_task_ids.append(task_id)
-            self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder)
+            self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder, with_seq=False)
         
     def play_audio(self, file_id: int, callback=None):
         audio = self.mod_handler.get_active_mod().get_audio_source(file_id)

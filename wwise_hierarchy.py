@@ -2,17 +2,14 @@
 Bank Version 141
 """
 
-import struct
-import uuid
 import copy
-
+import uuid
 from collections.abc import Callable
 from typing import Union
 
 from backend.db import SQLiteDatabase
 from log import logger
 from util import *
-
 
 HircType = {
     0x01: "State",
@@ -149,14 +146,6 @@ class HircEntry:
                 self.parent.lower_modified()
             for bank in self.soundbanks:
                 bank.lower_modified()
-        
-    def import_entry(self, new_entry):
-        if (
-            (self.modified and new_entry.get_data() != self.data_old)
-            or
-            (not self.modified and new_entry.get_data() != self.get_data())
-        ):
-            self.set_data(new_entry)
         
     def get_id(self):
         return self.hierarchy_id

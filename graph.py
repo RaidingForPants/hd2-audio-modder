@@ -86,7 +86,7 @@ class Graph(Frame):
         self.fig.canvas.draw()
         
     def get_data(self):
-        return (self.x, self.y)
+        return self.x, self.y
         
     def onclick(self, event):
         min_distance = 999999999999
