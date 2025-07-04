@@ -44,7 +44,7 @@ class VideoSource:
         else:
             with open(self.replacement_filepath, "rb") as f:
                 f.seek(self.replacement_video_offset)
-                return f.read()
+                return f.read(self.replacement_video_size)
 
     def set_data(self, replacement_filepath: str):
         self.replacement_filepath = replacement_filepath
@@ -1677,7 +1677,10 @@ class Mod:
         game_archive = self.game_archives[archive_name]
 
         for key in game_archive.video_sources.keys():
-            del self.video_sources[key]
+            if key in self.video_sources.keys():
+                self.video_count[key] -= 1
+                if self.video_count[key] == 0:
+                    del self.video_sources[key]
             
         for key in game_archive.wwise_banks.keys():
             if key in self.get_wwise_banks().keys():
@@ -1744,14 +1747,17 @@ class Mod:
 
         # handle if video already loaded
         for key, entry in game_archive.video_sources.items():
-            self.video_sources[key] = entry
-            #if key in self.video_sources.keys():
-            #    self.video_count[key] += 1
-            #    game_archive.video_sources[key] = self.get_video_source(key)
-            #else:
-            #    print(key)
-            #    self.video_sources[key] = entry
-            #    self.video_count[key] = 1
+            if key in self.video_sources.keys():
+                self.video_count[key] += 1
+                video = self.get_video_source(key)
+                game_archive.video_sources[key] = video
+                if "_patch" not in os.path.splitext(game_archive.name)[1]:
+                    video.filepath = entry.filepath
+                    video.video_size = entry.video_size
+                    video.stream_offset = entry.stream_offset
+            else:
+                self.video_sources[key] = entry
+                self.video_count[key] = 1
         
         replacements = {}
         for key, entry in game_archive.get_hierarchy_entries().items():
@@ -1924,11 +1930,10 @@ class Mod:
                 pass
 
             if not has_video_source:
-                self.video_sources[video.file_id] = video
                 video.modified = True
                 video.replacement_video_offset = video.stream_offset
                 video.replacement_video_size = video.video_size
-                video.replacement_filepath = video.filepath
+                video.replacement_filepath = video.filepath+".stream"
                 add_patch = True
             else:
                 try:
