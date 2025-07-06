@@ -2200,6 +2200,15 @@ class Mod:
         filetypes.remove(".wav")
         filetypes.remove(".wem")
         others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in filetypes}
+        # move invalid wems to the "other audio formats" list
+        for wem in list(wems.keys()):
+            with open(wem, 'rb') as f:
+                audio_data = bytearray(f.read(24))
+                if audio_data[20:22] != b"\xFF\xFF": # invalid wem
+                    # add wem to "others"
+                    others[wem] = wems[wem]
+                    del wems[wem]
+                    
         temp_files = []
         for file in others.keys():
             subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
