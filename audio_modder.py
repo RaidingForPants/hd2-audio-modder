@@ -3025,16 +3025,23 @@ class MainWindow:
                     archives.add(r.archive)
                 else:
                     missing_soundbanks.add(new_archive.get_wwise_banks()[soundbank_id])
-        if len(missing_soundbanks) > 0:
-            showwarning(title="Missing Soundbanks", message="Could not automatically load all soundbanks in the patch; it may be outdated. Please ensure any needed archives are manually loaded before importing this patch.\n" + "\n".join([bank.dep.data.replace("\x00", "") for bank in missing_soundbanks]))
+        #if len(missing_soundbanks) > 0:
+        #    showwarning(title="Missing Soundbanks", message="Could not automatically load all soundbanks in the patch; it may be outdated. Please ensure any needed archives are manually loaded before importing this patch.\n" + "\n".join([bank.dep.data.replace("\x00", "") for bank in missing_soundbanks]))
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=self.import_patch_load_archive_finished, task=self.load_archive_task, archive_files=[archive])
-        self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
+        reload_view = False
         for video in new_archive.video_sources.values():
             if video.file_id not in self.mod_handler.get_active_mod().get_video_sources().keys():
-                self.task_manager.schedule(name="", callback=self.create_view_callback, task=None)
+                reload_view = True
                 break
+        for bank in new_archive.wwise_banks.values():
+            if bank.get_id() not in self.mod_handler.get_active_mod().get_wwise_banks().keys():
+                reload_view = True
+                break
+        self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
+        if reload_view:
+            self.task_manager.schedule(name="", callback=self.create_view_callback, task=None)
 
     @callback
     def create_view_callback(self):

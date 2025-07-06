@@ -1921,6 +1921,12 @@ class Mod:
                 logger.warning("Unable to import some text data")
 
         add_patch = False
+        for bank in list(patch_game_archive.get_wwise_banks().values()):
+            if bank.get_id() in self.get_wwise_banks().keys():
+                del patch_game_archive.wwise_banks[bank.get_id()]
+        if len(patch_game_archive.get_wwise_banks()) > 0:
+            add_patch = True
+
         for video in list(patch_game_archive.get_video_sources().values()):
             has_video_source = False
             try:
@@ -1943,11 +1949,7 @@ class Mod:
                     logger.warning("Unable to import some video data")
                 del patch_game_archive.video_sources[video.file_id]
         if add_patch:
-            patch_game_archive.audio_sources.clear()
             patch_game_archive.text_banks.clear()
-            patch_game_archive.wwise_banks.clear()
-            patch_game_archive.wwise_streams.clear()
-            patch_game_archive.hierarchy_entries.clear()
             self.add_game_archive(patch_game_archive)
         
         return True
@@ -2208,7 +2210,7 @@ class Mod:
                     # add wem to "others"
                     others[wem] = wems[wem]
                     del wems[wem]
-                    
+
         temp_files = []
         for file in others.keys():
             subprocess.run([VGMSTREAM, "-o", f"{os.path.join(TMP, os.path.splitext(os.path.basename(file))[0])}.wav", file], stdout=subprocess.DEVNULL).check_returncode()
