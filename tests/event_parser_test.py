@@ -4,7 +4,7 @@ import unittest
 from core import GameArchive
 from log import logger
 from tests.parser_test_common import test_all_archive_sync
-from wwise_hierarchy import HircEntry, Event
+from wwise_hierarchy_154 import HircEntry, Event
 
 
 class TestEventParser(unittest.TestCase):
