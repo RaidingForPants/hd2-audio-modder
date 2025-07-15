@@ -20,8 +20,8 @@ from xlocale import *
 from util import *
 import wwise_hierarchy_140
 import wwise_hierarchy_154
-from wwise_hierarchy_154 import WwiseHierarchy_140
-from wwise_hierarchy_140 import WwiseHierarchy_154
+from wwise_hierarchy_154 import WwiseHierarchy_154
+from wwise_hierarchy_140 import WwiseHierarchy_140
 
 from log import logger
 
@@ -279,11 +279,11 @@ class WwiseBank:
         self.modified: bool = False
         self.dep: WwiseDep | None = None
         self.modified_count: int = 0
-        self.hierarchy: WwiseHierarchy_140 | None = None
+        self.hierarchy: WwiseHierarchy_154 | None = None
         self.content: list[int] = []
         self.file_id: int = 0
         
-    def import_hierarchy(self, new_hierarchy: WwiseHierarchy_140):
+    def import_hierarchy(self, new_hierarchy: WwiseHierarchy_154):
         if self.hierarchy == None:
             raise RuntimeError(
                 "No wwise hierarchy is assigned to this instance of "
@@ -773,6 +773,7 @@ class GameArchive:
                 else:
                     hirc = WwiseHierarchy_140(soundbank=entry)
                 try:
+                    print(type(hirc))
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
                     pass
@@ -876,7 +877,7 @@ class GameArchive:
         self, 
         source: wwise_hierarchy_140.BankSourceStruct | wwise_hierarchy_154.BankSourceStruct,
         media_index: MediaIndex,
-        hirc: WwiseHierarchy_140,
+        hirc: WwiseHierarchy_154,
         dep: WwiseDep
     ) -> AudioSource | None:
         """
@@ -1664,7 +1665,7 @@ class Mod:
 
         return True
         
-    def import_wwise_hierarchy(self, soundbank_id: int, new_hierarchy: WwiseHierarchy_140):
+    def import_wwise_hierarchy(self, soundbank_id: int, new_hierarchy: WwiseHierarchy_154):
         self.get_wwise_bank(soundbank_id).import_hierarchy(new_hierarchy)
         
     def generate_hierarchy_id(self, soundbank_id: int) -> int:

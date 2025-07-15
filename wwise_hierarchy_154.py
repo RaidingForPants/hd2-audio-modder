@@ -210,18 +210,20 @@ class MusicRandomSequence(HircEntry):
 
 class MusicSegment(HircEntry):
     
-    import_values = ["parent_id", "tracks", "duration", "entry_marker", "exit_marker", "unused_sections", "markers"]
+    import_values = ["base_params", "tracks", "duration", "entry_marker", "exit_marker", "unused_sections", "markers"]
 
     def __init__(self):
         super().__init__()
         self.tracks = []
         self.duration = 0
+        self.bit_flags = 0
         self.entry_marker = None
         self.exit_marker = None
         self.unused_sections = []
         self.markers = []
         self.modified = False
         self.parent_id = 0
+        self.base_params: BaseParam = None
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -229,15 +231,8 @@ class MusicSegment(HircEntry):
         entry.hierarchy_type = stream.uint8_read()
         entry.size = stream.uint32_read()
         entry.hierarchy_id = stream.uint32_read()
-        entry.unused_sections.append(stream.read(10))
-        entry.parent_id = stream.uint32_read()
-        entry.unused_sections.append(stream.read(1))
-        n = stream.uint8_read() #number of props
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1))
-        n = stream.uint8_read() #number of props (again)
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
+        entry.bit_flags = stream.uint8_read()
+        entry.base_params = BaseParam.from_memory_stream(stream)
         n = stream.uint32_read() #number of children (tracks)
         for _ in range(n):
             entry.tracks.append(stream.uint32_read())
@@ -301,16 +296,12 @@ class MusicSegment(HircEntry):
     def get_data(self):
         return (
             b"".join([
-                struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
-                self.unused_sections[0],
-                self.parent_id.to_bytes(4, byteorder="little"),
-                self.unused_sections[1],
-                self.unused_sections[2],
-                self.unused_sections[3],
+                struct.pack("<BIIB", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags),
+                self.base_params.get_data(),
                 len(self.tracks).to_bytes(4, byteorder="little"),
                 b"".join([x.to_bytes(4, byteorder="little") for x in self.tracks]),
-                self.unused_sections[4],
-                self.unused_sections[5],
+                self.unused_sections[0],
+                self.unused_sections[1],
                 struct.pack("<d", self.duration),
                 len(self.markers).to_bytes(4, byteorder="little"),
                 b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in self.markers])
@@ -444,7 +435,7 @@ class Action(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -532,11 +523,11 @@ class MusicTrack(HircEntry):
         entry.size = stream.uint32_read()
         start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
-        #entry.bit_flags = stream.uint8_read()
         num_sources = stream.uint32_read()
         for _ in range(num_sources):
             source = BankSourceStruct.from_memory_stream(stream)
             entry.sources.append(source)
+        entry.bit_flags = stream.uint8_read()
         num_track_info = stream.uint32_read()
         for _ in range(num_track_info):
             track = TrackInfoStruct.from_bytes(stream.read(48))
@@ -558,8 +549,8 @@ class MusicTrack(HircEntry):
         b = b"".join([source.get_data() for source in self.sources])
         t = b"".join([track.get_data() for track in self.track_info])
         clips = b"".join([clip.get_data() for clip in self.clip_automations])
-        payload = b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unused_sections[1] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
-        self.size = 9 + len(payload)
+        payload = b + self.bit_flags.to_bytes(1, "little") + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unused_sections[1] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
+        self.size = 8 + len(payload)
         return struct.pack("<BIII", self.hierarchy_type, self.size, self.hierarchy_id, len(self.sources)) + payload
 
 class ActionStop(Action):
@@ -1688,7 +1679,7 @@ class Event(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1827,7 +1818,7 @@ class RandomSequenceContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1879,6 +1870,7 @@ class BankSourceStruct:
         self.plugin_id: int = 0
         self.stream_type: int = 0
         self.source_id: int = 0
+        self.cache_id: int = 0
 
         # For some reason, it still work although it's not being updated
         self.mem_size: int = 0 
@@ -1890,8 +1882,8 @@ class BankSourceStruct:
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         b = BankSourceStruct()
-        b.plugin_id, b.stream_type, b.source_id, b.mem_size, b.bit_flags = \
-            struct.unpack("<IBIIB", stream.read(14))
+        b.plugin_id, b.stream_type, b.source_id, b.cache_id, b.mem_size, b.bit_flags = \
+            struct.unpack("<IBIIIB", stream.read(18))
         if (b.plugin_id & 0x0F) == 2:
             if b.plugin_id:
                 b.plugin_size = stream.uint32_read()
@@ -1901,10 +1893,11 @@ class BankSourceStruct:
         
     def get_data(self):
         b = struct.pack(
-            "<IBIIB",
+            "<IBIIIB",
             self.plugin_id,
             self.stream_type,
             self.source_id,
+            self.cache_id,
             self.mem_size,
             self.bit_flags
         )
@@ -1995,7 +1988,7 @@ class Sound(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -2051,7 +2044,7 @@ class HircEntryFactory:
                 entry = HircEntry.from_memory_stream(stream)
         return entry
             
-class WwiseHierarchy_140:
+class WwiseHierarchy_154:
     
     def __init__(self, soundbank = None):
         self.entries: dict[int, HircEntry] = {}
@@ -2090,7 +2083,7 @@ class WwiseHierarchy_140:
             if parent_id != None and parent_id in self.entries:
                 entry.parent = self.entries[parent_id]
                 
-    def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_140'):
+    def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_154'):
         for entry in new_hierarchy.get_entries():
             if isinstance(entry, (MusicSegment, MusicTrack)):
                 if entry.hierarchy_id in self.entries:
@@ -2315,16 +2308,15 @@ class FxChunk:
     """
 
     def __init__(
-        self, uFxIndex: int, fxId: int, bIsShareSet: int, bIsRendered: int
+        self, uFxIndex: int, fxId: int, bitVector: int
     ):
         self.uFxIndex: int = uFxIndex # U8i
         self.fxId: int = fxId # tid
-        self.bIsShareSet: int = bIsShareSet # U8x
-        self.bIsRendered: int = bIsRendered # U8x
+        self.bitVector: int = bitVector # U8x
 
     def get_data(self):
         return struct.pack(
-            "<BIBB", self.uFxIndex, self.fxId, self.bIsShareSet, self.bIsRendered
+            "<BIB", self.uFxIndex, self.fxId, self.bitVector
         )
 
 
@@ -2737,26 +2729,38 @@ class StateProp:
     def to_bytes(self):
         return struct.pack("<3B", self.propertyId, self.accumType, self.inDb)
 
+class AkPropBundle:
+    def __init__(self, pID: int, pValue: float):
+        self.pID = pID
+        self.pValue = pValue
+
+    def get_data(self):
+        return struct.pack("<Bf", self.pID, self.pValue)
 
 class StateGroupState:
     """
     ulStateID tid
-    ulStateInstanceID tid
+    cProps u16
+    pProps AkPropBundle[]
     """
 
-    def __init__(self, ulStateID: int = 0, ulStateInstanceID: int = 0):
-       self.ulStateID = ulStateID 
-       self.ulStateInstanceID = ulStateInstanceID
+    def __init__(self, ulStateID: int = 0, cProps: int = 0, pProps: list[AkPropBundle] = []):
+       self.ulStateID = ulStateID
+       self.cProps = cProps
+       self.pProps = pProps
 
     def get_data(self):
-        return struct.pack("<II", self.ulStateID, self.ulStateInstanceID)
+        b = struct.pack("<IH", self.ulStateID, self.cProps)
+        for pProp in self.pProps:
+            b += pProp.get_data()
+        return b
 
 
 class StateGroup:
     """
     ulStateGroupID tid
     eStateSyncType U8x
-    ulNumStates var (assume 8 bits, can be more)
+    states StateGroupState[]
     """
 
     def __init__(
@@ -2914,14 +2918,13 @@ class BaseParam:
     def __init__(self):
         self.bIsOverrideParentFx: int = 0
         self.uNumFx: int = 0
-        self.bitsFxBypass = 0
+        self.bBypassAll = 0
         self.fxChunks: list[FxChunk] = []
 
         self.bIsOverrideParentMetadata: int = 0
         self.uNumFxMetadata: int = 0
         self.fxChunksMetadata: list[FxChunkMetadata] = []
 
-        self.bOverrideAttachmentParams: int = 0
         self.overrideBusId: int = 0
         self.directParentID: int = 0
         self.byBitVectorA: int = 0
@@ -2938,7 +2941,7 @@ class BaseParam:
 
         self.stateParams = StateParams()
 
-        self.ulNumRTPC: int = 0
+        self.uNumCurves: int = 0
         self.rtpcs: list[RTPC] = []
 
     @staticmethod
@@ -2949,13 +2952,12 @@ class BaseParam:
         baseParam.bIsOverrideParentFx = stream.uint8_read()
         baseParam.uNumFx = stream.uint8_read()
         if baseParam.uNumFx > 0:
-            baseParam.bitsFxBypass = stream.uint8_read()
+            baseParam.bPypassAll = stream.uint8_read()
             baseParam.fxChunks = [
                 FxChunk(
                     stream.uint8_read(),
                     stream.uint32_read(),
                     stream.uint8_read(),
-                    stream.uint8_read()
                 )
                 for _ in range(baseParam.uNumFx)
             ]
@@ -2972,8 +2974,6 @@ class BaseParam:
                 )
                 for _ in range(baseParam.uNumFxMetadata)
             ]
-
-        baseParam.bOverrideAttachmentParams = stream.uint8_read()
 
         baseParam.overrideBusId = stream.uint32_read()
 
@@ -3020,10 +3020,15 @@ class BaseParam:
             ulStateGroupID = stream.uint32_read()
             eStateSyncType = stream.uint8_read()
             ulNumStates = stream.uint8_read()
-            states: list[StateGroupState] = [
-                StateGroupState(stream.uint32_read(), stream.uint32_read())
-                for _ in range(ulNumStates)
-            ]
+            states: list[StateGroupState] = []
+            for _ in range(ulNumStates):
+                ulStateID = stream.uint32_read()
+                cProps = stream.uint16_read()
+                pProps = [
+                    AkPropBundle(stream.uint16_read(), stream.float_read())
+                    for _ in range(cProps)
+                ]
+                states.append(StateGroupState(ulStateID, cProps, pProps))
             stateGroups.append(StateGroup(
                 ulStateGroupID,
                 eStateSyncType,
@@ -3033,9 +3038,9 @@ class BaseParam:
         baseParam.stateParams.stateGroups = stateGroups
 
         # [RTPC No Modulator]
-        baseParam.ulNumRTPC = stream.uint16_read()
+        baseParam.uNumCurves = stream.uint16_read()
         rtpcs: list[RTPC] = []
-        for _ in range(baseParam.ulNumRTPC):
+        for _ in range(baseParam.uNumCurves):
             RTPCID = stream.uint32_read()
             rtpcType = stream.uint8_read()
             rtpcAccum = stream.uint8_read()
@@ -3069,7 +3074,7 @@ class BaseParam:
             self.uNumFx, len(self.fxChunks)
         )
         if self.uNumFx > 0:
-            b += struct.pack("<B", self.bitsFxBypass)
+            b += struct.pack("<B", self.bBypassAll)
             for fxChunk in self.fxChunks:
                 b += fxChunk.get_data()
 
@@ -3085,8 +3090,7 @@ class BaseParam:
                 b += fxChunkMetadata.to_bytes()
 
         b += struct.pack(
-            "<BIIB", 
-            self.bOverrideAttachmentParams,
+            "<IIB",
             self.overrideBusId,
             self.directParentID,
             self.byBitVectorA
@@ -3104,10 +3108,10 @@ class BaseParam:
 
         b += self.stateParams.get_data()
 
-        b += struct.pack("<H", self.ulNumRTPC)
+        b += struct.pack("<H", self.uNumCurves)
         assert_equal(
             "# of RTPC != # of RTPC in the array",
-            self.ulNumRTPC, len(self.rtpcs)
+            self.uNumCurves, len(self.rtpcs)
         )
         for rtpc in self.rtpcs:
             b += rtpc.get_data()
@@ -3304,7 +3308,7 @@ class LayerContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3411,7 +3415,7 @@ class ActorMixer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3476,16 +3480,14 @@ class SwitchGroup:
 class SwitchParam:
     """
     ulNodeID tid
-    byBitVectorPlayBack U8x
-    byBitVectorMode U8x
+    byBitVector U8x
     fadeOutTime s32
     fadeInTime s32
     """
 
     def __init__(self):
         self.ulNodeID: int = 0
-        self.byBitVectorPlayBack: int = 0
-        self.byBitVectorMode: int = 0
+        self.byBitVector: int = 0
         self.fadeOutTime: int = 0
         self.fadeInTime: int = 0
 
@@ -3494,8 +3496,7 @@ class SwitchParam:
         param = SwitchParam()
 
         param.ulNodeID = stream.uint32_read()
-        param.byBitVectorPlayBack = stream.uint8_read()
-        param.byBitVectorMode = stream.uint8_read()
+        param.byBitVector = stream.uint8_read()
         param.fadeOutTime = stream.int32_read()
         param.fadeInTime = stream.int32_read()
 
@@ -3505,15 +3506,14 @@ class SwitchParam:
         b = struct.pack(
             "<IBBii",
             self.ulNodeID,
-            self.byBitVectorPlayBack,
-            self.byBitVectorMode,
+            self.byBitVector,
             self.fadeOutTime,
             self.fadeInTime
         )
         assert_equal(
             "Packed SwitchParam data does not have the correct data size!",
             len(b),
-            4 + 1 + 1 + 4 + 4
+            4 + 1 + 4 + 4
         )
         return b
         
@@ -3695,7 +3695,7 @@ class SwitchContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)

@@ -450,7 +450,7 @@ class Action(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1699,7 +1699,7 @@ class Event(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1838,7 +1838,7 @@ class RandomSequenceContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -2006,7 +2006,7 @@ class Sound(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -2063,7 +2063,7 @@ class HircEntryFactory:
         return entry
 
 
-class WwiseHierarchy_154:
+class WwiseHierarchy_140:
 
     def __init__(self, soundbank=None):
         self.entries: dict[int, HircEntry] = {}
@@ -2102,7 +2102,7 @@ class WwiseHierarchy_154:
             if parent_id != None and parent_id in self.entries:
                 entry.parent = self.entries[parent_id]
 
-    def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_154'):
+    def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_140'):
         for entry in new_hierarchy.get_entries():
             if isinstance(entry, (MusicSegment, MusicTrack)):
                 if entry.hierarchy_id in self.entries:
@@ -3315,7 +3315,7 @@ class LayerContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3421,7 +3421,7 @@ class ActorMixer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3703,7 +3703,7 @@ class SwitchContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy_154 = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
