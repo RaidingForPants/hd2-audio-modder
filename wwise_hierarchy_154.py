@@ -476,12 +476,12 @@ class Action(HircEntry):
 class TrackInfoStruct:
     
     def __init__(self):
-        self.track_id = self.source_id = self.event_id = self.play_at = self.begin_trim_offset = self.end_trim_offset = self.source_duration = 0
+        self.track_id = self.source_id = self.cache_id = self.event_id = self.play_at = self.begin_trim_offset = self.end_trim_offset = self.source_duration = 0
 
     @classmethod
     def from_bytes(cls, bytes: bytes | bytearray):
         t = TrackInfoStruct()
-        t.track_id, t.source_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack("<IIIdddd", bytes)
+        t.track_id, t.source_id, t.cache_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack("<IIIIdddd", bytes)
         return t
         
     def get_id(self):
@@ -491,7 +491,7 @@ class TrackInfoStruct:
             return self.event_id
 
     def get_data(self):
-        return struct.pack("<IIIdddd", self.track_id, self.source_id, self.event_id, self.play_at, self.begin_trim_offset, self.end_trim_offset, self.source_duration)
+        return struct.pack("<IIIIdddd", self.track_id, self.source_id, self.cache_id, self.event_id, self.play_at, self.begin_trim_offset, self.end_trim_offset, self.source_duration)
             
 
 class ClipAutomationStruct:
@@ -532,14 +532,14 @@ class MusicTrack(HircEntry):
         entry.size = stream.uint32_read()
         start_position = stream.tell()
         entry.hierarchy_id = stream.uint32_read()
-        entry.bit_flags = stream.uint8_read()
+        #entry.bit_flags = stream.uint8_read()
         num_sources = stream.uint32_read()
         for _ in range(num_sources):
             source = BankSourceStruct.from_memory_stream(stream)
             entry.sources.append(source)
         num_track_info = stream.uint32_read()
         for _ in range(num_track_info):
-            track = TrackInfoStruct.from_bytes(stream.read(44))
+            track = TrackInfoStruct.from_bytes(stream.read(48))
             entry.track_info.append(track)
         entry.unused_sections.append(stream.read(4))
         num_clip_automations = stream.uint32_read()
@@ -560,7 +560,7 @@ class MusicTrack(HircEntry):
         clips = b"".join([clip.get_data() for clip in self.clip_automations])
         payload = b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unused_sections[1] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
         self.size = 9 + len(payload)
-        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + payload
+        return struct.pack("<BIII", self.hierarchy_type, self.size, self.hierarchy_id, len(self.sources)) + payload
 
 class ActionStop(Action):
     """
