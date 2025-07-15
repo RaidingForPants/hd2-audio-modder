@@ -1869,6 +1869,7 @@ class BankSourceStruct:
     plugin_id U32
     stream_type U8x
     source_id tid
+    cache_id U32
     mem_size U32
     bit_flags U8x
     plugin_size U32
@@ -1879,6 +1880,7 @@ class BankSourceStruct:
         self.plugin_id: int = 0
         self.stream_type: int = 0
         self.source_id: int = 0
+        self.cache_id: int = 0
 
         # For some reason, it still work although it's not being updated
         self.mem_size: int = 0 
@@ -1890,8 +1892,8 @@ class BankSourceStruct:
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         b = BankSourceStruct()
-        b.plugin_id, b.stream_type, b.source_id, b.mem_size, b.bit_flags = \
-            struct.unpack("<IBIIB", stream.read(14))
+        b.plugin_id, b.stream_type, b.source_id, b.cache_id, b.mem_size, b.bit_flags = \
+            struct.unpack("<IBIIIB", stream.read(18))
         if (b.plugin_id & 0x0F) == 2:
             if b.plugin_id:
                 b.plugin_size = stream.uint32_read()
@@ -1901,10 +1903,11 @@ class BankSourceStruct:
         
     def get_data(self):
         b = struct.pack(
-            "<IBIIB",
+            "<IBIIIB",
             self.plugin_id,
             self.stream_type,
             self.source_id,
+            self.cache_id,
             self.mem_size,
             self.bit_flags
         )
@@ -2310,21 +2313,19 @@ class FxChunk:
     """
     uFxIndex - U8i
     fxId - tid
-    bIsShareSet - U8x
-    bIsRendered - U8x
+    bitVector - U8x
     """
 
     def __init__(
-        self, uFxIndex: int, fxId: int, bIsShareSet: int, bIsRendered: int
+        self, uFxIndex: int, fxId: int, bitVector: int
     ):
         self.uFxIndex: int = uFxIndex # U8i
         self.fxId: int = fxId # tid
-        self.bIsShareSet: int = bIsShareSet # U8x
-        self.bIsRendered: int = bIsRendered # U8x
+        self.bitVector: int = bitVector # U8x
 
     def get_data(self):
         return struct.pack(
-            "<BIBB", self.uFxIndex, self.fxId, self.bIsShareSet, self.bIsRendered
+            "<BIB", self.uFxIndex, self.fxId, self.bitVector
         )
 
 
@@ -2737,26 +2738,39 @@ class StateProp:
     def to_bytes(self):
         return struct.pack("<3B", self.propertyId, self.accumType, self.inDb)
 
+class AkPropBundle:
+    def __init__(self, pID: int, pValue: float):
+        self.pID = pID
+        self.pValue = pValue
+
+    def get_data(self):
+        return struct.pack("<Bf", self.pID, self.pValue)
+
 
 class StateGroupState:
     """
     ulStateID tid
-    ulStateInstanceID tid
+    cProps u16
+    pProps AkPropBundle[]
     """
 
-    def __init__(self, ulStateID: int = 0, ulStateInstanceID: int = 0):
+    def __init__(self, ulStateID: int = 0, cProps: int = 0, pProps: list[AkPropBundle] = []):
        self.ulStateID = ulStateID 
-       self.ulStateInstanceID = ulStateInstanceID
+       self.cProps = cProps
+       self.pProps = pProps
 
     def get_data(self):
-        return struct.pack("<II", self.ulStateID, self.ulStateInstanceID)
+        b = struct.pack("<IH", self.ulStateID, self.cProps)
+        for pProp in self.pProps:
+            b += pProp.get_data()
+        return b
 
 
 class StateGroup:
     """
     ulStateGroupID tid
     eStateSyncType U8x
-    ulNumStates var (assume 8 bits, can be more)
+    states StateGroupState[]
     """
 
     def __init__(
@@ -2914,14 +2928,13 @@ class BaseParam:
     def __init__(self):
         self.bIsOverrideParentFx: int = 0
         self.uNumFx: int = 0
-        self.bitsFxBypass = 0
+        self.bBypassAll = 0
         self.fxChunks: list[FxChunk] = []
 
         self.bIsOverrideParentMetadata: int = 0
         self.uNumFxMetadata: int = 0
         self.fxChunksMetadata: list[FxChunkMetadata] = []
 
-        self.bOverrideAttachmentParams: int = 0
         self.overrideBusId: int = 0
         self.directParentID: int = 0
         self.byBitVectorA: int = 0
@@ -2938,7 +2951,7 @@ class BaseParam:
 
         self.stateParams = StateParams()
 
-        self.ulNumRTPC: int = 0
+        self.uNumCurves: int = 0
         self.rtpcs: list[RTPC] = []
 
     @staticmethod
@@ -2949,13 +2962,12 @@ class BaseParam:
         baseParam.bIsOverrideParentFx = stream.uint8_read()
         baseParam.uNumFx = stream.uint8_read()
         if baseParam.uNumFx > 0:
-            baseParam.bitsFxBypass = stream.uint8_read()
+            baseParam.bBypassAll = stream.uint8_read()
             baseParam.fxChunks = [
                 FxChunk(
                     stream.uint8_read(),
                     stream.uint32_read(),
                     stream.uint8_read(),
-                    stream.uint8_read()
                 )
                 for _ in range(baseParam.uNumFx)
             ]
@@ -2972,8 +2984,6 @@ class BaseParam:
                 )
                 for _ in range(baseParam.uNumFxMetadata)
             ]
-
-        baseParam.bOverrideAttachmentParams = stream.uint8_read()
 
         baseParam.overrideBusId = stream.uint32_read()
 
@@ -3020,10 +3030,17 @@ class BaseParam:
             ulStateGroupID = stream.uint32_read()
             eStateSyncType = stream.uint8_read()
             ulNumStates = stream.uint8_read()
-            states: list[StateGroupState] = [
-                StateGroupState(stream.uint32_read(), stream.uint32_read())
-                for _ in range(ulNumStates)
-            ]
+
+            states: list[StateGroupState] = []
+            for _ in range(ulNumStates):
+                ulStateID = stream.uint32_read()
+                cProps = stream.uint16_read()
+                pProps = [
+                    AkPropBundle(stream.uint16_read(), stream.float_read())
+                    for _ in range(cProps)
+                ]
+                states.append(StateGroupState(ulStateID, cProps, pProps))
+
             stateGroups.append(StateGroup(
                 ulStateGroupID,
                 eStateSyncType,
@@ -3033,9 +3050,9 @@ class BaseParam:
         baseParam.stateParams.stateGroups = stateGroups
 
         # [RTPC No Modulator]
-        baseParam.ulNumRTPC = stream.uint16_read()
+        baseParam.uNumCurves = stream.uint16_read()
         rtpcs: list[RTPC] = []
-        for _ in range(baseParam.ulNumRTPC):
+        for _ in range(baseParam.uNumCurves):
             RTPCID = stream.uint32_read()
             rtpcType = stream.uint8_read()
             rtpcAccum = stream.uint8_read()
@@ -3069,7 +3086,7 @@ class BaseParam:
             self.uNumFx, len(self.fxChunks)
         )
         if self.uNumFx > 0:
-            b += struct.pack("<B", self.bitsFxBypass)
+            b += struct.pack("<B", self.bBypassAll)
             for fxChunk in self.fxChunks:
                 b += fxChunk.get_data()
 
@@ -3085,8 +3102,7 @@ class BaseParam:
                 b += fxChunkMetadata.to_bytes()
 
         b += struct.pack(
-            "<BIIB", 
-            self.bOverrideAttachmentParams,
+            "<IIB", 
             self.overrideBusId,
             self.directParentID,
             self.byBitVectorA
@@ -3104,10 +3120,10 @@ class BaseParam:
 
         b += self.stateParams.get_data()
 
-        b += struct.pack("<H", self.ulNumRTPC)
+        b += struct.pack("<H", self.uNumCurves)
         assert_equal(
             "# of RTPC != # of RTPC in the array",
-            self.ulNumRTPC, len(self.rtpcs)
+            self.uNumCurves, len(self.rtpcs)
         )
         for rtpc in self.rtpcs:
             b += rtpc.get_data()
@@ -3476,16 +3492,14 @@ class SwitchGroup:
 class SwitchParam:
     """
     ulNodeID tid
-    byBitVectorPlayBack U8x
-    byBitVectorMode U8x
+    byBitVector U8x
     fadeOutTime s32
     fadeInTime s32
     """
 
     def __init__(self):
         self.ulNodeID: int = 0
-        self.byBitVectorPlayBack: int = 0
-        self.byBitVectorMode: int = 0
+        self.byBitVector: int = 0
         self.fadeOutTime: int = 0
         self.fadeInTime: int = 0
 
@@ -3494,8 +3508,7 @@ class SwitchParam:
         param = SwitchParam()
 
         param.ulNodeID = stream.uint32_read()
-        param.byBitVectorPlayBack = stream.uint8_read()
-        param.byBitVectorMode = stream.uint8_read()
+        param.byBitVector = stream.uint8_read()
         param.fadeOutTime = stream.int32_read()
         param.fadeInTime = stream.int32_read()
 
@@ -3505,15 +3518,14 @@ class SwitchParam:
         b = struct.pack(
             "<IBBii",
             self.ulNodeID,
-            self.byBitVectorPlayBack,
-            self.byBitVectorMode,
+            self.byBitVector,
             self.fadeOutTime,
             self.fadeInTime
         )
         assert_equal(
             "Packed SwitchParam data does not have the correct data size!",
             len(b),
-            4 + 1 + 1 + 4 + 4
+            4 + 1 + 4 + 4
         )
         return b
         
