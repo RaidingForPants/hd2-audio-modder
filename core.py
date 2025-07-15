@@ -765,7 +765,6 @@ class GameArchive:
                 
                 hirc = WwiseHierarchy(soundbank=entry)
                 try:
-                    print(f"loading hirc for bank {entry.get_id()}")
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
                     pass
