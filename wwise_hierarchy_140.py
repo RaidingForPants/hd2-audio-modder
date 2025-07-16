@@ -10,6 +10,7 @@ from typing import Union
 from backend.db import SQLiteDatabase
 from log import logger
 from util import *
+import wwise_hierarchy_154
 
 HircType = {
     0x01: "State",
@@ -123,7 +124,10 @@ class HircEntry:
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -285,7 +289,10 @@ class MusicSegment(HircEntry):
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 if name == "entry_marker":
@@ -442,7 +449,10 @@ class Action(HircEntry):
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -1691,7 +1701,10 @@ class Event(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -1830,7 +1843,10 @@ class RandomSequenceContainer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -1998,7 +2014,10 @@ class Sound(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -2104,7 +2123,7 @@ class WwiseHierarchy_140:
 
     def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_140'):
         for entry in new_hierarchy.get_entries():
-            if isinstance(entry, (MusicSegment, MusicTrack)):
+            if isinstance(entry, (wwise_hierarchy_154.MusicSegment, wwise_hierarchy_154.MusicTrack, MusicSegment, MusicTrack)):
                 if entry.hierarchy_id in self.entries:
                     self.entries[entry.hierarchy_id].import_entry(entry)
                 else:
@@ -3307,7 +3326,10 @@ class LayerContainer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -3413,7 +3435,10 @@ class ActorMixer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)

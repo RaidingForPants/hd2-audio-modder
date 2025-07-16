@@ -10,6 +10,7 @@ from typing import Union
 from backend.db import SQLiteDatabase
 from log import logger
 from util import *
+import wwise_hierarchy_140
 
 HircType = {
     0x01: "State",
@@ -46,6 +47,7 @@ class HircEntry:
     """
     
     import_values = ["misc"]
+    import_objects = []
     
     def __init__(self):
         # Trasnlation of hierarchy binary data
@@ -96,6 +98,14 @@ class HircEntry:
             return self.baseParam.directParentID
         return None
 
+    def reload_parent(self):
+        try:
+            self.parent = self.soundbanks[0].hierarchy.get_entry(self.get_parent_id())
+            if self.get_id() == 434245467:
+                print(self.parent)
+        except KeyError:
+            self.parent = None
+
     def has_modified_children(self):
         return self.modified_children != 0
 
@@ -121,7 +131,10 @@ class HircEntry:
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -144,6 +157,7 @@ class HircEntry:
             self.modified = False
             if self.parent:
                 self.parent.lower_modified()
+                print(self.parent.modified_children)
             for bank in self.soundbanks:
                 bank.lower_modified()
         
@@ -210,11 +224,12 @@ class MusicRandomSequence(HircEntry):
 
 class MusicSegment(HircEntry):
     
-    import_values = ["base_params", "tracks", "duration", "entry_marker", "exit_marker", "unused_sections", "markers"]
+    import_values = ["parent_id", "tracks", "duration", "entry_marker", "exit_marker", "markers"]
+    import_objects = ["base_params"]
 
     def __init__(self):
         super().__init__()
-        self.tracks = []
+        self.tracks: list[int] = []
         self.duration = 0
         self.bit_flags = 0
         self.entry_marker = None
@@ -233,6 +248,7 @@ class MusicSegment(HircEntry):
         entry.hierarchy_id = stream.uint32_read()
         entry.bit_flags = stream.uint8_read()
         entry.base_params = BaseParam.from_memory_stream(stream)
+        entry.parent_id = entry.base_params.directParentID
         n = stream.uint32_read() #number of children (tracks)
         for _ in range(n):
             entry.tracks.append(stream.uint32_read())
@@ -276,7 +292,10 @@ class MusicSegment(HircEntry):
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 if name == "entry_marker":
@@ -427,7 +446,10 @@ class Action(HircEntry):
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -474,6 +496,40 @@ class TrackInfoStruct:
         t = TrackInfoStruct()
         t.track_id, t.source_id, t.cache_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack("<IIIIdddd", bytes)
         return t
+
+    def import_entry(self, track_info):
+        try:
+            self.track_id = track_info.track_id
+        except AttributeError:
+            pass
+        try:
+            self.source_id = track_info.source_id
+        except AttributeError:
+            pass
+        try:
+            self.cache_id = track_info.cache_id
+        except AttributeError:
+            pass
+        try:
+            self.event_id = track_info.event_id
+        except AttributeError:
+            pass
+        try:
+            self.play_at = track_info.play_at
+        except AttributeError:
+            pass
+        try:
+            self.begin_trim_offset = track_info.begin_trim_offset
+        except AttributeError:
+            pass
+        try:
+            self.end_trim_offset = track_info.end_trim_offset
+        except AttributeError:
+            pass
+        try:
+            self.source_duration = track_info.source_duration
+        except AttributeError:
+            pass
         
     def get_id(self):
         if self.source_id != 0:
@@ -504,18 +560,62 @@ class ClipAutomationStruct:
         
 
 class MusicTrack(HircEntry):
-    
-    import_values = ["bit_flags", "unused_sections", "parent_id", "sources", "track_info", "clip_automations", "misc"]
-    
+
+    #import_values = ["bit_flags", "parent_id", "clip_automations", "unk1", "unk2", "misc"]
+    import_values = ["clip_automations"]
+
     def __init__(self):
         super().__init__()
         self.bit_flags = 0
         self.unused_sections = []
         self.clip_automations = []
-        self.sources = []
-        self.track_info = []
+        self.sources: list[BankSourceStruct] = []
+        self.track_info: list[TrackInfoStruct] = []
         self.parent_id = 0
-        
+        self.unk1 =  bytearray()
+        self.unk2 =  bytearray()
+        self.base_params: BaseParam = None
+
+    def set_data(self, entry = None, **data):
+        if self.soundbanks == []:
+            raise AssertionError(
+                "No WwiseBank object is attached to this instance WwiseHierarchy"
+            )
+
+        if not self.modified:
+            self.data_old = self.get_data()
+            if self.parent:
+                self.parent.raise_modified()
+            for bank in self.soundbanks:
+                bank.raise_modified()
+        if entry:
+            for value in self.import_values:
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
+            for track in self.track_info:
+                for t in entry.track_info:
+                    # if track.track_id != 0 and track.track_id == t.track_id:
+                    #    track.import_entry(t)
+                    #    break
+                    if track.source_id != 0 and track.source_id == t.source_id:
+                        track.import_entry(t)
+                        break
+                    if track.event_id != 0 and track.event_id == t.event_id:
+                        track.import_entry(t)
+                        break
+        else:
+            for name, value in data.items():
+                setattr(self, name, value)
+
+        self.modified = True
+        self.size = len(self.get_data())-5
+        try:
+            self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
+        except:
+            self.parent = None
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         entry = MusicTrack()
@@ -532,11 +632,11 @@ class MusicTrack(HircEntry):
         for _ in range(num_track_info):
             track = TrackInfoStruct.from_bytes(stream.read(48))
             entry.track_info.append(track)
-        entry.unused_sections.append(stream.read(4))
+        entry.unk1 = stream.read(4)
         num_clip_automations = stream.uint32_read()
         for _ in range(num_clip_automations):
             entry.clip_automations.append(ClipAutomationStruct.from_memory_stream(stream))
-        entry.unused_sections.append(stream.read(5))
+        entry.unk2 = stream.read(4)
         entry.override_bus_id = stream.uint32_read()
         entry.parent_id = stream.uint32_read()
         entry.misc = stream.read(entry.size - (stream.tell()-start_position))
@@ -549,7 +649,7 @@ class MusicTrack(HircEntry):
         b = b"".join([source.get_data() for source in self.sources])
         t = b"".join([track.get_data() for track in self.track_info])
         clips = b"".join([clip.get_data() for clip in self.clip_automations])
-        payload = b + self.bit_flags.to_bytes(1, "little") + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unused_sections[1] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
+        payload = b + self.bit_flags.to_bytes(1, "little") + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unk1 + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unk2 + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
         self.size = 8 + len(payload)
         return struct.pack("<BIII", self.hierarchy_type, self.size, self.hierarchy_id, len(self.sources)) + payload
 
@@ -1671,7 +1771,10 @@ class Event(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -1810,7 +1913,10 @@ class RandomSequenceContainer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -1980,7 +2086,10 @@ class Sound(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -2085,11 +2194,11 @@ class WwiseHierarchy_154:
                 
     def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_154'):
         for entry in new_hierarchy.get_entries():
-            if isinstance(entry, (MusicSegment, MusicTrack)):
+            if isinstance(entry, (wwise_hierarchy_140.MusicSegment, wwise_hierarchy_140.MusicTrack, MusicSegment, MusicTrack)):
                 if entry.hierarchy_id in self.entries:
                     self.entries[entry.hierarchy_id].import_entry(entry)
-                else:
-                    self.add_entry(entry)
+                #else:
+                #    self.add_entry(entry)
                 
     def revert_modifications(self, entry_id: int = 0):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
@@ -2735,7 +2844,7 @@ class AkPropBundle:
         self.pValue = pValue
 
     def get_data(self):
-        return struct.pack("<Bf", self.pID, self.pValue)
+        return struct.pack("<Hf", self.pID, self.pValue)
 
 class StateGroupState:
     """
@@ -2943,6 +3052,9 @@ class BaseParam:
 
         self.uNumCurves: int = 0
         self.rtpcs: list[RTPC] = []
+
+    def import_entry(self, param):
+        pass
 
     @staticmethod
     def from_memory_stream(stream: MemoryStream):
@@ -3300,7 +3412,10 @@ class LayerContainer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -3407,7 +3522,10 @@ class ActorMixer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -3687,7 +3805,10 @@ class SwitchContainer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)

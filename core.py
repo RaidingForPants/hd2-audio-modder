@@ -767,13 +767,11 @@ class GameArchive:
                 bank.load(toc_file.read(toc_header.toc_data_size-16))
                 entry.bank_header = "BKHD".encode('utf-8') + len(bank.chunks["BKHD"]).to_bytes(4, byteorder="little") + bank.chunks["BKHD"]
                 bank_version = int.from_bytes(bank.chunks['BKHD'][0:4], "little") ^ BANK_VERSION_KEY
-                print(bank_version)
                 if bank_version == 154:
                     hirc = WwiseHierarchy_154(soundbank=entry)
                 else:
                     hirc = WwiseHierarchy_140(soundbank=entry)
                 try:
-                    print(type(hirc))
                     hirc.load(bank.chunks['HIRC'])
                 except KeyError:
                     pass
@@ -1896,7 +1894,6 @@ class Mod:
                     if isinstance(item, (wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack)):
                         if item.parent == None:
                             continue
-
                         item.parent.set_data(
                             duration=len_ms,
                             entry_marker=0,
@@ -1911,7 +1908,7 @@ class Mod:
                                 t.play_at = 0
                                 break
                         item.set_data(track_info=tracks)
-        
+
         if import_hierarchy:
             for bank in patch_game_archive.get_wwise_banks().values():
                 if bank.hierarchy == None:

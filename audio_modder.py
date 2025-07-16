@@ -704,7 +704,8 @@ class MusicTrackWindow:
             self.graphs.append(g)
 
             g.set_data(x, y)
-            source_id = info[self.track.clip_automations[i].clip_index].source_id
+            source_id = self.track.track_info[self.track.clip_automations[i].clip_index].source_id
+            #source_id = info[self.track.clip_automations[i].clip_index].source_id
             source = next(x for x in self.track.sources if x.source_id == source_id)
             if source.stream_type == BANK:
                 pass
