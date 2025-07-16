@@ -3521,7 +3521,7 @@ class SwitchParam:
 
     def get_data(self):
         b = struct.pack(
-            "<IBBii",
+            "<IBii",
             self.ulNodeID,
             self.byBitVector,
             self.fadeOutTime,
