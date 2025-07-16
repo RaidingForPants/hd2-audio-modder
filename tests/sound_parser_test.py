@@ -4,7 +4,7 @@ import unittest
 from tests.parser_test_common import test_all_archive_sync
 from core import GameArchive
 from log import logger
-from wwise_hierarchy import Sound, pack_sound
+from wwise_hierarchy_154 import Sound, pack_sound
 
 
 class TestSoundParser(unittest.TestCase):

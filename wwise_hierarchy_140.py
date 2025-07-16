@@ -1,5 +1,5 @@
 """
-Bank Version 141
+Bank Version 154
 """
 
 import copy
@@ -10,6 +10,7 @@ from typing import Union
 from backend.db import SQLiteDatabase
 from log import logger
 from util import *
+import wwise_hierarchy_154
 
 HircType = {
     0x01: "State",
@@ -44,9 +45,9 @@ class HircEntry:
     size - U32
     hierarchy_id - tid
     """
-    
+
     import_values = ["misc"]
-    
+
     def __init__(self):
         # Trasnlation of hierarchy binary data
         self.size: int = 0
@@ -56,13 +57,13 @@ class HircEntry:
         self.misc: bytearray = bytearray()
         self.unused_sections = []
 
-        # Bookkeeping data - external from hierarchy binary data 
-        self.soundbanks: list[WwiseBank] = [] # WwiseBank
+        # Bookkeeping data - external from hierarchy binary data
+        self.soundbanks: list[WwiseBank] = []  # WwiseBank
         self.modified_children: int = 0
         self.modified: bool = False
         self.parent: HircEntry | None = None
         self.data_old: bytes | bytearray = b""
-    
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         entry = HircEntry()
@@ -71,14 +72,14 @@ class HircEntry:
         entry.hierarchy_id = stream.uint32_read()
         entry.misc = stream.read(entry.size - 4)
         return entry
-        
+
     @classmethod
     def from_bytes(cls, data: bytes | bytearray):
         stream = MemoryStream()
         stream.write(data)
         stream.seek(0)
         return cls.from_memory_stream(stream)
-      
+
     def get_base_param(self):
         """
         This interface is used for getting base parameter with exception raising
@@ -89,7 +90,9 @@ class HircEntry:
         """
         Include header
         """
-        return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4, byteorder="little") + self.hierarchy_id.to_bytes(4, byteorder="little") + self.misc
+        return self.hierarchy_type.to_bytes(1, byteorder="little") + self.size.to_bytes(4,
+                                                                                        byteorder="little") + self.hierarchy_id.to_bytes(
+            4, byteorder="little") + self.misc
 
     def get_parent_id(self):
         if self.baseParam != None:
@@ -101,13 +104,13 @@ class HircEntry:
 
     def import_entry(self, new_entry: 'HircEntry'):
         if (
-            (self.modified and new_entry.get_data() != self.data_old)
-            or
-            (not self.modified and new_entry.get_data() != self.get_data())
+                (self.modified and new_entry.get_data() != self.data_old)
+                or
+                (not self.modified and new_entry.get_data() != self.get_data())
         ):
             self.set_data(new_entry)
-        
-    def set_data(self, entry = None, **data):
+
+    def set_data(self, entry=None, **data):
         if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
@@ -121,12 +124,15 @@ class HircEntry:
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
         self.modified = True
-        self.size = len(self.get_data())-5
+        self.size = len(self.get_data()) - 5
         try:
             self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
         except:
@@ -146,30 +152,30 @@ class HircEntry:
                 self.parent.lower_modified()
             for bank in self.soundbanks:
                 bank.lower_modified()
-        
+
     def get_id(self):
         return self.hierarchy_id
-        
+
     def raise_modified(self):
         if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
 
-        self.modified_children+=1
+        self.modified_children += 1
         if self.parent:
             self.parent.raise_modified()
-        
+
     def lower_modified(self):
         if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
             )
 
-        self.modified_children-=1
+        self.modified_children -= 1
         if self.parent:
             self.parent.lower_modified()
-                      
+
     def update_size(self):
         """
         Interface contract and usage:
@@ -180,23 +186,24 @@ class HircEntry:
 
     def modifier(self, callback: Callable):
         """
-        A helper function that receive and call a callback which make some 
-        changes in a hierarchy entry. Then it will automatically call 
+        A helper function that receive and call a callback which make some
+        changes in a hierarchy entry. Then it will automatically call
         `update_size` and `raise_modified`.
 
-        This helper function is intended to use with the classes that enforce 
-        size and intergity checking using header information when getting / 
+        This helper function is intended to use with the classes that enforce
+        size and intergity checking using header information when getting /
         setting data.
         """
         callback()
         self.update_size()
         self.raise_modified()
 
+
 class MusicRandomSequence(HircEntry):
-    
+
     def __init__(self):
         super().__init__()
-    
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         entry = MusicRandomSequence()
@@ -204,12 +211,12 @@ class MusicRandomSequence(HircEntry):
         entry.size = stream.uint32_read()
         entry.hierarchy_id = stream.uint32_read()
         return entry
-        
+
     def get_data(self):
         return b""
 
+
 class MusicSegment(HircEntry):
-    
     import_values = ["parent_id", "tracks", "duration", "entry_marker", "exit_marker", "unused_sections", "markers"]
 
     def __init__(self):
@@ -222,7 +229,7 @@ class MusicSegment(HircEntry):
         self.markers = []
         self.modified = False
         self.parent_id = 0
-    
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         entry = MusicSegment()
@@ -232,21 +239,22 @@ class MusicSegment(HircEntry):
         entry.unused_sections.append(stream.read(10))
         entry.parent_id = stream.uint32_read()
         entry.unused_sections.append(stream.read(1))
-        n = stream.uint8_read() #number of props
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1))
-        n = stream.uint8_read() #number of props (again)
-        stream.seek(stream.tell()-1)
-        entry.unused_sections.append(stream.read(5*n + 1 + 12 + 4)) #the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
-        n = stream.uint32_read() #number of children (tracks)
+        n = stream.uint8_read()  # number of props
+        stream.seek(stream.tell() - 1)
+        entry.unused_sections.append(stream.read(5 * n + 1))
+        n = stream.uint8_read()  # number of props (again)
+        stream.seek(stream.tell() - 1)
+        entry.unused_sections.append(stream.read(
+            5 * n + 1 + 12 + 4))  # the 4 is the count of state props, state chunks, and RTPC, which are currently always 0
+        n = stream.uint32_read()  # number of children (tracks)
         for _ in range(n):
             entry.tracks.append(stream.uint32_read())
-        entry.unused_sections.append(stream.read(23)) #meter info
-        n = stream.uint32_read() #number of stingers
-        stream.seek(stream.tell()-4)
-        entry.unused_sections.append(stream.read(24*n + 4))
+        entry.unused_sections.append(stream.read(23))  # meter info
+        n = stream.uint32_read()  # number of stingers
+        stream.seek(stream.tell() - 4)
+        entry.unused_sections.append(stream.read(24 * n + 4))
         entry.duration = struct.unpack("<d", stream.read(8))[0]
-        n = stream.uint32_read() #number of markers
+        n = stream.uint32_read()  # number of markers
         for i in range(n):
             id = stream.uint32_read()
             position = struct.unpack("<d", stream.read(8))[0]
@@ -260,14 +268,14 @@ class MusicSegment(HircEntry):
             entry.markers.append(marker)
             if i == 0:
                 entry.entry_marker = marker
-            elif i == n-1:
+            elif i == n - 1:
                 entry.exit_marker = marker
         return entry
 
     def get_parent_id(self):
         return self.parent_id
-      
-    def set_data(self, entry = None, **data):
+
+    def set_data(self, entry=None, **data):
         if self.soundbanks == []:
             raise AssertionError(
                 "No WwiseBank object is attached to this instance WwiseHierarchy"
@@ -281,7 +289,10 @@ class MusicSegment(HircEntry):
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 if name == "entry_marker":
@@ -294,10 +305,10 @@ class MusicSegment(HircEntry):
         self.size = len(self.get_data()) - 5
         try:
             self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
-            #potentially problematic, might need better way of getting the parent
+            # potentially problematic, might need better way of getting the parent
         except:
             self.parent = None
-        
+
     def get_data(self):
         return (
             b"".join([
@@ -313,9 +324,11 @@ class MusicSegment(HircEntry):
                 self.unused_sections[5],
                 struct.pack("<d", self.duration),
                 len(self.markers).to_bytes(4, byteorder="little"),
-                b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in self.markers])
+                b"".join([b"".join([x[0].to_bytes(4, byteorder="little"), struct.pack("<d", x[1]), x[2]]) for x in
+                          self.markers])
             ])
         )
+
 
 class ActionException:
     """
@@ -344,7 +357,7 @@ class ActionException:
 
     def get_data(self):
         return self.ulID.to_bytes(4, byteorder="little", signed=False) + \
-               self.bIsBus.to_bytes(1, byteorder="little", signed=False)
+            self.bIsBus.to_bytes(1, byteorder="little", signed=False)
 
 
 class Action(HircEntry):
@@ -436,7 +449,10 @@ class Action(HircEntry):
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -444,7 +460,7 @@ class Action(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -471,19 +487,20 @@ class Action(HircEntry):
         data += self.rangePropBundle.get_data()
 
         return data
-        
+
 
 class TrackInfoStruct:
-    
+
     def __init__(self):
         self.track_id = self.source_id = self.event_id = self.play_at = self.begin_trim_offset = self.end_trim_offset = self.source_duration = 0
 
     @classmethod
     def from_bytes(cls, bytes: bytes | bytearray):
         t = TrackInfoStruct()
-        t.track_id, t.source_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack("<IIIdddd", bytes)
+        t.track_id, t.source_id, t.event_id, t.play_at, t.begin_trim_offset, t.end_trim_offset, t.source_duration = struct.unpack(
+            "<IIIdddd", bytes)
         return t
-        
+
     def get_id(self):
         if self.source_id != 0:
             return self.source_id
@@ -491,15 +508,16 @@ class TrackInfoStruct:
             return self.event_id
 
     def get_data(self):
-        return struct.pack("<IIIdddd", self.track_id, self.source_id, self.event_id, self.play_at, self.begin_trim_offset, self.end_trim_offset, self.source_duration)
-            
+        return struct.pack("<IIIdddd", self.track_id, self.source_id, self.event_id, self.play_at,
+                           self.begin_trim_offset, self.end_trim_offset, self.source_duration)
+
 
 class ClipAutomationStruct:
-    
+
     def __init__(self):
         self.graph_points = []
         self.clip_index = self.auto_type = self.num_graph_points = 0
-        
+
     @classmethod
     def from_memory_stream(cls, stream):
         s = ClipAutomationStruct()
@@ -507,15 +525,15 @@ class ClipAutomationStruct:
         for _ in range(s.num_graph_points):
             s.graph_points.append(struct.unpack("<ffI", stream.read(12)))
         return s
-            
+
     def get_data(self):
-        return struct.pack("<III", self.clip_index, self.auto_type, self.num_graph_points) + b"".join([struct.pack("<ffI", point[0], point[1], point[2]) for point in self.graph_points])
-        
+        return struct.pack("<III", self.clip_index, self.auto_type, self.num_graph_points) + b"".join(
+            [struct.pack("<ffI", point[0], point[1], point[2]) for point in self.graph_points])
+
 
 class MusicTrack(HircEntry):
-    
     import_values = ["bit_flags", "unused_sections", "parent_id", "sources", "track_info", "clip_automations", "misc"]
-    
+
     def __init__(self):
         super().__init__()
         self.bit_flags = 0
@@ -524,7 +542,7 @@ class MusicTrack(HircEntry):
         self.sources = []
         self.track_info = []
         self.parent_id = 0
-        
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         entry = MusicTrack()
@@ -548,9 +566,9 @@ class MusicTrack(HircEntry):
         entry.unused_sections.append(stream.read(5))
         entry.override_bus_id = stream.uint32_read()
         entry.parent_id = stream.uint32_read()
-        entry.misc = stream.read(entry.size - (stream.tell()-start_position))
+        entry.misc = stream.read(entry.size - (stream.tell() - start_position))
         return entry
-        
+
     def get_parent_id(self):
         return self.parent_id
 
@@ -558,9 +576,14 @@ class MusicTrack(HircEntry):
         b = b"".join([source.get_data() for source in self.sources])
         t = b"".join([track.get_data() for track in self.track_info])
         clips = b"".join([clip.get_data() for clip in self.clip_automations])
-        payload = b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unused_sections[1] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
+        payload = b + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unused_sections[0] + len(
+            self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unused_sections[
+                      1] + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4,
+                                                                                                          byteorder="little") + self.misc
         self.size = 9 + len(payload)
-        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags, len(self.sources)) + payload
+        return struct.pack("<BIIBI", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags,
+                           len(self.sources)) + payload
+
 
 class ActionStop(Action):
     """
@@ -581,7 +604,7 @@ class ActionStop(Action):
         "ulExceptionListSize",
         "actionExceptionList"
     ]
-       
+
     def __init__(self):
         super().__init__()
         self.fadeCurveBitVector = 0
@@ -682,7 +705,7 @@ class ActionPause(Action):
         "ulExceptionListSize",
         "actionExceptionList"
     ]
-        
+
     def __init__(self):
         super().__init__()
         self.fadeCurveBitVector = 0
@@ -783,7 +806,7 @@ class ActionResume(Action):
         "ulExceptionListSize",
         "actionExceptionList"
     ]
-        
+
     def __init__(self):
         super().__init__()
         self.fadeCurveBitVector = 0
@@ -939,7 +962,6 @@ class ActionPlay(Action):
 
 
 class ActionPlayAndContinue(ActionPlay):
-
     import_values = [
         "ulActionType",
         "idExt",
@@ -1178,8 +1200,7 @@ class ActionSetProp(Action):
         return data
 
 
-class ActionUseState(Action): 
-
+class ActionUseState(Action):
     import_values = [
         "ulActionType",
         "idExt",
@@ -1224,7 +1245,7 @@ class ActionUseState(Action):
         )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
-        
+
         return header + data
 
     def update_size(self):
@@ -1282,7 +1303,7 @@ class ActionSetState(Action):
 
     def get_data(self):
         data = self._pack()
-        
+
         assert_equal(
             f"Header size and packed data size mismatch for ActionSetState {self.hierarchy_id}",
             self.size,
@@ -1355,7 +1376,7 @@ class ActionSetSwitch(Action):
 
     def get_data(self):
         data = self._pack()
-        
+
         assert_equal(
             f"Header size and packed data size mismatch for ActionSetSwitch {self.hierarchy_id}",
             self.size,
@@ -1501,7 +1522,7 @@ class ActionResetPlaylist(Action):
         "ulExceptionListSize",
         "actionExceptionList"
     ]
-        
+
     def __init__(self):
         super().__init__()
         self.fadeCurveBitVector = 0
@@ -1680,7 +1701,10 @@ class Event(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -1688,7 +1712,7 @@ class Event(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1714,7 +1738,6 @@ class Event(HircEntry):
         for _id in self.ulActionIDs:
             data += _id.to_bytes(4, "little")
         return data
-        
 
 
 class RandomSequenceContainer(HircEntry):
@@ -1733,6 +1756,7 @@ class RandomSequenceContainer(HircEntry):
         "ulPlayListItem",
         "playListItems",
     ]
+
     def __init__(self):
         super().__init__()
         self.children: ContainerChildren = ContainerChildren()
@@ -1793,19 +1817,19 @@ class RandomSequenceContainer(HircEntry):
             return self.baseParam
         raise AssertionError(
             f"Random / Sequence container {self.hierarchy_id} does not have a "
-             "base parameter."
+            "base parameter."
         )
 
     def get_data(self):
         data = self._pack()
         assert_equal(
             f"Header size and packed data size mismatch for RandomSequenceContainer {self.hierarchy_id}",
-            self.size, len(data) 
+            self.size, len(data)
         )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
-        return header + data 
+        return header + data
 
     def set_data(self, entry: Union['RandomSequenceContainer', None] = None, **data):
         assert len(self.soundbanks) > 0, f"No WwiseBank is attached to RandomSequenceContainer {self.hierarchy_id}"
@@ -1819,7 +1843,10 @@ class RandomSequenceContainer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -1827,7 +1854,7 @@ class RandomSequenceContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -1843,7 +1870,7 @@ class RandomSequenceContainer(HircEntry):
         if self.baseParam == None:
             raise AssertionError(
                 f"Random Sequence container {self.hierarchy_id} does not has a "
-                 "base parameter."
+                "base parameter."
             )
 
         data += self.baseParam.get_data()
@@ -1863,7 +1890,8 @@ class RandomSequenceContainer(HircEntry):
             data += playListItem.get_data()
 
         return data
-         
+
+
 class BankSourceStruct:
     """
     plugin_id U32
@@ -1881,12 +1909,12 @@ class BankSourceStruct:
         self.source_id: int = 0
 
         # For some reason, it still work although it's not being updated
-        self.mem_size: int = 0 
+        self.mem_size: int = 0
 
         self.bit_flags: int = 0
         self.plugin_size: int = 0
         self.plugin_data: bytearray = bytearray()
-        
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         b = BankSourceStruct()
@@ -1898,7 +1926,7 @@ class BankSourceStruct:
                 if b.plugin_size > 0:
                     b.plugin_data = stream.read(b.plugin_size)
         return b
-        
+
     def get_data(self):
         b = struct.pack(
             "<IBIIB",
@@ -1919,19 +1947,18 @@ class BankSourceStruct:
                     )
                     b += struct.pack(f"<{len(self.plugin_data)}s", self.plugin_data)
         return b
-            
-    
+
+
 class Sound(HircEntry):
-    
     import_values = [
         "sources",
         "baseParam",
     ]
-    
+
     def __init__(self):
         super().__init__()
         self.sources: list[BankSourceStruct] = []
-        self.baseParam: BaseParam | None = None 
+        self.baseParam: BaseParam | None = None
 
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -1963,14 +1990,14 @@ class Sound(HircEntry):
             return self.baseParam
         raise AssertionError(
             f"Sound container {self.hierarchy_id} does not have a "
-             "base parameter."
+            "base parameter."
         )
 
     def get_data(self):
         data = self._pack()
         assert_equal(
             f"Header size and packed data size mismatch for Sound {self.hierarchy_id}",
-            self.size, len(data) 
+            self.size, len(data)
         )
         header = struct.pack("<BI", self.hierarchy_type, self.size)
 
@@ -1987,7 +2014,10 @@ class Sound(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -1995,7 +2025,7 @@ class Sound(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -2015,16 +2045,16 @@ class Sound(HircEntry):
         data += self.baseParam.get_data()
 
         return data
-        
-        
+
+
 class HircEntryFactory:
-    
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         hierarchy_type = stream.uint8_read()
-        stream.seek(stream.tell()-1)
+        stream.seek(stream.tell() - 1)
         match hierarchy_type:
-            case 0x02: # sound
+            case 0x02:  # sound
                 entry = Sound.from_memory_stream(stream)
             case 0x03:
                 stream.advance(1 + 4 + 4)
@@ -2041,19 +2071,20 @@ class HircEntryFactory:
                 entry = ActorMixer.from_memory_stream(stream)
             case 0x09:
                 entry = LayerContainer.from_memory_stream(stream)
-            case 0x0A: # music segment
+            case 0x0A:  # music segment
                 entry = MusicSegment.from_memory_stream(stream)
-            case 0x0B: # music track
+            case 0x0B:  # music track
                 entry = MusicTrack.from_memory_stream(stream)
             case 0x0C:
                 entry = MusicSwitchContainer.from_memory_stream(stream)
             case _:
                 entry = HircEntry.from_memory_stream(stream)
         return entry
-            
-class WwiseHierarchy:
-    
-    def __init__(self, soundbank = None):
+
+
+class WwiseHierarchy_140:
+
+    def __init__(self, soundbank=None):
         self.entries: dict[int, HircEntry] = {}
 
         self.actions: list[Action] = []
@@ -2068,10 +2099,10 @@ class WwiseHierarchy:
         self.music_switch_containers: list[MusicSwitchContainer] = []
         self.uncategorized: list[HircEntry] = []
 
-        self.soundbank = soundbank # WwiseBank
+        self.soundbank = soundbank  # WwiseBank
         self.added_entries = {}
         self.removed_entries = {}
-        
+
     def load(self, hierarchy_data: bytes | bytearray):
         self.entries.clear()
         reader = MemoryStream()
@@ -2089,15 +2120,15 @@ class WwiseHierarchy:
             parent_id = entry.get_parent_id()
             if parent_id != None and parent_id in self.entries:
                 entry.parent = self.entries[parent_id]
-                
-    def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy'):
+
+    def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_140'):
         for entry in new_hierarchy.get_entries():
-            if isinstance(entry, (MusicSegment, MusicTrack)):
+            if isinstance(entry, (wwise_hierarchy_154.MusicSegment, wwise_hierarchy_154.MusicTrack, MusicSegment, MusicTrack)):
                 if entry.hierarchy_id in self.entries:
                     self.entries[entry.hierarchy_id].import_entry(entry)
                 else:
                     self.add_entry(entry)
-                
+
     def revert_modifications(self, entry_id: int = 0):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
 
@@ -2106,43 +2137,43 @@ class WwiseHierarchy:
         else:
             for entry in self.removed_entries:
                 self.entries[entry.hierarchy_id] = entry
-                self.soundbank.lower_modified() # type: ignore
+                self.soundbank.lower_modified()  # type: ignore
                 self._categorized_entry(entry)
             self.removed_entries.clear()
             for entry in self.added_entries.copy().values():
                 self.remove_entry(entry)
-                self.soundbank.lower_modified() # type: ignore
+                self.soundbank.lower_modified()  # type: ignore
             for entry in self.get_entries():
                 entry.revert_modifications()
-                
+
     def add_entry(self, new_entry: HircEntry):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
 
-        self.soundbank.raise_modified() # type: ignore
+        self.soundbank.raise_modified()  # type: ignore
         self.added_entries[new_entry.hierarchy_id] = new_entry
         self.entries[new_entry.hierarchy_id] = new_entry
         self._categorized_entry(new_entry)
         new_entry.soundbanks.append(self.soundbank)
-            
+
     def remove_entry(self, entry: HircEntry):
         assert_not_none(f"No WwiseBank is attached to entry {self.soundbank}", self.soundbank)
 
         if entry.hierarchy_id in self.entries:
             if entry.hierarchy_id in self.added_entries:
                 del self.added_entries[entry.hierarchy_id]
-                self.soundbank.lower_modified() # type: ignore
+                self.soundbank.lower_modified()  # type: ignore
             else:
                 self.removed_entries[entry.hierarchy_id] = entry
-                self.soundbank.raise_modified() # type: ignore
+                self.soundbank.raise_modified()  # type: ignore
 
             self._remove_categorized_entry(entry)
-            
+
             del self.entries[entry.hierarchy_id]
             entry.soundbanks.remove(self.soundbank)
-    
+
     def has_entry(self, entry_id: int):
         return entry_id in self.entries
-            
+
     def get_entry(self, entry_id: int):
         return self.entries[entry_id]
 
@@ -2204,13 +2235,13 @@ class WwiseHierarchy:
 
     def get_switches_container(self):
         return self.switch_containers
-        
+
     def get_music_switch_containers(self):
         return self.music_switch_containers
 
     def get_entries(self):
         return self.entries.values()
-        
+
     def get_data(self):
         old_child_lists = {}
         old_size = {}
@@ -2226,47 +2257,47 @@ class WwiseHierarchy:
             new_child_list.children = new_list
             new_child_list.numChildren = len(new_list)
             mixer.children = new_child_list
-            mixer.size = mixer.size - 4*old_num_children + 4*new_child_list.numChildren
-            
+            mixer.size = mixer.size - 4 * old_num_children + 4 * new_child_list.numChildren
+
         arr = [entry.get_data() for entry in self.entries.values()]
-        
+
         for mixer in self.get_actor_mixers() + self.get_switches_container() + self.get_random_sequence_containers() + self.get_layer_containers() + self.get_music_switch_containers():
             mixer.children = old_child_lists[mixer.hierarchy_id]
             mixer.size = old_size[mixer.hierarchy_id]
-        
+
         return len(arr).to_bytes(4, byteorder="little") + b"".join(arr)
 
     def _categorized_entry(self, entry: HircEntry):
         match entry.hierarchy_type:
             case 0x02:
-                assert(isinstance(entry, Sound))
+                assert (isinstance(entry, Sound))
                 self.sounds.append(entry)
             case 0x03:
-                assert(isinstance(entry, Action))
+                assert (isinstance(entry, Action))
                 self.actions.append(entry)
             case 0x04:
-                assert(isinstance(entry, Event))
+                assert (isinstance(entry, Event))
                 self.events.append(entry)
             case 0x05:
-                assert(isinstance(entry, RandomSequenceContainer))
+                assert (isinstance(entry, RandomSequenceContainer))
                 self.random_sequence_containers.append(entry)
             case 0x06:
-                assert(isinstance(entry, SwitchContainer))
+                assert (isinstance(entry, SwitchContainer))
                 self.switch_containers.append(entry)
             case 0x07:
-                assert(isinstance(entry, ActorMixer))
+                assert (isinstance(entry, ActorMixer))
                 self.actor_mixers.append(entry)
             case 0x09:
-                assert(isinstance(entry, LayerContainer))
+                assert (isinstance(entry, LayerContainer))
                 self.layer_container.append(entry)
             case 0x0A:
-                assert(isinstance(entry, MusicSegment))
+                assert (isinstance(entry, MusicSegment))
                 self.music_segments.append(entry)
             case 0x0B:
-                assert(isinstance(entry, MusicTrack))
+                assert (isinstance(entry, MusicTrack))
                 self.music_tracks.append(entry)
             case 0x0C:
-                assert(isinstance(entry, MusicSwitchContainer))
+                assert (isinstance(entry, MusicSwitchContainer))
                 self.music_switch_containers.append(entry)
             case _:
                 self.uncategorized.append(entry)
@@ -2274,37 +2305,38 @@ class WwiseHierarchy:
     def _remove_categorized_entry(self, entry: HircEntry):
         match entry.hierarchy_type:
             case 0x02:
-                assert(isinstance(entry, Sound))
+                assert (isinstance(entry, Sound))
                 self.sounds.remove(entry)
             case 0x03:
-                assert(isinstance(entry, Action))
+                assert (isinstance(entry, Action))
                 self.actions.remove(entry)
             case 0x04:
-                assert(isinstance(entry, Event))
+                assert (isinstance(entry, Event))
                 self.events.remove(entry)
             case 0x05:
-                assert(isinstance(entry, RandomSequenceContainer))
+                assert (isinstance(entry, RandomSequenceContainer))
                 self.random_sequence_containers.remove(entry)
             case 0x06:
-                assert(isinstance(entry, SwitchContainer))
+                assert (isinstance(entry, SwitchContainer))
                 self.switch_containers.remove(entry)
             case 0x07:
-                assert(isinstance(entry, ActorMixer))
+                assert (isinstance(entry, ActorMixer))
                 self.actor_mixers.remove(entry)
             case 0x09:
-                assert(isinstance(entry, LayerContainer))
+                assert (isinstance(entry, LayerContainer))
                 self.layer_container.remove(entry)
             case 0x0A:
-                assert(isinstance(entry, MusicSegment))
+                assert (isinstance(entry, MusicSegment))
                 self.music_segments.remove(entry)
             case 0x0B:
-                assert(isinstance(entry, MusicTrack))
+                assert (isinstance(entry, MusicTrack))
                 self.music_tracks.remove(entry)
             case 0x0C:
-                assert(isinstance(entry, MusicSwitchContainer))
+                assert (isinstance(entry, MusicSwitchContainer))
                 self.music_switch_containers.remove(entry)
             case _:
                 self.uncategorized.remove(entry)
+
 
 class FxChunk:
     """
@@ -2315,12 +2347,12 @@ class FxChunk:
     """
 
     def __init__(
-        self, uFxIndex: int, fxId: int, bIsShareSet: int, bIsRendered: int
+            self, uFxIndex: int, fxId: int, bIsShareSet: int, bIsRendered: int
     ):
-        self.uFxIndex: int = uFxIndex # U8i
-        self.fxId: int = fxId # tid
-        self.bIsShareSet: int = bIsShareSet # U8x
-        self.bIsRendered: int = bIsRendered # U8x
+        self.uFxIndex: int = uFxIndex  # U8i
+        self.fxId: int = fxId  # tid
+        self.bIsShareSet: int = bIsShareSet  # U8x
+        self.bIsRendered: int = bIsRendered  # U8x
 
     def get_data(self):
         return struct.pack(
@@ -2352,10 +2384,10 @@ class PropBundle:
     """
 
     def __init__(
-        self,
-        cProps: int = 0,
-        pIDs: list[int] = [],
-        pValues: list[bytearray] = []
+            self,
+            cProps: int = 0,
+            pIDs: list[int] = [],
+            pValues: list[bytearray] = []
     ):
         self.cProps = cProps
         self.pIDs = pIDs
@@ -2411,14 +2443,14 @@ class PropBundle:
 
         raise ValueError(
             f"Property ID {pID} does not exist. Please use add_prop_value_float to "
-             "add a new property!"
+            "add a new property!"
         )
 
     def add_prop_value_float(self, new_pid: int, new_value: float):
         if self.cProps == 0 or self.pIDs[-1] < new_pid:
             self.pIDs.append(new_pid)
             self.pValues.append(bytearray(struct.pack("<f", new_value)))
-            self.cProps += 1 
+            self.cProps += 1
             if len(self.pIDs) != self.cProps:
                 raise AssertionError(
                     "Property counter does not match up # of property IDs."
@@ -2504,10 +2536,10 @@ class RangedPropBundle:
     """
 
     def __init__(
-        self,
-        cProps: int = 0,
-        pIDs: list[int] = [],
-        rangedValues: list[tuple[float, float]] = []
+            self,
+            cProps: int = 0,
+            pIDs: list[int] = [],
+            rangedValues: list[tuple[float, float]] = []
     ):
         self.cProps = cProps
         self.pIDs = pIDs
@@ -2515,7 +2547,7 @@ class RangedPropBundle:
         assert_equal("# of props != # of prop. IDs", self.cProps, len(self.pIDs))
         assert_equal("# of props != # of prop. values", self.cProps, len(self.rangedValues))
         assert_equal("# of prop. IDs != # of prop. values", len(self.pIDs), len(self.rangedValues))
-    
+
     @staticmethod
     def from_memory_stream(s: MemoryStream):
         r = RangedPropBundle()
@@ -2524,11 +2556,10 @@ class RangedPropBundle:
             s.uint8_read() for _ in range(r.cProps)
         ]
         r.rangedValues = [
-            (s.float_read(), s.float_read()) 
+            (s.float_read(), s.float_read())
             for _ in range(r.cProps)
         ]
         return r
-
 
     def assert_range_prop_count(self, prop_count: int):
         if self.cProps != prop_count:
@@ -2546,7 +2577,7 @@ class RangedPropBundle:
                 f"There are {len(self.rangedValues)} property values but "
                 f"expected value is {prop_count}."
             )
-    
+
     def assert_range_prop_id(self, pos: int, prop_id: int):
         if self.pIDs[pos] != prop_id:
             raise AssertionError(
@@ -2555,7 +2586,7 @@ class RangedPropBundle:
             )
 
     def set_range_prop_value_by_pid(
-        self, pID: int, new_values: tuple[float, float]
+            self, pID: int, new_values: tuple[float, float]
     ):
         pIDs = self.pIDs
         rangeValues = self.rangedValues
@@ -2567,11 +2598,11 @@ class RangedPropBundle:
 
         raise ValueError(
             f"Property ID {pID} does not exist. Please use add_range_prop_value to "
-             "add a new property!"
+            "add a new property!"
         )
 
     def add_range_prop_value(
-        self, new_pid: int, new_values: tuple[float, float]
+            self, new_pid: int, new_values: tuple[float, float]
     ):
         if new_pid < 0:
             raise ValueError(f"Invalid property ID {new_pid}!")
@@ -2621,7 +2652,7 @@ class RangedPropBundle:
             if pIDs[l - i - 1] == new_pid:
                 raise AssertionError(
                     f"Property with ID {new_pid} already exists. Please use "
-                     "`set_prop_value_float_by_pid instead to set this property!"
+                    "`set_prop_value_float_by_pid instead to set this property!"
                 )
             pIDs.insert(l - i, new_pid)
             rangeValues.insert(l - i, (new_values[0], new_values[1]))
@@ -2661,10 +2692,10 @@ class AuxParams:
     """
 
     def __init__(
-        self,
-        byBitVectorAux: int = 0,
-        auxIDs: list[int] = [],
-        reflectionAuxBus: int = 0
+            self,
+            byBitVectorAux: int = 0,
+            auxIDs: list[int] = [],
+            reflectionAuxBus: int = 0
     ):
         self.byBitVectorAux = byBitVectorAux
         self.has_aux = self.byBitVectorAux & 0b0000_1000
@@ -2698,12 +2729,12 @@ class AdvSetting:
     """
 
     def __init__(
-        self, 
-        byBitVectorAdv: int = 0,
-        eVirtualQueueBehavior: int = 0,
-        u16MaxNumInstance: int = 0,
-        eBelowThresholdBehavior: int = 0,
-        byBitVectorHDR: int = 0
+            self,
+            byBitVectorAdv: int = 0,
+            eVirtualQueueBehavior: int = 0,
+            u16MaxNumInstance: int = 0,
+            eBelowThresholdBehavior: int = 0,
+            byBitVectorHDR: int = 0
     ):
         self.byBitVectorAdv = byBitVectorAdv
         self.eVirtualQueueBehavior = eVirtualQueueBehavior
@@ -2726,7 +2757,7 @@ class StateProp:
     """
     propertyId var (assume 8 bits, can be more)
     accumType U8x
-    inDb bool U8x 
+    inDb bool U8x
     """
 
     def __init__(self, propertyId: int = 0, accumType: int = 0, inDb: int = 0):
@@ -2745,8 +2776,8 @@ class StateGroupState:
     """
 
     def __init__(self, ulStateID: int = 0, ulStateInstanceID: int = 0):
-       self.ulStateID = ulStateID 
-       self.ulStateInstanceID = ulStateInstanceID
+        self.ulStateID = ulStateID
+        self.ulStateInstanceID = ulStateInstanceID
 
     def get_data(self):
         return struct.pack("<II", self.ulStateID, self.ulStateInstanceID)
@@ -2760,11 +2791,11 @@ class StateGroup:
     """
 
     def __init__(
-        self, 
-        ulStateGroupID: int = 0,
-        eStateSyncType: int = 0,
-        ulNumStates: int = 0,
-        states: list[StateGroupState] = []
+            self,
+            ulStateGroupID: int = 0,
+            eStateSyncType: int = 0,
+            ulNumStates: int = 0,
+            states: list[StateGroupState] = []
     ):
         self.ulStateGroupID = ulStateGroupID
         self.eStateSyncType = eStateSyncType
@@ -2799,11 +2830,11 @@ class StateParams:
     """
 
     def __init__(
-        self, 
-        ulNumStateProps: int = 0, 
-        stateProps: list[StateProp] = [],
-        ulNumStateGroups: int = 0,
-        stateGroups: list[StateGroup] = []
+            self,
+            ulNumStateProps: int = 0,
+            stateProps: list[StateProp] = [],
+            ulNumStateGroups: int = 0,
+            stateGroups: list[StateGroup] = []
     ):
         self.ulNumStateProps = ulNumStateProps
         self.stateProps = stateProps
@@ -2869,15 +2900,15 @@ class RTPC:
     """
 
     def __init__(
-        self, 
-        rtpcID: int = 0,
-        rtpcType: int = 0,
-        rtpcAccum: int = 0,
-        paramID: int = 0,
-        rtpcCurveID: int = 0,
-        eScaling: int = 0,
-        ulSize: int = 0,
-        rtpcGraphPoints: list[RTPCGraphPoint] = []
+            self,
+            rtpcID: int = 0,
+            rtpcType: int = 0,
+            rtpcAccum: int = 0,
+            paramID: int = 0,
+            rtpcCurveID: int = 0,
+            eScaling: int = 0,
+            ulSize: int = 0,
+            rtpcGraphPoints: list[RTPCGraphPoint] = []
     ):
         self.rtpcID = rtpcID
         self.rtpcType = rtpcType
@@ -2901,7 +2932,7 @@ class RTPC:
         )
         b = struct.pack(
             "<IBBBIBH",
-            self.rtpcID, self.rtpcType, self.rtpcAccum, self.paramID, 
+            self.rtpcID, self.rtpcType, self.rtpcAccum, self.paramID,
             self.rtpcCurveID, self.eScaling, self.ulSize
         )
         for p in self.rtpcGraphPoints:
@@ -2992,9 +3023,9 @@ class BaseParam:
 
         # [Aux Params]
         baseParam.auxParams.byBitVectorAux = stream.uint8_read()
-        baseParam.auxParams.has_aux = baseParam.auxParams.byBitVectorAux & 0b0000_1000 
+        baseParam.auxParams.has_aux = baseParam.auxParams.byBitVectorAux & 0b0000_1000
         if baseParam.auxParams.has_aux:
-            auxIDs: list[int] = [stream.uint32_read() for _ in range(4)] 
+            auxIDs: list[int] = [stream.uint32_read() for _ in range(4)]
             baseParam.auxParams.auxIDs = auxIDs
         baseParam.auxParams.reflectionAuxBus = stream.uint32_read()
 
@@ -3041,24 +3072,23 @@ class BaseParam:
             rtpcAccum = stream.uint8_read()
             ParamID = stream.uint8_read()
             rtpcCurveID = stream.uint32_read()
-            eScaling  = stream.uint8_read()
+            eScaling = stream.uint8_read()
             ulSize = stream.uint16_read()
             RTPCGraphPoints: list[RTPCGraphPoint] = [
                 RTPCGraphPoint(
-                    stream.float_read(), 
-                    stream.float_read(), 
+                    stream.float_read(),
+                    stream.float_read(),
                     stream.uint32_read()
                 )
                 for _ in range(ulSize)
             ]
             rtpcs.append(RTPC(
-                RTPCID, rtpcType, rtpcAccum, ParamID, rtpcCurveID, eScaling, ulSize, 
+                RTPCID, rtpcType, rtpcAccum, ParamID, rtpcCurveID, eScaling, ulSize,
                 RTPCGraphPoints
             ))
         baseParam.rtpcs = rtpcs
 
         return baseParam
-
 
     def get_data(self):
         b = struct.pack("<BB", self.bIsOverrideParentFx, self.uNumFx)
@@ -3085,7 +3115,7 @@ class BaseParam:
                 b += fxChunkMetadata.to_bytes()
 
         b += struct.pack(
-            "<BIIB", 
+            "<BIIB",
             self.bOverrideAttachmentParams,
             self.overrideBusId,
             self.directParentID,
@@ -3095,7 +3125,7 @@ class BaseParam:
         b += self.propBundle.get_data()
 
         b += self.rangePropBundle.get_data()
-        
+
         b += struct.pack(f"<{len(self.positioningParamData)}s", self.positioningParamData)
 
         b += self.auxParams.get_data()
@@ -3158,30 +3188,30 @@ class PlayListSetting:
     """
 
     def __init__(
-        self,
-        sLoopCount: int = 0,
-        sLoopModMin: int = 0,
-        sLoopModMax: int = 0,
-        fTransitionTime: float = 0,
-        fTransitionTimeModMin: float = 0,
-        fTransitionTimeModMax: float = 0,
-        wAvoidReaptCount: int = 0,
-        eTransitionMode: int = 0,
-        eRandomMode: int = 0,
-        eMode: int = 0,
-        byBitVectorPlayList: int = 0
+            self,
+            sLoopCount: int = 0,
+            sLoopModMin: int = 0,
+            sLoopModMax: int = 0,
+            fTransitionTime: float = 0,
+            fTransitionTimeModMin: float = 0,
+            fTransitionTimeModMax: float = 0,
+            wAvoidReaptCount: int = 0,
+            eTransitionMode: int = 0,
+            eRandomMode: int = 0,
+            eMode: int = 0,
+            byBitVectorPlayList: int = 0
     ):
-        self.sLoopCount = sLoopCount 
-        self.sLoopModMin = sLoopModMin 
-        self.sLoopModMax = sLoopModMax 
-        self.fTransitionTime = fTransitionTime 
-        self.fTransitionTimeModMin = fTransitionTimeModMin 
-        self.fTransitionTimeModMax = fTransitionTimeModMax 
-        self.wAvoidReaptCount = wAvoidReaptCount 
-        self.eTransitionMode = eTransitionMode 
-        self.eRandomMode = eRandomMode 
-        self.eMode = eMode 
-        self.byBitVectorPlayList = byBitVectorPlayList 
+        self.sLoopCount = sLoopCount
+        self.sLoopModMin = sLoopModMin
+        self.sLoopModMax = sLoopModMax
+        self.fTransitionTime = fTransitionTime
+        self.fTransitionTimeModMin = fTransitionTimeModMin
+        self.fTransitionTimeModMax = fTransitionTimeModMax
+        self.wAvoidReaptCount = wAvoidReaptCount
+        self.eTransitionMode = eTransitionMode
+        self.eRandomMode = eRandomMode
+        self.eMode = eMode
+        self.byBitVectorPlayList = byBitVectorPlayList
 
     def get_data(self):
         return struct.pack(
@@ -3273,11 +3303,11 @@ class LayerContainer(HircEntry):
         )
 
     def get_data(self):
-        data = self._pack() 
+        data = self._pack()
 
         assert_equal(
             f"Header size and packed data size mismatch for LayerContainer {self.hierarchy_id}",
-            self.size, len(data) 
+            self.size, len(data)
         )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
@@ -3296,7 +3326,10 @@ class LayerContainer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -3304,7 +3337,7 @@ class LayerContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3316,7 +3349,7 @@ class LayerContainer(HircEntry):
 
     def _pack(self):
         data = struct.pack("<I", self.hierarchy_id)
-        
+
         if self.baseParam == None:
             raise AssertionError(
                 f"Layer container {self.hierarchy_id} does not has a base parameter."
@@ -3331,7 +3364,6 @@ class LayerContainer(HircEntry):
 
 
 class ActorMixer(HircEntry):
-
     import_values = [
         "baseParam",
         "children"
@@ -3384,7 +3416,7 @@ class ActorMixer(HircEntry):
         data = self._pack()
         assert_equal(
             f"Header size and packed data size mismatch for ActorMixer {self.hierarchy_id}",
-            self.size, len(data) 
+            self.size, len(data)
         )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
@@ -3403,7 +3435,10 @@ class ActorMixer(HircEntry):
 
         if entry:
             for value in self.import_values:
-                setattr(self, value, getattr(entry, value))
+                try:
+                    setattr(self, value, getattr(entry, value))
+                except AttributeError:
+                    pass
         else:
             for name, value in data.items():
                 setattr(self, name, value)
@@ -3411,7 +3446,7 @@ class ActorMixer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
@@ -3427,7 +3462,7 @@ class ActorMixer(HircEntry):
             )
 
         data += self.baseParam.get_data()
-        
+
         data += self.children.get_data()
 
         return data
@@ -3516,52 +3551,51 @@ class SwitchParam:
             4 + 1 + 1 + 4 + 4
         )
         return b
-        
-        
+
+
 class MusicSwitchContainer(HircEntry):
-    
     import_values = [
         "unused_sections",
         "children",
         "baseParam"
     ]
-    
+
     def __init__(self):
         super().__init__()
         self.baseParam: BaseParam | None = None
         self.children: ContainerChildren = ContainerChildren()
         self.unused_sections = []
-        
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         c = MusicSwitchContainer()
-        
+
         c.hierarchy_type = stream.uint8_read()
         c.size = stream.uint32_read()
-        
+
         start = stream.tell()
-        
+
         c.hierarchy_id = stream.uint32_read()
-        
+
         c.unused_sections.append(stream.read(1))
-        
+
         c.baseParam = BaseParam.from_memory_stream(stream)
-        
+
         # [Children]
         c.children.numChildren = stream.uint32_read()
         c.children.children = [
             stream.uint32_read() for _ in range(c.children.numChildren)
         ]
-        
-        c.unused_sections.append(stream.read(c.size-(stream.tell()-start)))
-        
+
+        c.unused_sections.append(stream.read(c.size - (stream.tell() - start)))
+
         return c
-        
+
     def get_parent_id(self):
         if self.baseParam != None:
             return self.baseParam.directParentID
         return None
-        
+
     def get_data(self):
         return b"".join([
             struct.pack("<BII", self.hierarchy_type, self.size, self.hierarchy_id),
@@ -3570,7 +3604,6 @@ class MusicSwitchContainer(HircEntry):
             self.children.get_data(),
             self.unused_sections[1]
         ])
-    
 
 
 class SwitchContainer(HircEntry):
@@ -3612,7 +3645,7 @@ class SwitchContainer(HircEntry):
         self.switchGroups: list[SwitchGroup] = []
         self.ulNumSwitchParams: int = 0
         self.switchParms: list[SwitchParam] = []
-        
+
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
         s = SwitchContainer()
@@ -3669,7 +3702,7 @@ class SwitchContainer(HircEntry):
 
         assert_equal(
             f"Header size and packed data size mismatch for SwitchContainer {self.hierarchy_id}",
-            self.size, len(data) 
+            self.size, len(data)
         )
 
         header = struct.pack("<BI", self.hierarchy_type, self.size)
@@ -3695,20 +3728,19 @@ class SwitchContainer(HircEntry):
         self.modified = True
         self.update_size()
 
-        hierarchy: WwiseHierarchy = self.soundbanks[0].hierarchy
+        hierarchy: WwiseHierarchy_140 = self.soundbanks[0].hierarchy
         parent_id = self.get_parent_id()
         if parent_id != None and hierarchy.has_entry(parent_id):
             self.parent = hierarchy.get_entry(parent_id)
         else:
             self.parent = None
 
-
     def update_size(self):
         self.size = len(self._pack())
 
     def _pack(self):
         data = struct.pack("<I", self.hierarchy_id)
-        
+
         if self.baseParam == None:
             raise AssertionError(
                 "Switch container {self.hierarchy_id} does not has a base "
@@ -3718,7 +3750,7 @@ class SwitchContainer(HircEntry):
         data += self.baseParam.get_data()
 
         data += struct.pack(
-            "<BIIB", 
+            "<BIIB",
             self.eGroupType,
             self.ulGroupID,
             self.ulDefaultSwitch,
@@ -3759,7 +3791,7 @@ def parse_positioning_params(stream: MemoryStream):
     """
     head = stream.tell()
 
-    uBitsPositioning = stream.uint8_read() # U8x
+    uBitsPositioning = stream.uint8_read()  # U8x
     has_positioning = (uBitsPositioning >> 0) & 1
 
     has_3d = False
@@ -3767,17 +3799,17 @@ def parse_positioning_params(stream: MemoryStream):
         has_3d = (uBitsPositioning >> 1) & 1
 
     if has_positioning and has_3d:
-        uBits3d = stream.uint8_read() # U8x type: ignore
+        uBits3d = stream.uint8_read()  # U8x type: ignore
         eType = 0
 
         e3DPositionType = (uBitsPositioning >> 5) & 3
         has_automation = (e3DPositionType != 0)
 
         if has_automation:
-            ePathMode = stream.uint8_read() # U8x
-            TransitionTime = stream.int32_read() # s32
+            ePathMode = stream.uint8_read()  # U8x
+            TransitionTime = stream.int32_read()  # s32
 
-            ulNumVertices = stream.uint32_read() # u32
+            ulNumVertices = stream.uint32_read()  # u32
             vertices: list[tuple[float, float, float, int]] = [
                 (
                     stream.float_read(),
@@ -3787,7 +3819,7 @@ def parse_positioning_params(stream: MemoryStream):
                 ) for _ in range(ulNumVertices)
             ]
 
-            ulNumPlayListItem = stream.uint32_read() # u32
+            ulNumPlayListItem = stream.uint32_read()  # u32
             playListItems: list[tuple[int, int]] = [
                 (stream.uint32_read(), stream.uint32_read())
                 for _ in range(ulNumPlayListItem)

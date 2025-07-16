@@ -1,7 +1,7 @@
 import unittest
 
 from backend.db import SQLiteDatabase, config_sqlite_conn
-from wwise_hierarchy import ak_media_id
+from wwise_hierarchy_154 import ak_media_id
 
 
 class TestSourceIDGen(unittest.TestCase):

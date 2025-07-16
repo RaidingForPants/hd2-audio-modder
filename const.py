@@ -24,6 +24,10 @@ VORBIS = 0x00040001
 REV_AUDIO = 0x01A01052
 # [End]
 
+# [Misc]
+BANK_VERSION_KEY = 0x9211BCAC
+# [End]
+
 # [Conversion]
 DEFAULT_CONVERSION_SETTING = "Vorbis Quality High"
 

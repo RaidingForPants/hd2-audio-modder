@@ -41,7 +41,8 @@ import db
 import log
 import fileutil
 from util import *
-from wwise_hierarchy import *
+import wwise_hierarchy_140
+import wwise_hierarchy_154
 from core import *
 from xlocale import *
 from env import *
@@ -52,7 +53,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.18.1"
+VERSION = "1.18.2"
 
 def resource_path(relative_path):
     try:
@@ -703,7 +704,8 @@ class MusicTrackWindow:
             self.graphs.append(g)
 
             g.set_data(x, y)
-            source_id = info[self.track.clip_automations[i].clip_index].source_id
+            source_id = self.track.track_info[self.track.clip_automations[i].clip_index].source_id
+            #source_id = info[self.track.clip_automations[i].clip_index].source_id
             source = next(x for x in self.track.sources if x.source_id == source_id)
             if source.stream_type == BANK:
                 pass
@@ -813,9 +815,9 @@ class AudioSourceWindow:
 
         self.parent_text_box.configure(state="normal")
         self.parent_text_box.delete(1.0, tk.END)
-        if len([p for p in audio.parents if isinstance(p, Sound)]) > 0:
+        if len([p for p in audio.parents if isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound))]) > 0:
             self.parent_text_box.insert(tk.END, f"Parent Wwise Source object id(s):")
-            for parent in [p for p in audio.parents if isinstance(p, Sound)]:
+            for parent in [p for p in audio.parents if isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound))]:
                 self.parent_text_box.insert(tk.END, "\n"+f"{parent.get_id()}")
             self.parent_text_box.insert(tk.END, "\n\n")
         if audio.stream_type != BANK:
@@ -1324,19 +1326,29 @@ class TaskManager:
         return wrapper
         
     def sync_wrapper(self, task, callback):
-        if callback is not None:
+        if task is not None and callback is not None:
             def wrapper(*args, **kwargs):
                 try:
                     result = task(*args, **kwargs)
                     callback(*result)
                 finally:
                     self.sync_task_finished()
-        else:
+        elif task is not None:
             def wrapper(*args, **kwargs):
                 try:
                     task(*args, **kwargs)
                 finally:
                     self.sync_task_finished()
+        elif callback is not None:
+            def wrapper(*args, **kwargs):
+                try:
+                    args = args + tuple(kwargs.values())
+                    callback(*args)
+                finally:
+                    self.sync_task_finished()
+        else:
+            def wrapper(*args, **kwargs):
+                self.sync_task_finished()
         return wrapper
         
     def async_task_finished(self, future):
@@ -1404,7 +1416,7 @@ def async_task(func):
 
 def callback(callback):
     def wrapper(*args, **kwargs):
-        args[0].root.after_idle(callback, *args, **kwargs)
+        args[0].root.after_idle(callback, *args)
     return wrapper
 
 class MainWindow:
@@ -2174,8 +2186,6 @@ class MainWindow:
 
     @async_task
     async def convert_from_bik(self, bik_file: str, output_file: str):
-        print(bik_file)
-        print(output_file)
         output_file = os.path.normpath(output_file)
         p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_CONVERT, bik_file, output_file, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await p.wait()
@@ -2591,7 +2601,7 @@ class MainWindow:
                 tree_entry = self.treeview.insert(parent_item, END, tags=(entry.get_id(), entry.parent.get_id()))
             else:
                 tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
-            if entry.modified or (isinstance(entry, HircEntry) and entry.has_modified_children()): 
+            if entry.modified or (isinstance(entry, (wwise_hierarchy_154.HircEntry, wwise_hierarchy_140.HircEntry)) and entry.has_modified_children()):
                 self.mark_modified(entry, tree_entry)
         if isinstance(entry, WwiseBank):
             if self.name_lookup is not None:
@@ -2611,19 +2621,19 @@ class MainWindow:
         elif isinstance(entry, AudioSource):
             name = f"{entry.get_id()}.wem"
             entry_type = "Audio Source"
-        elif isinstance(entry, TrackInfoStruct):
+        elif isinstance(entry, (wwise_hierarchy_154.TrackInfoStruct, wwise_hierarchy_140.TrackInfoStruct)):
             name = f"Event {entry.get_id()}"
             entry_type = "Event"
         elif isinstance(entry, StringEntry):
             entry_type = "String"
             name = entry.get_text()[:20]
-        elif isinstance(entry, MusicTrack):
+        elif isinstance(entry, (wwise_hierarchy_154.MusicTrack, wwise_hierarchy_140.MusicTrack)):
             entry_type = "Music Track"
             name = f"Track {entry.get_id()}"
-        elif isinstance(entry, MusicSegment):
+        elif isinstance(entry, (wwise_hierarchy_154.MusicSegment, wwise_hierarchy_140.MusicSegment)):
             entry_type = "Music Segment"
             name = f"Segment {entry.get_id()}"
-        elif isinstance(entry, RandomSequenceContainer):
+        elif isinstance(entry, (wwise_hierarchy_154.RandomSequenceContainer, wwise_hierarchy_140.RandomSequenceContainer)):
             entry_type = "Random Sequence"
             name = f"Sequence {entry.get_id()}"
         elif isinstance(entry, GameArchive):
@@ -2658,7 +2668,7 @@ class MainWindow:
                 sequence_sources.clear()
                 bank_entry = self.create_treeview_entry(bank, archive_entry)
                 for hierarchy_entry in bank.hierarchy.entries.values():
-                    if isinstance(hierarchy_entry, MusicSegment):
+                    if isinstance(hierarchy_entry, (wwise_hierarchy_154.MusicSegment, wwise_hierarchy_140.MusicSegment)):
                         segment_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for track_id in hierarchy_entry.tracks:
                             track = bank.hierarchy.entries[track_id]
@@ -2669,11 +2679,11 @@ class MainWindow:
                                         self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
                                     except:
                                         pass
-                    elif isinstance(hierarchy_entry, RandomSequenceContainer):
+                    elif isinstance(hierarchy_entry, (wwise_hierarchy_154.RandomSequenceContainer, wwise_hierarchy_140.RandomSequenceContainer)):
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for s_id in hierarchy_entry.children.children:
                             sound = bank.hierarchy.entries[s_id]
-                            if not isinstance(sound, Sound):
+                            if not isinstance(sound, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound)):
                                 continue
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
@@ -2682,7 +2692,7 @@ class MainWindow:
                                 except:
                                     pass
                 for hierarchy_entry in bank.hierarchy.entries.values():
-                    if isinstance(hierarchy_entry, Sound) and hierarchy_entry not in sequence_sources:
+                    if isinstance(hierarchy_entry, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound)) and hierarchy_entry not in sequence_sources:
                         if hierarchy_entry.sources[0].plugin_id == VORBIS:
                             try:
                                 self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(hierarchy_entry.sources[0].source_id), bank_entry)
@@ -2844,7 +2854,7 @@ class MainWindow:
             self.treeview.item(item, tags=tags)
     
     def mark_modified(self, entry, item=None):
-        if isinstance(entry, HircEntry):
+        if isinstance(entry, (wwise_hierarchy_154.HircEntry, wwise_hierarchy_140.HircEntry)):
             modified = entry.modified or entry.has_modified_children()
         else:
             modified = entry.modified
@@ -2884,7 +2894,7 @@ class MainWindow:
             for item in diff:
                 self.mark_modified(item)
                 parents = []
-                if isinstance(item, HircEntry):
+                if isinstance(item, (wwise_hierarchy_154.HircEntry, wwise_hierarchy_140.HircEntry)):
                     parents = [item.parent] if item.parent is not None else item.soundbanks
                 elif isinstance(item, AudioSource):
                     parents = item.parents
@@ -3017,12 +3027,30 @@ class MainWindow:
                     archives.add(r.archive)
                 else:
                     missing_soundbanks.add(new_archive.get_wwise_banks()[soundbank_id])
-        if len(missing_soundbanks) > 0:
-            showwarning(title="Missing Soundbanks", message="Could not automatically load all soundbanks in the patch; it may be outdated. Please ensure any needed archives are manually loaded before importing this patch.\n" + "\n".join([bank.dep.data.replace("\x00", "") for bank in missing_soundbanks]))
+        #if len(missing_soundbanks) > 0:
+        #    showwarning(title="Missing Soundbanks", message="Could not automatically load all soundbanks in the patch; it may be outdated. Please ensure any needed archives are manually loaded before importing this patch.\n" + "\n".join([bank.dep.data.replace("\x00", "") for bank in missing_soundbanks]))
         for archive in archives:
             archive = os.path.join(self.app_state.game_data_path, archive)
             self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive)}", callback=self.import_patch_load_archive_finished, task=self.load_archive_task, archive_files=[archive])
+        reload_view = False
+        for video in new_archive.video_sources.values():
+            if video.file_id not in self.mod_handler.get_active_mod().get_video_sources().keys():
+                reload_view = True
+                break
+        for bank in new_archive.wwise_banks.values():
+            if bank.get_id() not in self.mod_handler.get_active_mod().get_wwise_banks().keys():
+                reload_view = True
+                break
         self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
+        if reload_view:
+            self.task_manager.schedule(name="", callback=self.create_view_callback, task=None)
+
+    @callback
+    def create_view_callback(self):
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
         
     @callback
     def import_patch_load_archive_finished(self, results):
