@@ -2739,12 +2739,17 @@ class StateProp:
         return struct.pack("<3B", self.propertyId, self.accumType, self.inDb)
 
 class AkPropBundle:
+    """
+    pID U16
+    pValue f32
+    """
+
     def __init__(self, pID: int, pValue: float):
         self.pID = pID
         self.pValue = pValue
 
     def get_data(self):
-        return struct.pack("<Bf", self.pID, self.pValue)
+        return struct.pack("<Hf", self.pID, self.pValue)
 
 
 class StateGroupState:
