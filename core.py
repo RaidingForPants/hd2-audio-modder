@@ -909,7 +909,7 @@ class GameArchive:
             return None
 
         if stream_type == BANK and plugin_id == REV_AUDIO:
-            if hirc.has_entry(source_id):
+            if not hirc.has_entry(source_id):
                 logger.error(
                     f"There's no custom FX hierarchy entry associated with audio"
                     f" source {source_id}!"
