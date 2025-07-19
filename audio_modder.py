@@ -16,6 +16,7 @@ import queue
 import PIL.Image
 import PIL.ImageTk
 import random
+import re
 
 from functools import partial
 from functools import cmp_to_key
@@ -1634,11 +1635,15 @@ class MainWindow:
             self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
         self.dump_menu.add_command(label="Dump all as .wem", command=self.dump_all_as_wem)
         
+        self.tools_menu = Menu(self.menu, tearoff=0)
+        self.tools_menu.add_command(label="Batch Migrate Patch Files", command=self.batch_migrate_patch)
+        
         self.menu.add_cascade(label="File", menu=self.file_menu)
         self.menu.add_cascade(label="Edit", menu=self.edit_menu)
         self.menu.add_cascade(label="Dump", menu=self.dump_menu)
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
+        self.menu.add_cascade(label="Tools", menu=self.tools_menu)
         self.menu.add_command(
             label = "About",
             command=self.open_about_window
@@ -2329,7 +2334,13 @@ class MainWindow:
             self.create_source_view()
         else:
             self.create_hierarchy_view()
-        
+
+    def remove_all_game_archives(self):
+        self.mod_handler.get_active_mod().remove_all_game_archives()
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
 
     def treeview_on_right_click(self, event):
         try:
@@ -2805,7 +2816,7 @@ class MainWindow:
         self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
     
     @task
-    def load_archive_task(self, archive_files: str | None = ""):
+    def load_archive_task(self, archive_files: list[str] = []):
         results = []
         for archive_file in archive_files:
             results.append((self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file), archive_file))
@@ -2813,6 +2824,30 @@ class MainWindow:
     
     @callback
     def load_archive_task_finished(self, results):
+        new_game_archives = []
+        for result in results:
+            success = result[0]
+            archive_file = result[1]
+            if success:
+                self.update_recent_files(filepath=archive_file)
+                archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
+                new_game_archives.append(archive)
+        for archive in new_game_archives:
+            if self.selected_view.get() == "SourceView":
+                self.create_source_view(new_game_archive=archive)
+            else:
+                self.create_hierarchy_view(new_game_archive=archive)
+        if len(new_game_archives) > 0:
+            self.clear_search()
+            self.update_language_menu()
+            for child in self.entry_info_panel.winfo_children():
+                child.forget()
+
+    def load_archive_sync(self, archive_files: list[str] = []):
+        results = []
+        for archive_file in archive_files:
+            results.append((self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file), archive_file))
+
         new_game_archives = []
         for result in results:
             success = result[0]
@@ -2998,6 +3033,119 @@ class MainWindow:
     def reset_unsaved_callback(self, none):
         self.unsaved_changes = False
         
+    def batch_migrate_patch(self):
+        """
+        Batch migrate patch files to update their versions.
+        Scans for .patch_* files, creates backups of entire directory, and migrates them.
+        """
+        # Ask user to select directory
+        directory = filedialog.askdirectory(
+            title="Select directory to scan for patch files"
+        )
+        if not directory:
+            return
+
+        # Find all .patch_* files
+        patch_files = []
+        patch_path_pattern = re.compile(r"^.*\.patch_\d+$")
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                if patch_path_pattern.match(file):
+                    patch_files.append(os.path.join(root, file))
+
+        if not patch_files:
+            tkinter.messagebox.showinfo("No Patch Files", "No .patch_* files found in the selected directory.")
+            return
+
+        # Confirm with user
+        message = f"Found {len(patch_files)} patch file(s).\n\n"
+        message += "This will:\n"
+        message += "1. Create backup of entire directory with timestamp\n"
+        message += "2. Import and re-export each patch to update version\n"
+        message += "3. Overwrite original files\n\n"
+        message += "Continue?"
+        
+        if not tkinter.messagebox.askyesno("Confirm Batch Migration", message):
+            return
+
+        # Create backup of entire directory
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        parent_dir = os.path.dirname(directory)
+        dir_name = os.path.basename(directory)
+        backup_dir = os.path.join(parent_dir, f"{dir_name}_backup_{timestamp}")
+        
+        try:
+            shutil.copytree(directory, backup_dir)
+        except Exception as e:
+            tkinter.messagebox.showerror("Backup Error", f"Failed to create backup: {str(e)}")
+            return
+
+        migrated_count = 0
+        failed_count = 0
+
+        for patch_file in patch_files:
+            try:
+                self.import_patch_sync(patch_file)
+
+                # Export the updated patch
+                output_filename = os.path.basename(patch_file)
+                output_dir = os.path.dirname(patch_file)
+                self.mod_handler.get_active_mod().write_patch(output_dir, output_filename)
+
+                # Clear current workspace after each file processing
+                self.remove_all_game_archives()
+
+                migrated_count += 1
+
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"Failed to migrate {patch_file}: {str(e)}")
+                continue
+
+        # Show results
+        result_message = f"Migration completed!\n\n"
+        result_message += f"Successfully migrated: {migrated_count}\n"
+        result_message += f"Failed: {failed_count}\n"
+        result_message += f"\nFull directory backup saved in: {backup_dir}"
+
+        tkinter.messagebox.showinfo("Batch Migration Complete", result_message)
+
+    def import_patch_sync(self, patch_file: str = ""):
+        self.sound_handler.kill_sound()
+        if patch_file == "":
+            patch_file = askopenfilename(title="Select patch file", filetypes=[("Patch File", "*.patch_*")])
+        if not patch_file:
+            return
+
+        archive_file = patch_file
+        new_archive = GameArchive.from_file(archive_file)
+        missing_soundbank_ids = [soundbank_id for soundbank_id in new_archive.get_wwise_banks().keys() if soundbank_id not in self.mod_handler.get_active_mod().get_wwise_banks()]
+
+        archives = set()
+        missing_soundbanks = set()
+        if len(new_archive.text_banks) > 0 and "9ba626afa44a3aa3" not in self.mod_handler.get_active_mod().get_game_archives().keys():
+            archives.add("9ba626afa44a3aa3")
+        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+            for soundbank_id in missing_soundbank_ids:
+                r = self.name_lookup.lookup_soundbank(soundbank_id)
+                if r.success:
+                    archives.add(r.archive)
+                else:
+                    missing_soundbanks.add(new_archive.get_wwise_banks()[soundbank_id])
+
+        for archive in archives:
+            archive = os.path.join(self.app_state.game_data_path, archive)
+            self.load_archive_sync(archive_files=[archive])
+
+        for video in new_archive.video_sources.values():
+            if video.file_id not in self.mod_handler.get_active_mod().get_video_sources().keys():
+                break
+        for bank in new_archive.wwise_banks.values():
+            if bank.get_id() not in self.mod_handler.get_active_mod().get_wwise_banks().keys():
+                break
+
+        self.mod_handler.get_active_mod().import_patch(patch_file)
+
     def import_patch(self, archive_file: str = ""):
         self.sound_handler.kill_sound()
         if archive_file == "":
