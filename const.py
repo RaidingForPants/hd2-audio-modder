@@ -35,3 +35,8 @@ SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
 SUPPORTED_VIDEO_TYPES = [".bik", ".mp4", ".mov"]
 WWISE_SUPPORTED_SYSTEMS = ["Windows", "Darwin"]
 # [End]
+
+# [Cli]
+CACHE = "cache"
+TMP = "tmp"
+# [End]

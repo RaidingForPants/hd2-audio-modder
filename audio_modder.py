@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import struct
 import time
@@ -3077,6 +3078,12 @@ class MainWindow:
 if __name__ == "__main__":
     logger.setLevel(logging.INFO)
     random.seed()
+
+    # CLI mode
+    if len(sys.argv) > 1:
+        from cli import main
+        exit(main())
+
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)

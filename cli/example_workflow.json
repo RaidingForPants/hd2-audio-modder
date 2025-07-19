@@ -1,0 +1,114 @@
+{
+  "description": "CLI Function Test Workflow",
+  "context": {
+    "test_game_dir": "./test_data/game",
+    "test_output_dir": "./test_data/output",
+    "test_audio_file": "./test_data/audio/test.wav",
+    "base_archive": "9ba626afa44a3aa3",
+    "timestamp": "$(date +%Y%m%d_%H%M%S)"
+  },
+  "steps": [
+    {
+      "name": "Initialize Config",
+      "command": "configure",
+      "args": {
+        "game_data_path": "{test_game_dir}",
+        "theme": "dark"
+      },
+      "description": "Set basic config for test environment"
+    },
+    {
+      "name": "Set Test Variables",
+      "command": "set_variable",
+      "args": {
+        "test_session": "cli_test_{timestamp}",
+        "test_mode": "automated"
+      },
+      "description": "Set test session related variables"
+    },
+    {
+      "name": "Show System Status",
+      "command": "status",
+      "args": {},
+      "description": "Check system initialization status"
+    },
+    {
+      "name": "List Current Variables",
+      "command": "list_variables",
+      "args": {},
+      "description": "Show all set variables"
+    },
+    {
+      "name": "Import Base Archive",
+      "command": "import_archive",
+      "args": {
+        "path": "{test_game_dir}/{base_archive}"
+      },
+      "condition": "os.path.exists('{test_game_dir}/{base_archive}')",
+      "on_error": "continue",
+      "description": "Try to import base game archive file"
+    },
+    {
+      "name": "List Loaded Archives",
+      "command": "list_archives",
+      "args": {},
+      "description": "Show successfully loaded archive files"
+    },
+    {
+      "name": "Import Test Audio File",
+      "command": "import_audio",
+      "args": {
+        "file_path": "{test_audio_file}"
+      },
+      "condition": "os.path.exists('{test_audio_file}')",
+      "on_error": "continue",
+      "description": "Try to import test audio file"
+    },
+    {
+      "name": "List Audio Sources",
+      "command": "list_audio",
+      "args": {},
+      "description": "Show loaded audio sources"
+    },
+    {
+      "name": "Test Variable Operation",
+      "command": "set_variable",
+      "args": {
+        "test_counter": "1",
+        "test_result": "success"
+      },
+      "description": "Test variable setting function"
+    },
+    {
+      "name": "Verify Variable Setting",
+      "command": "get_variable",
+      "args": {
+        "name": "test_counter"
+      },
+      "description": "Verify if variable is set correctly"
+    },
+    {
+      "name": "Export Test Patch",
+      "command": "write_patch",
+      "args": {
+        "output_dir": "{test_output_dir}"
+      },
+      "on_error": "continue",
+      "description": "Try to export test patch file to specified directory"
+    },
+    {
+      "name": "Export Session Data",
+      "command": "export_session",
+      "args": {
+        "file": "{test_output_dir}/test_session_{timestamp}.json"
+      },
+      "description": "Export test session data"
+    },
+    {
+      "name": "Final Status Check",
+      "command": "status",
+      "args": {},
+      "description": "Check system status after test completion"
+    }
+  ]
+} 

@@ -716,12 +716,18 @@ class GameArchive:
         toc_file.write(b"".join(toc_data))
         stream_file.write(b"".join(stream_data))
 
-        with open(os.path.join(path, self.name), 'w+b') as f:
-            f.write(toc_file.data)
+        try:
+            with open(os.path.join(path, self.name), 'w+b') as f:
+                f.write(toc_file.data)
+        except (OSError, IOError) as e:
+            raise OSError(f"Failed to write file '{os.path.join(path, self.name)}': {e}")
             
         if len(stream_file.data) > 0:
-            with open(os.path.join(path, self.name+".stream"), 'w+b') as f:
-                f.write(stream_file.data)
+            try:
+                with open(os.path.join(path, self.name+".stream"), 'w+b') as f:
+                    f.write(stream_file.data)
+            except (OSError, IOError) as e:
+                raise OSError(f"Failed to write file '{os.path.join(path, self.name+'.stream')}': {e}")
 
     def load(self, toc_file: MemoryStream, stream_file: MemoryStream):
         self.wwise_streams.clear()
