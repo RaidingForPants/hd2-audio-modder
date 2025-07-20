@@ -3080,6 +3080,9 @@ class MainWindow:
             tkinter.messagebox.showerror("Backup Error", f"Failed to create backup: {str(e)}")
             return
 
+        # Remove all game archives at first
+        self.remove_all_game_archives()
+
         migrated_count = 0
         failed_count = 0
 
