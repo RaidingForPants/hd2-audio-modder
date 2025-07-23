@@ -46,6 +46,7 @@ import wwise_hierarchy_154
 from core import *
 from xlocale import *
 from env import *
+import env
 from const import *
 from graph import *
 
@@ -384,6 +385,15 @@ class OptionsWindow:
         self.rad_tools_path_title.grid(row=5, column=0, sticky="e")
         self.rad_tools_path.grid(row=5, column=1)
         self.rad_tools_path_button.grid(row=5, column=2, pady=2, padx=2)
+
+        self.wwise_path_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="Wwise Path:")
+        self.wwise_path = ttk.Label(self.config_frame, font=('Segoe UI', 12),
+                                        text=os.path.normpath(self.config.wwise_path))
+        self.wwise_path_button = ttk.Button(self.config_frame, text="Change path",
+                                                command=self.change_wwise_path_button_pressed)
+        self.wwise_path_title.grid(row=6, column=0, sticky="e")
+        self.wwise_path.grid(row=6, column=1)
+        self.wwise_path_button.grid(row=6, column=2, pady=2, padx=2)
         
         
         self.button_frame = Frame(self.frame)
@@ -430,8 +440,8 @@ class OptionsWindow:
                     if os.path.exists(os.path.join(str(path), "data")):
                         return os.path.join(str(path), "data")
                 elif path.match("*/steamapps/common"):
-                    if os.path.exists(os.path.join(str(path), "data")):
-                        return os.path.join(str(path), "data")
+                    if os.path.exists(os.path.join(str(path), "Helldivers 2", "data")):
+                        return os.path.join(str(path), "Helldiver 2", "data")
                 elif path.match("*/steamapps"):
                     if os.path.exists(os.path.join(str(path), "common", "Helldivers 2", "data")):
                         return os.path.join(str(path), "common", "Helldivers 2", "data")
@@ -444,6 +454,47 @@ class OptionsWindow:
                 return game_data_path
             if not response:
                 pass
+
+    def select_wwise_path(self):
+        while True:
+            wwise_path: str = filedialog.askdirectory(
+                parent=self.root,
+                mustexist=True,
+                title="Locate Wwise Install"
+            )
+            if os.path.exists(wwise_path):
+                if SYSTEM == "Windows":
+                    path = pathlib.Path(wwise_path)
+                    if path.match("*/Authoring/x64/Release/bin/WwiseConsole.exe"):
+                        return wwise_path
+                    elif (path / "Authoring/x64/Release/bin/WwiseConsole.exe").exists():
+                        return str(path / "Authoring/x64/Release/bin/WwiseConsole.exe")
+                    elif (path / "x64/Release/bin/WwiseConsole.exe").exists():
+                        return str(path / "x64/Release/bin/WwiseConsole.exe")
+                    elif (path / "Release/bin/WwiseConsole.exe").exists():
+                        return str(path / "Release/bin/WwiseConsole.exe")
+                    elif (path / "bin/WwiseConsole.exe").exists():
+                        return str(path / "bin/WwiseConsole.exe")
+                    elif (path / "WwiseConsole.exe").exists():
+                        return str(path / "WwiseConsole.exe")
+                elif SYSTEM == "Darwin":
+                    path = pathlib.Path(wwise_path)
+                    if path.match("*/Wwise.app/Contents/Tools/WwiseConsole.sh"):
+                        return wwise_path
+                    elif (path / "Wwise.app/Contents/Tools/WwiseConsole.sh").exists():
+                        return str(path / "Wwise.app/Contents/Tools/WwiseConsole.sh")
+                    elif (path / "Contents/Tools/WwiseConsole.sh").exists():
+                        return str(path / "Contents/Tools/WwiseConsole.sh")
+                    elif (path / "Tools/WwiseConsole.sh").exists():
+                        return str(path / "Tools/WwiseConsole.sh")
+                    elif (path / "WwiseConsole.sh").exists():
+                        return str(path / "WwiseConsole.sh")
+                elif SYSTEM == "Linux": # not supported
+                    return wwise_path
+            if not wwise_path:
+                return ""
+            response = showwarning(parent=self.root, title="Missing Wwise", message=f"Unable to locate Wwise install in {wwise_path}.")
+            return ""
             
     def change_game_data_path_button_pressed(self):
         new_path = self.select_game_data_path()
@@ -463,6 +514,11 @@ class OptionsWindow:
         new_path = os.path.normpath(folder_path)
         if new_path and new_path != ".":
             self.rad_tools_path.config(text=new_path)
+
+    def change_wwise_path_button_pressed(self):
+        new_path = os.path.normpath(self.select_wwise_path())
+        if new_path and new_path != ".":
+            self.wwise_path.config(text=new_path)
         
     def apply_button_pressed(self):
         self.apply_changes()
@@ -479,7 +535,9 @@ class OptionsWindow:
         self.config.ui_scale = self.treeview_text_scale_var.get()
         self.config.game_data_path = self.game_data_path.cget("text")
         self.config.rad_tools_path = self.rad_tools_path.cget("text")
+        self.config.wwise_path = self.wwise_path.cget("text")
         self.config.theme = self.theme_var.get()
+        wwise_setup(self.config)
         
     def close_window(self):
         self.root.destroy()
@@ -1918,7 +1976,7 @@ class MainWindow:
             patch_files = [file for file in import_files if ".patch_" in os.path.basename(file)]
             for file in patch_files:
                 self.import_patch(file)
-            if os.path.exists(WWISE_CLI):
+            if os.path.exists(self.app_state.wwise_path):
                 audio_files = [file for file in import_files if os.path.splitext(file)[1].lower() in SUPPORTED_AUDIO_TYPES]
             else:
                 audio_files = [file for file in import_files if os.path.splitext(file)[1].lower() == ".wem"]
@@ -2210,7 +2268,7 @@ class MainWindow:
         
     def import_audio_files(self):
 
-        if os.path.exists(WWISE_CLI):
+        if os.path.exists(self.app_state.wwise_path):
             available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
@@ -2313,7 +2371,7 @@ class MainWindow:
         self.category_search.selection_clear()
         
     def targeted_import(self, targets):
-        if os.path.exists(WWISE_CLI):
+        if os.path.exists(self.app_state.wwise_path):
             available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
@@ -2668,7 +2726,7 @@ class MainWindow:
                 sequence_sources.clear()
                 bank_entry = self.create_treeview_entry(bank, archive_entry)
                 for hierarchy_entry in bank.hierarchy.entries.values():
-                    if isinstance(hierarchy_entry, (wwise_hierarchy_154.MusicSegment, wwise_hierarchy_140.MusicSegment)):
+                    if hierarchy_entry.hierarchy_type == HircType.MusicSegment:
                         segment_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for track_id in hierarchy_entry.tracks:
                             track = bank.hierarchy.entries[track_id]
@@ -2679,11 +2737,11 @@ class MainWindow:
                                         self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
                                     except:
                                         pass
-                    elif isinstance(hierarchy_entry, (wwise_hierarchy_154.RandomSequenceContainer, wwise_hierarchy_140.RandomSequenceContainer)):
+                    elif hierarchy_entry.hierarchy_type == HircType.RandomSequenceContainer:
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for s_id in hierarchy_entry.children.children:
                             sound = bank.hierarchy.entries[s_id]
-                            if not isinstance(sound, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound)):
+                            if not sound.hierarchy_type == HircType.Sound:
                                 continue
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
@@ -2692,7 +2750,7 @@ class MainWindow:
                                 except:
                                     pass
                 for hierarchy_entry in bank.hierarchy.entries.values():
-                    if isinstance(hierarchy_entry, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound)) and hierarchy_entry not in sequence_sources:
+                    if hierarchy_entry.hierarchy_type == HircType.Sound and hierarchy_entry not in sequence_sources:
                         if hierarchy_entry.sources[0].plugin_id == VORBIS:
                             try:
                                 self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(hierarchy_entry.sources[0].source_id), bank_entry)
@@ -3074,12 +3132,38 @@ class MainWindow:
         self.check_modified()
         self.show_info_window()
 
+def wwise_setup(app_state, show_warnings=False):
+    if os.path.exists(app_state.wwise_path):
+        env.WWISE_CLI = app_state.wwise_path
+    if show_warnings and not os.path.exists(app_state.wwise_path) and SYSTEM != "Linux":
+        logger.warning("Wwise installation not found. The only file type available for import is WEM.")
+        showwarning(title="Missing Plugin",
+                    message="Wwise installation not found. The only file type available for import is WEM.")
+
+    if os.path.exists(app_state.wwise_path) and not os.path.exists(DEFAULT_WWISE_PROJECT):
+        process = subprocess.run([
+            app_state.wwise_path,
+            "create-new-project",
+            DEFAULT_WWISE_PROJECT,
+            "--platform",
+            "Windows",
+            "--quiet",
+        ])
+        if process.returncode != 0:
+            logger.error("Error creating Wwise project. Audio import restricted to .wem files only")
+            showwarning(title="Wwise Error",
+                        message="Error creating Wwise project. Audio import restricted to .wem files only")
+
+
 if __name__ == "__main__":
     logger.setLevel(logging.INFO)
     random.seed()
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)
+
+    if os.path.exists(env.WWISE_CLI) and not os.path.exists(app_state.wwise_path):
+        app_state.wwise_path = env.WWISE_CLI
 
     GAME_FILE_LOCATION = app_state.game_data_path
     try:
@@ -3114,24 +3198,8 @@ if __name__ == "__main__":
                      "in the same folder as the executable")
         showwarning(title="Missing Plugin", message="Cannot find vgmstream distribution! " \
                     "Audio playback is disabled.")
-                     
-    if not os.path.exists(WWISE_CLI) and SYSTEM != "Linux":
-        logger.warning("Wwise installation not found. The only file type available for import is WEM.")
-        showwarning(title="Missing Plugin", message="Wwise installation not found. The only file type available for import is WEM.")
-    
-    if os.path.exists(WWISE_CLI) and not os.path.exists(DEFAULT_WWISE_PROJECT):
-        process = subprocess.run([
-            WWISE_CLI,
-            "create-new-project",
-            DEFAULT_WWISE_PROJECT,
-            "--platform",
-            "Windows",
-            "--quiet",
-        ])
-        if process.returncode != 0:
-            logger.error("Error creating Wwise project. Audio import restricted to .wem files only")
-            showwarning(title="Wwise Error", message="Error creating Wwise project. Audio import restricted to .wem files only")
-            WWISE_CLI = ""
+
+    wwise_setup(app_state, show_warnings=True)
 
     lookup_store: db.FriendlyNameLookup | None = None
     

@@ -16,6 +16,7 @@ from typing import Callable, Literal, Union
 from backend.db import SQLiteDatabase
 from const import *
 from env import *
+import env
 from xlocale import *
 from util import *
 import wwise_hierarchy_140
@@ -2157,9 +2158,8 @@ class Mod:
             raise NotImplementedError(
                 "The current operating system does not support this feature"
             )
-        
         process = subprocess.run([
-            WWISE_CLI,
+            env.WWISE_CLI,
             "migrate",
             wwise_project,
             "--quiet",
@@ -2171,7 +2171,7 @@ class Mod:
         convert_dest = os.path.join(TMP, SYSTEM)
         
         process = subprocess.run([
-            WWISE_CLI,
+            env.WWISE_CLI,
             "convert-external-source",
             wwise_project,
             "--platform", "Windows",
