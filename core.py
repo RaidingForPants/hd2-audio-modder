@@ -1746,6 +1746,19 @@ class Mod:
         except:
             pass
     
+    def remove_all_game_archives(self):
+        """
+        Remove all game archives from the mod.
+        This will clear all audio sources, wwise banks, wwise streams, 
+        text banks, video sources, and hierarchy entries.
+        """
+        # Get all archive names to remove
+        archive_names = list(self.game_archives.keys())
+        
+        # Remove each archive
+        for archive_name in archive_names:
+            self.remove_game_archive(archive_name)
+    
     def add_game_archive(self, game_archive: GameArchive):
         """
         @exception
