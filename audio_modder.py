@@ -2185,7 +2185,7 @@ class MainWindow:
                 return
             elif tags[0] == "dir":
                 return
-        file_dict = {self.workspace.item(i, option="values")[0]: [parse_filename(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
+        file_dict = {self.workspace.item(i, option="values")[0]: [parse_filename(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"}
         self.workspace_popup_menu.add_command(
             label="Import", 
             command=lambda: self.import_files(file_dict)
@@ -2279,10 +2279,15 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
-        # separate out video files
+        # separate out video files and patch files
         videos = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in SUPPORTED_VIDEO_TYPES}
         for video, targets in videos.items():
             self.import_video(targets, video)
+            del file_dict[video]
+        patches = [file for file, targets in file_dict.items() if "patch" in os.path.splitext(file)[1]]
+        for patch in patches:
+            del file_dict[patch]
+            self.import_patch(archive_file=patch)
         self.task_manager.schedule(name="Importing Files", callback=self.import_files_callback, task=self.import_files_task, file_dict=file_dict)
         
     @task
