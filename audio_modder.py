@@ -1636,7 +1636,6 @@ class MainWindow:
 
         self.load_archive_menu = Menu(self.menu, tearoff=0)
         self.tools_menu = Menu(self.menu, tearoff=0)
-        self.tools_menu.add_command(label="Batch Migrate Patch Files", command=self.batch_migrate_patch)
         if os.path.exists(GAME_FILE_LOCATION):
             self.load_archive_menu.add_command(
                 label="From HD2 Data Folder",
@@ -1677,9 +1676,6 @@ class MainWindow:
             label="Import"
         )
         
-        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
-            self.tools_menu.add_command(label="Combine Mods", command=self.combine_mods)
-        
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Write Separate Patches", command=self.write_separate_patches)
@@ -1694,9 +1690,10 @@ class MainWindow:
         if os.path.exists(VGMSTREAM):
             self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
         self.dump_menu.add_command(label="Dump all as .wem", command=self.dump_all_as_wem)
-        
-        self.tools_menu = Menu(self.menu, tearoff=0)
+
         self.tools_menu.add_command(label="Batch Migrate Patch Files", command=self.batch_migrate_patch)
+        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+            self.tools_menu.add_command(label="Combine Mods", command=self.combine_mods)
         
         self.menu.add_cascade(label="File", menu=self.file_menu)
         self.menu.add_cascade(label="Edit", menu=self.edit_menu)
@@ -1883,6 +1880,7 @@ class MainWindow:
         seven_z_files = [file for file in files if os.path.splitext(file)[1].lower() == ".7z"]
         patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
         index = 0
+        # extract all files
         for index, mod_file in enumerate(zip_files):
             try:
                 zip = zipfile.ZipFile(mod_file)
@@ -1901,6 +1899,8 @@ class MainWindow:
             zip.extractall(path=extract_location)
             files = [file for file in list_files_recursive(extract_location) if "patch" in os.path.splitext(file)[1]]
             patch_files.extend(files)
+
+        # create list of soundbanks to load
         missing_soundbank_ids = []
         archives = set()
         for index, file in enumerate(patch_files):
