@@ -89,6 +89,7 @@ def load_config(config_path: str = "config.pickle") -> Config | None:
         cfg.recent_files = cfg.get("recent_files", [])
         cfg.recent_files = [file for file in cfg.recent_files if os.path.exists(file)]
         cfg.save_config()
+        #print(cfg.wwise_path)
         return cfg
 
     game_data_path: str | None = _select_game_data_path()
