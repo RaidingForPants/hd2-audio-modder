@@ -2857,9 +2857,8 @@ class MainWindow:
             archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
         if not archive_file:
             return
-        if ".patch" in os.path.basename(archive_file):
-            self.import_patch(archive_file)
-            return
+        if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
+            archive_file = os.path.splitext(archive_file)[0]
         self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
     
     @task
@@ -2877,7 +2876,7 @@ class MainWindow:
             archive_file = result[1]
             if success:
                 self.update_recent_files(filepath=archive_file)
-                archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
+                archive = self.mod_handler.get_active_mod().get_game_archive(os.path.basename(archive_file))
                 new_game_archives.append(archive)
         for archive in new_game_archives:
             if self.selected_view.get() == "SourceView":

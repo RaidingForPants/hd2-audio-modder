@@ -1698,7 +1698,10 @@ class Mod:
                     for entry in game_archive.get_wwise_banks()[key].hierarchy.entries.values():
                         entry.soundbanks.remove(game_archive.get_wwise_banks()[key])
                     for audio_id in self.get_wwise_banks()[key].get_content():
-                        audio = self.get_audio_source(audio_id)
+                        try:
+                            audio = self.get_audio_source(audio_id)
+                        except KeyError:
+                            continue
                         parents = [p for p in audio.parents]
                         for parent in parents:
                             if isinstance(parent, (wwise_hierarchy_154.HircEntry, wwise_hierarchy_140.HircEntry)) and key in [b.get_id() for b in parent.soundbanks]:
@@ -1806,7 +1809,10 @@ class Mod:
             if key in self.get_wwise_banks().keys():
                 self.bank_count[key] += 1
                 for audio_id in game_archive.wwise_banks[key].get_content():
-                    audio = self.get_audio_source(audio_id)
+                    try:
+                        audio = self.get_audio_source(audio_id)
+                    except KeyError:
+                        continue
                     parents = [p for p in audio.parents]
                     for parent in parents:
                         if isinstance(parent, (wwise_hierarchy_154.HircEntry, wwise_hierarchy_140.HircEntry)) and key in [b.get_id() for b in parent.soundbanks]:

@@ -144,6 +144,7 @@ def parse_filename(name: str):
     Options:
     id_fluff.wav
     seq_id_fluff.wav
+    id_wwisehash.wem
     *fluff may or may not be separated by an underscore
     *sequence number will always be separated by an underscore
     '''
