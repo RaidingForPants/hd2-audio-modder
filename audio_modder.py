@@ -2643,11 +2643,11 @@ class MainWindow:
         for index, audio_source in enumerate([self.mod_handler.get_active_mod().get_audio_source(source_id) for source_id in file_ids]):
             if audio_source.get_resource_id() != 0:
                 if with_seq:
-                    os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{index}_{audio_source.get_resource_id()}.wav"))
+                    os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"s{index}_{audio_source.get_resource_id()}.wav"))
                 else:
                     os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{audio_source.get_resource_id()}.wav"))
             elif with_seq:
-                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{index}_{audio_source.get_short_id()}.wav"))
+                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"s{index}_{audio_source.get_short_id()}.wav"))
 
         return task_id
 
