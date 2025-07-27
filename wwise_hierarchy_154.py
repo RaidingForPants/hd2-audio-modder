@@ -157,7 +157,6 @@ class HircEntry:
             self.modified = False
             if self.parent:
                 self.parent.lower_modified()
-                print(self.parent.modified_children)
             for bank in self.soundbanks:
                 bank.lower_modified()
         

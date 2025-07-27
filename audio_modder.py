@@ -905,10 +905,7 @@ class AudioSourceWindow:
                 button.configure(text= '\u23f5')
             else:
                 button.configure(text= '\u23f9')
-            temp = self.audio.data
-            self.audio.data = self.audio.data_old
-            self.play(file_id, callback)
-            self.audio.data = temp
+            self.play(-file_id, callback)
         self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
         self.play_original_button.configure(command=partial(play_original_audio, self.play_original_button, audio.get_short_id(), partial(reset_button_icon, self.play_original_button)))
         self.parent_text_box.pack(side="bottom", pady=5)
@@ -3132,8 +3129,11 @@ class MainWindow:
             self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder, with_seq=False)
         
     def play_audio(self, file_id: int, callback=None):
-        audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
-        self.sound_handler.play_audio(audio.get_short_id(), audio.get_data(), callback)
+        audio = self.mod_handler.get_active_mod().get_audio_source(abs(file_id))
+        if file_id > 0:
+            self.sound_handler.play_audio(file_id, audio.get_data(), callback)
+        else:
+            self.sound_handler.play_audio(file_id, audio.data_old, callback)
         
     def revert_audio(self, file_id):
         self.mod_handler.get_active_mod().revert_audio(file_id)

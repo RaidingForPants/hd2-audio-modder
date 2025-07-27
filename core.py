@@ -1074,7 +1074,9 @@ class SoundHandler:
     def __init__(self):
         self.audio_process = None
         self.wave_object = None
-        self.audio_id = -1
+        self.audio_id = 0
+        self.playing = False
+        self.audio_file = ""
         self.audio = pyaudio.PyAudio()
         
     @classmethod
@@ -1102,15 +1104,16 @@ class SoundHandler:
             except:
                 pass
             self.audio_process = None
+            self.playing = False
         
     def play_audio(self, sound_id: int, sound_data: bytearray, callback: Callable | None = None):
         if not os.path.exists(VGMSTREAM):
             return
-        self.kill_sound()
         self.callback = callback
         if self.audio_id == sound_id:
-            self.audio_id = -1
+            self.toggle_play_pause()
             return
+        self.kill_sound()
         filename = f"temp{sound_id}"
         if not os.path.isfile(f"{filename}.wav"):
             with open(f'{os.path.join(TMP, filename)}.wem', 'wb') as f:
@@ -1139,7 +1142,7 @@ class SoundHandler:
                 if self.callback is not None:
                     self.callback()
                     self.callback = None
-                self.audio_id = -1
+                self.audio_id = 0
                 self.wave_file.close()
                 try:
                     os.remove(self.audio_file)
@@ -1157,6 +1160,16 @@ class SoundHandler:
                 output=True,
                 stream_callback=read_stream)
         self.audio_file = f"{os.path.join(TMP, filename)}.wav"
+        self.playing = True
+
+    def toggle_play_pause(self):
+        if self.audio_process is not None:
+            if self.playing:
+                self.playing = False
+                self.audio_process.stop_stream()
+            elif not self.playing and self.audio_id != 0:
+                self.playing = True
+                self.audio_process.start_stream()
         
     def downmix_to_stereo(self, data: bytearray, channels: int, channel_width: int, frame_count: int) -> bytes:
         if channel_width == 2:
