@@ -1475,6 +1475,37 @@ def callback(callback):
         args[0].root.after_idle(callback, *args)
     return wrapper
 
+class AudioPlayerWindow:
+
+    def __init__(self, parent):
+        self.parent = parent
+        self.frame = Frame(parent)
+        self.play_button = Button(self.frame, text="Play")
+        self.time_var = DoubleVar()
+        self.slider = ttk.Scale(self.frame, variable=self.time_var, from_=0, to=100, orient="horizontal")
+        self.start_label = Label(self.frame, text="0.00")
+        self.end_label = Label(self.frame, text="End")
+        self.start_label.pack(side="left")
+        self.slider.pack(side="left")
+        self.end_label.pack(side="left")
+        self.play_button.pack(side="bottom")
+        self.frame.pack()
+
+    def set_slider_callback(self, callback):
+        self.slider.configure(command=callback)
+
+    def set_button_callback(self, callback):
+        self.play_button.configure(command=callback)
+
+    def set_new_audio(self, duration):
+        self.slider.configure(to=duration)
+        self.slider.set(0)
+        self.end_label.configure(text=f"{float(duration):.2f}")
+
+    def set_time(self, time):
+        self.time_var.set(time)
+        self.start_label.configure(text=f"{float(time):.2f}")
+
 class MainWindow:
 
     dark_mode_bg = "#333333"
@@ -1595,6 +1626,15 @@ class MainWindow:
                                                      self.check_modified)
                                                      
         self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified, self.play_audio)
+
+        temp_window = Toplevel(self.root)
+        self.audio_player = AudioPlayerWindow(temp_window)
+        self.audio_player.set_button_callback(self.sound_handler.toggle_play_pause)
+        self.audio_player.set_slider_callback(self.update_audio_slider)
+        self.sound_handler.update_func = self.audio_player.set_time
+        self.sound_handler.start_func = self.audio_player.set_new_audio
+        #self.audio_player.pack()
+        #self.audio_player.set_button_callback()
                                                      
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
@@ -1736,6 +1776,11 @@ class MainWindow:
         self.root.resizable(True, True)
         #async_mainloop(self.root)
         self.root.mainloop()
+
+    def update_audio_slider(self, time):
+        self.sound_handler.pause()
+        self.sound_handler.seek(float(time))
+        self.audio_player.set_time(time)
 
     def open_about_window(self):
         image1 = PIL.Image.open(str(resource_path("support_me_on_kofi_blue.png"))).resize((164, 33))

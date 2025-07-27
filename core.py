@@ -1071,13 +1071,15 @@ class SoundHandler:
     
     handler_instance: Union['SoundHandler', None] = None
     
-    def __init__(self):
+    def __init__(self, start_func = None, update_func = None):
         self.audio_process = None
         self.wave_object = None
         self.audio_id = 0
         self.playing = False
         self.audio_file = ""
         self.audio = pyaudio.PyAudio()
+        self.update_func = update_func
+        self.start_func = start_func
         
     @classmethod
     def create_instance(cls):
@@ -1129,7 +1131,10 @@ class SoundHandler:
         self.wave_file = wave.open(f"{os.path.join(TMP, filename)}.wav")
         self.audio_file = f"{os.path.join(TMP, filename)}.wav"
         self.frame_count = 0
+        self.frame_count_timer = 0
         self.max_frames = self.wave_file.getnframes()
+        if self.start_func is not None:
+            self.start_func(self.max_frames / self.wave_file.getframerate())
         
         def read_stream(
             _, 
@@ -1138,6 +1143,7 @@ class SoundHandler:
             ___
         ):
             self.frame_count += frame_count
+            self.frame_count_timer += frame_count
             if self.frame_count > self.max_frames:
                 if self.callback is not None:
                     self.callback()
@@ -1152,6 +1158,9 @@ class SoundHandler:
             data = self.wave_file.readframes(frame_count)
             if self.wave_file.getnchannels() > 2:
                 data = self.downmix_to_stereo(data, self.wave_file.getnchannels(), self.wave_file.getsampwidth(), frame_count)
+            if self.update_func is not None and self.frame_count_timer > self.wave_file.getframerate() / 10:
+                self.frame_count_timer = 0
+                self.update_func(self.frame_count / self.wave_file.getframerate())
             return (data, pyaudio.paContinue)
 
         self.audio_process = self.audio.open(format=self.audio.get_format_from_width(self.wave_file.getsampwidth()),
@@ -1170,6 +1179,18 @@ class SoundHandler:
             elif not self.playing and self.audio_id != 0:
                 self.playing = True
                 self.audio_process.start_stream()
+
+    def pause(self):
+        if self.audio_process is not None:
+            if self.playing:
+                self.playing = False
+                self.audio_process.stop_stream()
+
+    def seek(self, time):
+        if self.wave_file is not None:
+            new_frame = int(time*self.wave_file.getframerate())
+            self.wave_file.setpos(new_frame)
+            self.frame_count = new_frame
         
     def downmix_to_stereo(self, data: bytearray, channels: int, channel_width: int, frame_count: int) -> bytes:
         if channel_width == 2:
