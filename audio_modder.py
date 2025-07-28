@@ -16,6 +16,7 @@ import queue
 import PIL.Image
 import PIL.ImageTk
 import random
+import re
 
 from functools import partial
 from functools import cmp_to_key
@@ -46,6 +47,7 @@ import wwise_hierarchy_154
 from core import *
 from xlocale import *
 from env import *
+import env
 from const import *
 from graph import *
 
@@ -53,7 +55,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.18.2"
+VERSION = "1.18.3"
 
 def resource_path(relative_path):
     try:
@@ -384,6 +386,15 @@ class OptionsWindow:
         self.rad_tools_path_title.grid(row=5, column=0, sticky="e")
         self.rad_tools_path.grid(row=5, column=1)
         self.rad_tools_path_button.grid(row=5, column=2, pady=2, padx=2)
+
+        self.wwise_path_title = ttk.Label(self.config_frame, font=('Segoe UI', 12), text="Wwise Path:")
+        self.wwise_path = ttk.Label(self.config_frame, font=('Segoe UI', 12),
+                                        text=os.path.normpath(self.config.wwise_path))
+        self.wwise_path_button = ttk.Button(self.config_frame, text="Change path",
+                                                command=self.change_wwise_path_button_pressed)
+        self.wwise_path_title.grid(row=6, column=0, sticky="e")
+        self.wwise_path.grid(row=6, column=1)
+        self.wwise_path_button.grid(row=6, column=2, pady=2, padx=2)
         
         
         self.button_frame = Frame(self.frame)
@@ -430,8 +441,8 @@ class OptionsWindow:
                     if os.path.exists(os.path.join(str(path), "data")):
                         return os.path.join(str(path), "data")
                 elif path.match("*/steamapps/common"):
-                    if os.path.exists(os.path.join(str(path), "data")):
-                        return os.path.join(str(path), "data")
+                    if os.path.exists(os.path.join(str(path), "Helldivers 2", "data")):
+                        return os.path.join(str(path), "Helldiver 2", "data")
                 elif path.match("*/steamapps"):
                     if os.path.exists(os.path.join(str(path), "common", "Helldivers 2", "data")):
                         return os.path.join(str(path), "common", "Helldivers 2", "data")
@@ -444,6 +455,47 @@ class OptionsWindow:
                 return game_data_path
             if not response:
                 pass
+
+    def select_wwise_path(self):
+        while True:
+            wwise_path: str = filedialog.askdirectory(
+                parent=self.root,
+                mustexist=True,
+                title="Locate Wwise Install"
+            )
+            if os.path.exists(wwise_path):
+                if SYSTEM == "Windows":
+                    path = pathlib.Path(wwise_path)
+                    if path.match("*/Authoring/x64/Release/bin/WwiseConsole.exe"):
+                        return wwise_path
+                    elif (path / "Authoring/x64/Release/bin/WwiseConsole.exe").exists():
+                        return str(path / "Authoring/x64/Release/bin/WwiseConsole.exe")
+                    elif (path / "x64/Release/bin/WwiseConsole.exe").exists():
+                        return str(path / "x64/Release/bin/WwiseConsole.exe")
+                    elif (path / "Release/bin/WwiseConsole.exe").exists():
+                        return str(path / "Release/bin/WwiseConsole.exe")
+                    elif (path / "bin/WwiseConsole.exe").exists():
+                        return str(path / "bin/WwiseConsole.exe")
+                    elif (path / "WwiseConsole.exe").exists():
+                        return str(path / "WwiseConsole.exe")
+                elif SYSTEM == "Darwin":
+                    path = pathlib.Path(wwise_path)
+                    if path.match("*/Wwise.app/Contents/Tools/WwiseConsole.sh"):
+                        return wwise_path
+                    elif (path / "Wwise.app/Contents/Tools/WwiseConsole.sh").exists():
+                        return str(path / "Wwise.app/Contents/Tools/WwiseConsole.sh")
+                    elif (path / "Contents/Tools/WwiseConsole.sh").exists():
+                        return str(path / "Contents/Tools/WwiseConsole.sh")
+                    elif (path / "Tools/WwiseConsole.sh").exists():
+                        return str(path / "Tools/WwiseConsole.sh")
+                    elif (path / "WwiseConsole.sh").exists():
+                        return str(path / "WwiseConsole.sh")
+                elif SYSTEM == "Linux": # not supported
+                    return wwise_path
+            if not wwise_path:
+                return ""
+            response = showwarning(parent=self.root, title="Missing Wwise", message=f"Unable to locate Wwise install in {wwise_path}.")
+            return ""
             
     def change_game_data_path_button_pressed(self):
         new_path = self.select_game_data_path()
@@ -463,6 +515,11 @@ class OptionsWindow:
         new_path = os.path.normpath(folder_path)
         if new_path and new_path != ".":
             self.rad_tools_path.config(text=new_path)
+
+    def change_wwise_path_button_pressed(self):
+        new_path = os.path.normpath(self.select_wwise_path())
+        if new_path and new_path != ".":
+            self.wwise_path.config(text=new_path)
         
     def apply_button_pressed(self):
         self.apply_changes()
@@ -479,7 +536,9 @@ class OptionsWindow:
         self.config.ui_scale = self.treeview_text_scale_var.get()
         self.config.game_data_path = self.game_data_path.cget("text")
         self.config.rad_tools_path = self.rad_tools_path.cget("text")
+        self.config.wwise_path = self.wwise_path.cget("text")
         self.config.theme = self.theme_var.get()
+        wwise_setup(self.config)
         
     def close_window(self):
         self.root.destroy()
@@ -833,25 +892,8 @@ class AudioSourceWindow:
         self.play_original_label.forget()
         self.play_original_button.forget()
         self.parent_text_box.pack_forget()
-        def reset_button_icon(button):
-            button.configure(text= '\u23f5')
-        def press_button(button, file_id, callback):
-            if button['text'] == '\u23f9':
-                button.configure(text= '\u23f5')
-            else:
-                button.configure(text= '\u23f9')
-            self.play(file_id, callback)
-        def play_original_audio(button, file_id, callback):
-            if button['text'] == '\u23f9':
-                button.configure(text= '\u23f5')
-            else:
-                button.configure(text= '\u23f9')
-            temp = self.audio.data
-            self.audio.data = self.audio.data_old
-            self.play(file_id, callback)
-            self.audio.data = temp
-        self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
-        self.play_original_button.configure(command=partial(play_original_audio, self.play_original_button, audio.get_short_id(), partial(reset_button_icon, self.play_original_button)))
+        self.play_button.configure(command=partial(self.play, audio.get_short_id()))
+        self.play_original_button.configure(command=partial(self.play, -audio.get_short_id()))
         self.parent_text_box.pack(side="bottom", pady=5)
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left")
@@ -1419,6 +1461,96 @@ def callback(callback):
         args[0].root.after_idle(callback, *args)
     return wrapper
 
+class AudioPlayerWindow:
+
+    def __init__(self, parent):
+        self.parent = parent
+        self.sound_handler = SoundHandler.get_instance()
+        self.frame = Frame(parent)
+        self.play_button = ttk.Button(self.frame, text='\u23f5', width=2, command=self.button_pressed)
+        self.time_var = DoubleVar()
+        self.slider = ttk.Scale(self.frame, variable=self.time_var, from_=0, to=100, orient="horizontal")
+        self.start_label = ttk.Label(self.frame, text="0.00")
+        self.end_label = ttk.Label(self.frame, text="0.00")
+        self.name_label = ttk.Label(self.frame, text="Now Playing: ")
+        self.name_label.pack(side="top")
+        self.play_button.pack(side="left")
+        self.start_label.pack(side="left")
+        self.slider.pack(side="left", fill='x', expand=True)
+        self.end_label.pack(side="left")
+        self.frame.pack(fill='x', expand=True, padx=5)
+        self.audio_playing = False
+        self.audio_ended = False
+        self.audio_duration = 0
+
+        self.slider.bind("<Button-1>", self.slider_grabbed)
+        self.slider.bind("<ButtonRelease-1>", self.slider_released)
+
+    def reset(self):
+        self.audio_playing = False
+        self.audio_ended = False
+        self.audio_duration = 0
+        self.time_var.set(0)
+        self.start_label.configure(text="0.00")
+        self.end_label.configure(text="0.00")
+        self.play_button.configure(text="\u23f5")
+        self.name_label.configure(text=f"Now Playing:")
+        self.sound_handler.kill_sound()
+
+    def set_slider_callback(self, callback):
+        self.slider.configure(command=callback)
+
+    def set_button_callback(self, callback):
+        self.play_button.configure(command=callback)
+
+    def play_audio(self, sound_id: int, sound_data: bytearray):
+        self.sound_handler.play_audio(sound_id, sound_data, callback=self.audio_finished)
+        self.name_label.configure(text=f"Now Playing: {sound_id}.wem")
+
+    def set_new_audio(self, duration):
+        self.slider.configure(to=duration)
+        self.audio_duration = duration
+        self.slider.set(0)
+        self.end_label.configure(text=f"{float(duration):.2f}")
+
+    def set_time(self, time, autoplay=True):
+        self.time_var.set(time)
+        if autoplay:
+            self.audio_playing = True
+            self.play_button.configure(text="\u23f8")
+        self.audio_ended = False
+        self.start_label.configure(text=f"{float(time):.2f}")
+
+    def audio_finished(self):
+        self.time_var.set(self.audio_duration)
+        self.start_label.configure(text=f"{float(self.audio_duration):.2f}")
+        self.audio_playing = False
+        self.audio_ended = True
+        self.play_button.configure(text="\u23f5")
+
+    def slider_grabbed(self, event):
+        self.sound_handler.pause()
+
+    def slider_released(self, event):
+        if self.audio_playing:
+            self.sound_handler.play()
+
+    def button_pressed(self):
+        if self.audio_ended:
+            self.set_time(0, autoplay=True)
+            self.sound_handler.seek(0)
+            self.play_button.configure(text="\u23f8")
+            self.sound_handler.toggle_play_pause()
+            self.sound_handler.toggle_play_pause()
+            self.sound_handler.play()
+        else:
+            self.sound_handler.toggle_play_pause()
+            self.audio_playing = self.sound_handler.playing
+            if self.sound_handler.playing:
+                self.play_button.configure(text="\u23f8")
+            else:
+                self.play_button.configure(text="\u23f5")
+
 class MainWindow:
 
     dark_mode_bg = "#333333"
@@ -1539,6 +1671,13 @@ class MainWindow:
                                                      self.check_modified)
                                                      
         self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified, self.play_audio)
+
+        #temp_window = Toplevel(self.root)
+        self.audio_player = AudioPlayerWindow(self.top_bar)
+        self.audio_player.frame.pack()
+        self.audio_player.set_slider_callback(self.update_audio_slider)
+        self.sound_handler.update_func = self.audio_player.set_time
+        self.sound_handler.start_func = self.audio_player.set_new_audio
                                                      
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
@@ -1576,6 +1715,7 @@ class MainWindow:
         self.recent_file_menu = Menu(self.file_menu, tearoff=0)
 
         self.load_archive_menu = Menu(self.menu, tearoff=0)
+        self.tools_menu = Menu(self.menu, tearoff=0)
         if os.path.exists(GAME_FILE_LOCATION):
             self.load_archive_menu.add_command(
                 label="From HD2 Data Folder",
@@ -1616,9 +1756,6 @@ class MainWindow:
             label="Import"
         )
         
-        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
-            self.file_menu.add_command(label="Combine Mods", command=self.combine_mods)
-        
         self.file_menu.add_command(label="Save", command=self.save_mod)
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Write Separate Patches", command=self.write_separate_patches)
@@ -1633,12 +1770,17 @@ class MainWindow:
         if os.path.exists(VGMSTREAM):
             self.dump_menu.add_command(label="Dump all as .wav", command=self.dump_all_as_wav)
         self.dump_menu.add_command(label="Dump all as .wem", command=self.dump_all_as_wem)
+
+        self.tools_menu.add_command(label="Batch Migrate Patch Files", command=self.batch_migrate_patch)
+        if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+            self.tools_menu.add_command(label="Combine Mods", command=self.combine_mods)
         
         self.menu.add_cascade(label="File", menu=self.file_menu)
         self.menu.add_cascade(label="Edit", menu=self.edit_menu)
         self.menu.add_cascade(label="Dump", menu=self.dump_menu)
         self.menu.add_cascade(label="View", menu=self.view_menu)
         self.menu.add_cascade(label="Options", menu=self.options_menu)
+        self.menu.add_cascade(label="Tools", menu=self.tools_menu)
         self.menu.add_command(
             label = "About",
             command=self.open_about_window
@@ -1677,6 +1819,10 @@ class MainWindow:
         self.root.resizable(True, True)
         #async_mainloop(self.root)
         self.root.mainloop()
+
+    def update_audio_slider(self, time):
+        self.sound_handler.seek(float(time))
+        self.audio_player.set_time(time, autoplay=False)
 
     def open_about_window(self):
         image1 = PIL.Image.open(str(resource_path("support_me_on_kofi_blue.png"))).resize((164, 33))
@@ -1799,7 +1945,7 @@ class MainWindow:
             showerror(title="Missing Required Configuration", message="Unknown game data folder location. Unable to automatically combine mods")
             return
         if self.file_upload_window is None:
-            self.sound_handler.kill_sound()
+            self.kill_sound()
             self.file_upload_window = FileUploadWindow(self.root, callback=self.combine_mods_callback)
             
     def combine_mods_callback(self, files):
@@ -1818,6 +1964,7 @@ class MainWindow:
         seven_z_files = [file for file in files if os.path.splitext(file)[1].lower() == ".7z"]
         patch_files = [file for file in files if ".patch_" in os.path.basename(file)]
         index = 0
+        # extract all files
         for index, mod_file in enumerate(zip_files):
             try:
                 zip = zipfile.ZipFile(mod_file)
@@ -1836,6 +1983,8 @@ class MainWindow:
             zip.extractall(path=extract_location)
             files = [file for file in list_files_recursive(extract_location) if "patch" in os.path.splitext(file)[1]]
             patch_files.extend(files)
+
+        # create list of soundbanks to load
         missing_soundbank_ids = []
         archives = set()
         for index, file in enumerate(patch_files):
@@ -1906,6 +2055,103 @@ class MainWindow:
     def combine_mods_cleanup(self):
         pass
 
+    def batch_migrate_patch(self):
+        """
+        Batch migrate patch files to update their versions.
+        Scans for .patch_* files, creates backups of entire directory, and migrates them.
+        """
+        # Ask user to select directory
+        directory = filedialog.askdirectory(
+            title="Select directory to scan for patch files"
+        )
+        if not directory:
+            return
+
+        # Find all .patch_* files
+        patch_files = []
+        patch_path_pattern = re.compile(r"^.*\.patch_\d+$")
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                if patch_path_pattern.match(file):
+                    patch_files.append(os.path.join(root, file))
+
+        if not patch_files:
+            tkinter.messagebox.showinfo("No Patch Files", "No .patch_* files found in the selected directory.")
+            return
+
+        # Confirm with user
+        message = (
+            f"Found {len(patch_files)} patch file(s).\n\n"
+            "This will:\n"
+            "1. Create backup of entire directory with timestamp\n"
+            "2. Import and re-export each patch to update version\n"
+            "3. Overwrite original files\n\n"
+            "Continue?"
+        )
+
+        if not tkinter.messagebox.askyesno("Confirm Batch Migration", message):
+            return
+
+        # Create backup of entire directory
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        parent_dir = os.path.dirname(directory)
+        dir_name = os.path.basename(directory)
+        backup_dir = os.path.join(parent_dir, f"{dir_name}_backup_{timestamp}")
+
+        try:
+            shutil.copytree(directory, backup_dir)
+        except Exception as e:
+            tkinter.messagebox.showerror("Backup Error", f"Failed to create backup: {str(e)}")
+            return
+
+        migrated_count = 0
+        failed_count = 0
+
+        for patch_file in patch_files:
+            migration_mod = Mod("migrate", None)
+            try:
+                archives = set()
+                patch_content = GameArchive.from_file(patch_file)
+                patch_soundbanks = patch_content.get_wwise_banks()
+                patch_text = patch_content.get_text_banks()
+                if len(patch_text) > 0:
+                    archives.add("9ba626afa44a3aa3")
+                if self.name_lookup is not None and os.path.exists(self.app_state.game_data_path):
+                    for soundbank_id in patch_soundbanks.keys():
+                        r = self.name_lookup.lookup_soundbank(soundbank_id)
+                        if r.success:
+                            archives.add(r.archive)
+                        else:  # migration failure
+                            raise Exception(
+                                f"Unable to locate archive for soundbank {patch_soundbanks[soundbank_id].dep.data}")
+
+                for archive in archives:
+                    archive = os.path.join(self.app_state.game_data_path, archive)
+                    migration_mod.load_archive_file(archive)
+                migration_mod.import_patch(patch_file)
+
+                # Export the updated patch
+                output_filename = os.path.basename(patch_file)
+                output_dir = os.path.dirname(patch_file)
+                migration_mod.write_patch(output_dir, output_filename)
+
+                migrated_count += 1
+
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"Failed to migrate {patch_file}: {str(e)}")
+                continue
+
+        # Show results
+        result_message = (
+            f"Migration completed!\n\n"
+            f"Successfully migrated: {migrated_count}\n"
+            f"Failed: {failed_count}\n"
+            f"\nFull directory backup saved in: {backup_dir}"
+        )
+
+        tkinter.messagebox.showinfo("Batch Migration Complete", result_message)
+
     def drop_import(self, event):
         self.drag_source_widget = None
         renamed = False
@@ -1918,7 +2164,7 @@ class MainWindow:
             patch_files = [file for file in import_files if ".patch_" in os.path.basename(file)]
             for file in patch_files:
                 self.import_patch(file)
-            if os.path.exists(WWISE_CLI):
+            if os.path.exists(self.app_state.wwise_path):
                 audio_files = [file for file in import_files if os.path.splitext(file)[1].lower() in SUPPORTED_AUDIO_TYPES]
             else:
                 audio_files = [file for file in import_files if os.path.splitext(file)[1].lower() == ".wem"]
@@ -2127,7 +2373,7 @@ class MainWindow:
                 return
             elif tags[0] == "dir":
                 return
-        file_dict = {self.workspace.item(i, option="values")[0]: [parse_filename(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"} 
+        file_dict = {self.workspace.item(i, option="values")[0]: [parse_filename(os.path.basename(self.workspace.item(i, option="values")[0]))] for i in selects if self.workspace.item(i, option="tags")[0] == "file"}
         self.workspace_popup_menu.add_command(
             label="Import", 
             command=lambda: self.import_files(file_dict)
@@ -2210,7 +2456,7 @@ class MainWindow:
         
     def import_audio_files(self):
 
-        if os.path.exists(WWISE_CLI):
+        if os.path.exists(self.app_state.wwise_path):
             available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
@@ -2221,10 +2467,15 @@ class MainWindow:
         self.import_files(file_dict)
         
     def import_files(self, file_dict):
-        # separate out video files
+        # separate out video files and patch files
         videos = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in SUPPORTED_VIDEO_TYPES}
         for video, targets in videos.items():
             self.import_video(targets, video)
+            del file_dict[video]
+        patches = [file for file, targets in file_dict.items() if "patch" in os.path.splitext(file)[1]]
+        for patch in patches:
+            del file_dict[patch]
+            self.import_patch(archive_file=patch)
         self.task_manager.schedule(name="Importing Files", callback=self.import_files_callback, task=self.import_files_task, file_dict=file_dict)
         
     @task
@@ -2313,7 +2564,7 @@ class MainWindow:
         self.category_search.selection_clear()
         
     def targeted_import(self, targets):
-        if os.path.exists(WWISE_CLI):
+        if os.path.exists(self.app_state.wwise_path):
             available_filetypes = [("Audio Files", " ".join(SUPPORTED_AUDIO_TYPES))]
         else:
             available_filetypes = [("Wwise Vorbis", "*.wem")]
@@ -2329,7 +2580,13 @@ class MainWindow:
             self.create_source_view()
         else:
             self.create_hierarchy_view()
-        
+
+    def remove_all_game_archives(self):
+        self.mod_handler.get_active_mod().remove_all_game_archives()
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
 
     def treeview_on_right_click(self, event):
         try:
@@ -2466,7 +2723,7 @@ class MainWindow:
                 audio_data = None
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
-                self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
+                self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data, self.audio_player.audio_finished)
 
     def set_language(self):
         global language
@@ -2580,11 +2837,11 @@ class MainWindow:
         for index, audio_source in enumerate([self.mod_handler.get_active_mod().get_audio_source(source_id) for source_id in file_ids]):
             if audio_source.get_resource_id() != 0:
                 if with_seq:
-                    os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{index}_{audio_source.get_resource_id()}.wav"))
+                    os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"s{index}_{audio_source.get_resource_id()}.wav"))
                 else:
                     os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{audio_source.get_resource_id()}.wav"))
             elif with_seq:
-                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"{index}_{audio_source.get_short_id()}.wav"))
+                os.rename(os.path.join(output_folder, f"{audio_source.get_short_id()}.wav"), os.path.join(output_folder, f"s{index}_{audio_source.get_short_id()}.wav"))
 
         return task_id
 
@@ -2668,7 +2925,7 @@ class MainWindow:
                 sequence_sources.clear()
                 bank_entry = self.create_treeview_entry(bank, archive_entry)
                 for hierarchy_entry in bank.hierarchy.entries.values():
-                    if isinstance(hierarchy_entry, (wwise_hierarchy_154.MusicSegment, wwise_hierarchy_140.MusicSegment)):
+                    if hierarchy_entry.hierarchy_type == HircType.MusicSegment:
                         segment_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for track_id in hierarchy_entry.tracks:
                             track = bank.hierarchy.entries[track_id]
@@ -2679,11 +2936,11 @@ class MainWindow:
                                         self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(source.source_id), track_entry)
                                     except:
                                         pass
-                    elif isinstance(hierarchy_entry, (wwise_hierarchy_154.RandomSequenceContainer, wwise_hierarchy_140.RandomSequenceContainer)):
+                    elif hierarchy_entry.hierarchy_type == HircType.RandomSequenceContainer:
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
                         for s_id in hierarchy_entry.children.children:
                             sound = bank.hierarchy.entries[s_id]
-                            if not isinstance(sound, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound)):
+                            if not sound.hierarchy_type == HircType.Sound:
                                 continue
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:
                                 sequence_sources.add(sound)
@@ -2692,7 +2949,7 @@ class MainWindow:
                                 except:
                                     pass
                 for hierarchy_entry in bank.hierarchy.entries.values():
-                    if isinstance(hierarchy_entry, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound)) and hierarchy_entry not in sequence_sources:
+                    if hierarchy_entry.hierarchy_type == HircType.Sound and hierarchy_entry not in sequence_sources:
                         if hierarchy_entry.sources[0].plugin_id == VORBIS:
                             try:
                                 self.create_treeview_entry(self.mod_handler.get_active_mod().get_audio_source(hierarchy_entry.sources[0].source_id), bank_entry)
@@ -2794,18 +3051,17 @@ class MainWindow:
             self.selected_language.set(first)
     
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         if not archive_file:
             archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
         if not archive_file:
             return
-        if ".patch" in os.path.basename(archive_file):
-            self.import_patch(archive_file)
-            return
+        if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
+            archive_file = os.path.splitext(archive_file)[0]
         self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
     
     @task
-    def load_archive_task(self, archive_files: str | None = ""):
+    def load_archive_task(self, archive_files: list[str] = []):
         results = []
         for archive_file in archive_files:
             results.append((self.mod_handler.get_active_mod().load_archive_file(archive_file=archive_file), archive_file))
@@ -2819,7 +3075,7 @@ class MainWindow:
             archive_file = result[1]
             if success:
                 self.update_recent_files(filepath=archive_file)
-                archive = self.mod_handler.get_active_mod().get_game_archive(os.path.splitext(os.path.basename(archive_file))[0])
+                archive = self.mod_handler.get_active_mod().get_game_archive(os.path.basename(archive_file))
                 new_game_archives.append(archive)
         for archive in new_game_archives:
             if self.selected_view.get() == "SourceView":
@@ -2835,7 +3091,7 @@ class MainWindow:
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select save location")
         if output_folder and os.path.exists(output_folder):
-            self.sound_handler.kill_sound()
+            self.kill_sound()
             self.mod_handler.get_active_mod().save(output_folder)
             self.reset_unsaved_changes()
         
@@ -2934,14 +3190,14 @@ class MainWindow:
                     self.mark_modified(entry, item)
         
     def dump_all_as_wem(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
         self.task_manager.schedule(name="Dumping Files", callback=None, task=task(self.mod_handler.get_active_mod().dump_all_as_wem), output_folder=output_folder)
         
     def dump_all_as_wav(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
@@ -2960,21 +3216,28 @@ class MainWindow:
             self.task_manager.schedule(name="Initializing File Dump", callback=None, task=self.dump_as_wav_setup_task, task_id=task_id, file_ids=file_ids, output_location=bank_folder, with_seq=False)
         
     def play_audio(self, file_id: int, callback=None):
-        audio = self.mod_handler.get_active_mod().get_audio_source(file_id)
-        self.sound_handler.play_audio(audio.get_short_id(), audio.get_data(), callback)
+        audio = self.mod_handler.get_active_mod().get_audio_source(abs(file_id))
+        if file_id > 0:
+            self.audio_player.play_audio(audio.get_id(), audio.get_data())
+        else:
+            self.audio_player.play_audio(audio.get_id(), audio.data_old)
         
     def revert_audio(self, file_id):
         self.mod_handler.get_active_mod().revert_audio(file_id)
         
     def revert_all(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         self.mod_handler.get_active_mod().revert_all()
         self.clear_modified()
         self.show_info_window()
         self.reset_unsaved_changes()
 
+    def kill_sound(self):
+        self.sound_handler.pause()
+        self.audio_player.play_button.configure(text="\u23f5")
+
     def write_separate_patches(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         output_folder = filedialog.askdirectory(title="Save Patch File", mustexist=True)
         if not output_folder:
             return
@@ -2983,7 +3246,7 @@ class MainWindow:
                                    output_folder=output_folder)
         
     def write_patch(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         output_file = filedialog.asksaveasfilename(title="Save Patch File", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
         if not output_file:
             return
@@ -2997,9 +3260,9 @@ class MainWindow:
     @callback
     def reset_unsaved_callback(self, none):
         self.unsaved_changes = False
-        
+
     def import_patch(self, archive_file: str = ""):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         if archive_file == "":
             archive_file = askopenfilename(title="Select patch file", filetypes=[("Patch File", "*.patch_*")])
         if not archive_file:
@@ -3074,12 +3337,38 @@ class MainWindow:
         self.check_modified()
         self.show_info_window()
 
+def wwise_setup(app_state, show_warnings=False):
+    if os.path.exists(app_state.wwise_path):
+        env.WWISE_CLI = app_state.wwise_path
+    if show_warnings and not os.path.exists(app_state.wwise_path) and SYSTEM != "Linux":
+        logger.warning("Wwise installation not found. The only file type available for import is WEM.")
+        showwarning(title="Missing Plugin",
+                    message="Wwise installation not found. The only file type available for import is WEM.")
+
+    if os.path.exists(app_state.wwise_path) and not os.path.exists(DEFAULT_WWISE_PROJECT):
+        process = subprocess.run([
+            app_state.wwise_path,
+            "create-new-project",
+            DEFAULT_WWISE_PROJECT,
+            "--platform",
+            "Windows",
+            "--quiet",
+        ])
+        if process.returncode != 0:
+            logger.error("Error creating Wwise project. Audio import restricted to .wem files only")
+            showwarning(title="Wwise Error",
+                        message="Error creating Wwise project. Audio import restricted to .wem files only")
+
+
 if __name__ == "__main__":
     logger.setLevel(logging.INFO)
     random.seed()
     app_state: cfg.Config | None = cfg.load_config()
     if app_state == None:
         exit(1)
+
+    if os.path.exists(env.WWISE_CLI) and not os.path.exists(app_state.wwise_path):
+        app_state.wwise_path = env.WWISE_CLI
 
     GAME_FILE_LOCATION = app_state.game_data_path
     try:
@@ -3114,24 +3403,8 @@ if __name__ == "__main__":
                      "in the same folder as the executable")
         showwarning(title="Missing Plugin", message="Cannot find vgmstream distribution! " \
                     "Audio playback is disabled.")
-                     
-    if not os.path.exists(WWISE_CLI) and SYSTEM != "Linux":
-        logger.warning("Wwise installation not found. The only file type available for import is WEM.")
-        showwarning(title="Missing Plugin", message="Wwise installation not found. The only file type available for import is WEM.")
-    
-    if os.path.exists(WWISE_CLI) and not os.path.exists(DEFAULT_WWISE_PROJECT):
-        process = subprocess.run([
-            WWISE_CLI,
-            "create-new-project",
-            DEFAULT_WWISE_PROJECT,
-            "--platform",
-            "Windows",
-            "--quiet",
-        ])
-        if process.returncode != 0:
-            logger.error("Error creating Wwise project. Audio import restricted to .wem files only")
-            showwarning(title="Wwise Error", message="Error creating Wwise project. Audio import restricted to .wem files only")
-            WWISE_CLI = ""
+
+    wwise_setup(app_state, show_warnings=True)
 
     lookup_store: db.FriendlyNameLookup | None = None
     

@@ -61,14 +61,8 @@ match SYSTEM:
                                      "Wwise.app/Contents/Tools/WwiseConsole.sh")
         SYS_CLIPBOARD = "pbcopy"
 
-
-if os.path.exists(WWISE_CLI):
-    if "Wwise2024" in WWISE_CLI:
-        WWISE_VERSION = "2024"
-    elif "Wwise2023" in WWISE_CLI:
-        WWISE_VERSION = "2023"
-else:
-    WWISE_VERSION = ""
+if not os.path.exists(WWISE_CLI):
+    WWISE_CLI = ""
 
 
 def get_data_path():

@@ -16,6 +16,7 @@ from typing import Callable, Literal, Union
 from backend.db import SQLiteDatabase
 from const import *
 from env import *
+import env
 from xlocale import *
 from util import *
 import wwise_hierarchy_140
@@ -909,8 +910,8 @@ class GameArchive:
             return None
 
         if stream_type == BANK and plugin_id == REV_AUDIO:
-            if hirc.has_entry(source_id):
-                logger.error(
+            if not hirc.has_entry(source_id):
+                logger.warning(
                     f"There's no custom FX hierarchy entry associated with audio"
                     f" source {source_id}!"
                 )
@@ -920,7 +921,7 @@ class GameArchive:
             )
         if stream_type == BANK:
             if source_id not in media_index.data:
-                logger.error(
+                logger.warning(
                     "There is no media index data associated with audio source ID "
                    f"{source_id}"
                 )
@@ -962,7 +963,7 @@ class GameArchive:
             data[plugin_data_start:plugin_data_end], byteorder="little"
         )
         if media_index_id not in media_index.data:
-            logger.error(
+            logger.warning(
                 f"There is no media index data associated with {media_index_id}"
             )
             return None
@@ -987,7 +988,7 @@ class GameArchive:
             (os.path.dirname(dep.data) + "/" + str(source.source_id)).encode('utf-8')
         )
         if stream_resource_id not in self.wwise_streams:
-            logger.error(
+            logger.warning(
                 "There is no WwiseStream associated with stream resource ID"
                f"{stream_resource_id}"
             )
@@ -995,7 +996,7 @@ class GameArchive:
 
         audio = self.wwise_streams[stream_resource_id].audio_source
         if audio == None:
-            logger.error(
+            logger.warning(
                 f"WwiseStream {stream_resource_id} has no audio source."
             )
             return None
@@ -1017,7 +1018,7 @@ class GameArchive:
                     if source_id == 0:
                         continue
                     if source_id not in self.audio_sources:
-                        logger.error(
+                        logger.warning(
                              "There is no audio source associated with audio "
                             f"source ID {source_id}."
                         )
@@ -1031,7 +1032,7 @@ class GameArchive:
                         continue
                     source_id = source.source_id
                     if source_id not in self.audio_sources:
-                        logger.error(
+                        logger.warning(
                             f"Audio source {source_id} is not tracked and registered "
                             f"in the list of all audio sources!",
                         )
@@ -1052,7 +1053,7 @@ class GameArchive:
                 source = sound.sources[0]
                 source_id = source.source_id
                 if source_id not in self.audio_sources:
-                    logger.error(
+                    logger.warning(
                         f"Audio source {source_id} is not tracked and registered "
                         f"in the list of all audio sources!",
                     )
@@ -1070,11 +1071,17 @@ class SoundHandler:
     
     handler_instance: Union['SoundHandler', None] = None
     
-    def __init__(self):
+    def __init__(self, start_func = None, update_func = None):
         self.audio_process = None
         self.wave_object = None
-        self.audio_id = -1
+        self.audio_id = 0
+        self.playing = False
+        self.audio_file = ""
+        self.wave_file = None
+        self.frame_count = 0
         self.audio = pyaudio.PyAudio()
+        self.update_func = update_func
+        self.start_func = start_func
         
     @classmethod
     def create_instance(cls):
@@ -1101,15 +1108,22 @@ class SoundHandler:
             except:
                 pass
             self.audio_process = None
+            self.playing = False
         
     def play_audio(self, sound_id: int, sound_data: bytearray, callback: Callable | None = None):
         if not os.path.exists(VGMSTREAM):
             return
         self.kill_sound()
         self.callback = callback
-        if self.audio_id == sound_id:
-            self.audio_id = -1
-            return
+        if self.wave_file is not None:
+            self.wave_file.close()
+        if self.audio_process is not None:
+            self.audio_process.close()
+        if os.path.exists(self.audio_file):
+            try:
+                os.remove(self.audio_file)
+            except OSError:
+                pass
         filename = f"temp{sound_id}"
         if not os.path.isfile(f"{filename}.wav"):
             with open(f'{os.path.join(TMP, filename)}.wem', 'wb') as f:
@@ -1125,7 +1139,10 @@ class SoundHandler:
         self.wave_file = wave.open(f"{os.path.join(TMP, filename)}.wav")
         self.audio_file = f"{os.path.join(TMP, filename)}.wav"
         self.frame_count = 0
+        self.frame_count_timer = 0
         self.max_frames = self.wave_file.getnframes()
+        if self.start_func is not None:
+            self.start_func(self.max_frames / self.wave_file.getframerate())
         
         def read_stream(
             _, 
@@ -1134,20 +1151,17 @@ class SoundHandler:
             ___
         ):
             self.frame_count += frame_count
+            self.frame_count_timer += frame_count
             if self.frame_count > self.max_frames:
                 if self.callback is not None:
                     self.callback()
-                    self.callback = None
-                self.audio_id = -1
-                self.wave_file.close()
-                try:
-                    os.remove(self.audio_file)
-                except:
-                    pass
                 return (None, pyaudio.paComplete)
             data = self.wave_file.readframes(frame_count)
             if self.wave_file.getnchannels() > 2:
                 data = self.downmix_to_stereo(data, self.wave_file.getnchannels(), self.wave_file.getsampwidth(), frame_count)
+            if self.update_func is not None and self.frame_count_timer > self.wave_file.getframerate() / 10:
+                self.frame_count_timer = 0
+                self.update_func(self.frame_count / self.wave_file.getframerate())
             return (data, pyaudio.paContinue)
 
         self.audio_process = self.audio.open(format=self.audio.get_format_from_width(self.wave_file.getsampwidth()),
@@ -1156,6 +1170,38 @@ class SoundHandler:
                 output=True,
                 stream_callback=read_stream)
         self.audio_file = f"{os.path.join(TMP, filename)}.wav"
+        self.playing = True
+
+    def toggle_play_pause(self):
+        if self.audio_process is not None:
+            if self.playing:
+                self.playing = False
+                self.audio_process.stop_stream()
+            elif not self.playing and self.audio_id != 0:
+                self.playing = True
+                self.audio_process.start_stream()
+
+    def pause(self):
+        if self.audio_process is not None:
+            if self.playing:
+                self.playing = False
+                try:
+                    self.audio_process.stop_stream()
+                except:
+                    self.audio_process.close()
+                    self.audio_process = None
+
+    def play(self):
+        if self.audio_process is not None:
+            if not self.playing and self.audio_id != 0:
+                self.playing = True
+                self.audio_process.start_stream()
+
+    def seek(self, time):
+        if self.wave_file is not None:
+            new_frame = int(time*self.wave_file.getframerate())
+            self.wave_file.setpos(new_frame)
+            self.frame_count = new_frame
         
     def downmix_to_stereo(self, data: bytearray, channels: int, channel_width: int, frame_count: int) -> bytes:
         if channel_width == 2:
@@ -1697,7 +1743,10 @@ class Mod:
                     for entry in game_archive.get_wwise_banks()[key].hierarchy.entries.values():
                         entry.soundbanks.remove(game_archive.get_wwise_banks()[key])
                     for audio_id in self.get_wwise_banks()[key].get_content():
-                        audio = self.get_audio_source(audio_id)
+                        try:
+                            audio = self.get_audio_source(audio_id)
+                        except KeyError:
+                            continue
                         parents = [p for p in audio.parents]
                         for parent in parents:
                             if isinstance(parent, (wwise_hierarchy_154.HircEntry, wwise_hierarchy_140.HircEntry)) and key in [b.get_id() for b in parent.soundbanks]:
@@ -1741,6 +1790,19 @@ class Mod:
             del self.game_archives[archive_name]
         except:
             pass
+    
+    def remove_all_game_archives(self):
+        """
+        Remove all game archives from the mod.
+        This will clear all audio sources, wwise banks, wwise streams, 
+        text banks, video sources, and hierarchy entries.
+        """
+        # Get all archive names to remove
+        archive_names = list(self.game_archives.keys())
+        
+        # Remove each archive
+        for archive_name in archive_names:
+            self.remove_game_archive(archive_name)
     
     def add_game_archive(self, game_archive: GameArchive):
         """
@@ -1805,7 +1867,10 @@ class Mod:
             if key in self.get_wwise_banks().keys():
                 self.bank_count[key] += 1
                 for audio_id in game_archive.wwise_banks[key].get_content():
-                    audio = self.get_audio_source(audio_id)
+                    try:
+                        audio = self.get_audio_source(audio_id)
+                    except KeyError:
+                        continue
                     parents = [p for p in audio.parents]
                     for parent in parents:
                         if isinstance(parent, (wwise_hierarchy_154.HircEntry, wwise_hierarchy_140.HircEntry)) and key in [b.get_id() for b in parent.soundbanks]:
@@ -1919,7 +1984,7 @@ class Mod:
                     self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
                 except Exception as e:
                     logger.error(e)
-                    logger.warning(f"Unable to import heirarchy information for {bank.dep.data}")
+                    logger.error(f"Unable to import heirarchy information for {bank.dep.data}")
 
         for text_bank in patch_game_archive.get_text_banks().values():
             try:
@@ -2157,9 +2222,8 @@ class Mod:
             raise NotImplementedError(
                 "The current operating system does not support this feature"
             )
-        
         process = subprocess.run([
-            WWISE_CLI,
+            env.WWISE_CLI,
             "migrate",
             wwise_project,
             "--quiet",
@@ -2171,7 +2235,7 @@ class Mod:
         convert_dest = os.path.join(TMP, SYSTEM)
         
         process = subprocess.run([
-            WWISE_CLI,
+            env.WWISE_CLI,
             "convert-external-source",
             wwise_project,
             "--platform", "Windows",
@@ -2209,14 +2273,16 @@ class Mod:
         filetypes.remove(".wav")
         filetypes.remove(".wem")
         others = {file: targets for file, targets in file_dict.items() if os.path.splitext(file)[1].lower() in filetypes}
+
         # move invalid wems to the "other audio formats" list
-        for wem in list(wems.keys()):
-            with open(wem, 'rb') as f:
-                audio_data = bytearray(f.read(24))
-                if audio_data[20:22] != b"\xFF\xFF": # invalid wem
-                    # add wem to "others"
-                    others[wem] = wems[wem]
-                    del wems[wem]
+        if os.path.exists(env.WWISE_CLI):
+            for wem in list(wems.keys()):
+                with open(wem, 'rb') as f:
+                    audio_data = bytearray(f.read(24))
+                    if audio_data[20:22] != b"\xFF\xFF": # invalid wem
+                        # add wem to "others"
+                        others[wem] = wems[wem]
+                        del wems[wem]
 
         temp_files = []
         for file in others.keys():

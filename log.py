@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 
 
 default_formatter = logging.Formatter(
@@ -10,10 +11,13 @@ default_formatter = logging.Formatter(
     "msg:\"%(message)s\"}"
 )
 
-default_file_handler = logging.FileHandler("log.txt")
+default_file_handler = logging.handlers.RotatingFileHandler("log.txt", backupCount=2)
+default_file_handler.doRollover()
+default_file_handler.setLevel(logging.INFO)
 default_file_handler.setFormatter(default_formatter)
 
 default_stream_handler = logging.StreamHandler()
+default_stream_handler.setLevel(logging.ERROR)
 default_stream_handler.setFormatter(default_formatter)
 
 
@@ -26,7 +30,7 @@ def get_logger():
             return logger
 
         logger = logging.getLogger()
-        logger.setLevel(logging.CRITICAL)
+        logger.setLevel(logging.INFO)
         
         logger.addHandler(default_file_handler)
         logger.addHandler(default_stream_handler)
