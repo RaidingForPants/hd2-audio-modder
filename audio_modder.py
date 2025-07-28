@@ -3074,6 +3074,10 @@ class MainWindow:
         self.mod_handler.delete_mod(self.mod_handler.get_active_mod())
         self.reset_unsaved_changes()
         self.mod_handler.create_new_mod("default")
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
         self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}",
                                    callback=self.load_archive_task_finished, task=self.load_archive_task,
                                    archive_files=[archive_file])
