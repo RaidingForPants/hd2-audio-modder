@@ -1214,28 +1214,12 @@ class SoundHandler:
             arr = numpy.frombuffer(data, dtype=numpy.int32)
             stereo_array = numpy.zeros(shape=(frame_count, 2), dtype=numpy.int32)
         arr = arr.reshape((frame_count, channels)) # type: ignore
-        
-        if channels == 4:
-            for index, frame in enumerate(arr):
-                stereo_array[index][0] = int(0.42265 * frame[0] + 0.366025 * frame[2] + 0.211325 * frame[3]) # type: ignore
-                stereo_array[index][1] = int(0.42265 * frame[1] + 0.366025 * frame[3] + 0.211325 * frame[2]) # type: ignore
-        
-            return stereo_array.tobytes() # type: ignore
-                
-        if channels == 6:
-            for index, frame in enumerate(arr):
-                stereo_array[index][0] = int(0.374107*frame[1] + 0.529067*frame[0] + 0.458186*frame[3] + 0.264534*frame[4] + 0.374107*frame[5]) # type: ignore
-                stereo_array[index][1] = int(0.374107*frame[1] + 0.529067*frame[2] + 0.458186*frame[4] + 0.264534*frame[3] + 0.374107*frame[5]) # type: ignore
-        
-            return stereo_array.tobytes() # type: ignore
-        
-        #if not 4 or 6 channel, default to taking the L and R channels rather than mixing
+
         for index, frame in enumerate(arr):
-            stereo_array[index][0] = frame[0] # type: ignore
-            stereo_array[index][1] = frame[1] # type: ignore
-        
-        return stereo_array.tobytes() # type: ignore
-        
+            stereo_array[index][0] = frame[0]  # type: ignore
+            stereo_array[index][1] = frame[1]  # type: ignore
+
+        return stereo_array.tobytes()  # type: ignore
 
 class Mod:
 

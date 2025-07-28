@@ -55,7 +55,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.18.3"
+VERSION = "1.18.4"
 
 def resource_path(relative_path):
     try:
@@ -1470,8 +1470,8 @@ class AudioPlayerWindow:
         self.play_button = ttk.Button(self.frame, text='\u23f5', width=2, command=self.button_pressed)
         self.time_var = DoubleVar()
         self.slider = ttk.Scale(self.frame, variable=self.time_var, from_=0, to=100, orient="horizontal")
-        self.start_label = ttk.Label(self.frame, text="0.00")
-        self.end_label = ttk.Label(self.frame, text="0.00")
+        self.start_label = ttk.Label(self.frame, text="00:00.00")
+        self.end_label = ttk.Label(self.frame, text="00:00.00")
         self.name_label = ttk.Label(self.frame, text="Now Playing: ")
         self.name_label.pack(side="top")
         self.play_button.pack(side="left")
@@ -1491,8 +1491,8 @@ class AudioPlayerWindow:
         self.audio_ended = False
         self.audio_duration = 0
         self.time_var.set(0)
-        self.start_label.configure(text="0.00")
-        self.end_label.configure(text="0.00")
+        self.start_label.configure(text="00:00.00")
+        self.end_label.configure(text="00:00.00")
         self.play_button.configure(text="\u23f5")
         self.name_label.configure(text=f"Now Playing:")
         self.sound_handler.kill_sound()
@@ -1511,7 +1511,7 @@ class AudioPlayerWindow:
         self.slider.configure(to=duration)
         self.audio_duration = duration
         self.slider.set(0)
-        self.end_label.configure(text=f"{float(duration):.2f}")
+        self.end_label.configure(text=f"{int(float(duration)//60):02}:{float(duration)%60:05.2f}")
 
     def set_time(self, time, autoplay=True):
         self.time_var.set(time)
@@ -1519,11 +1519,11 @@ class AudioPlayerWindow:
             self.audio_playing = True
             self.play_button.configure(text="\u23f8")
         self.audio_ended = False
-        self.start_label.configure(text=f"{float(time):.2f}")
+        self.start_label.configure(text=f"{int(float(time)//60):02}:{float(time)%60:05.2f}")
 
     def audio_finished(self):
         self.time_var.set(self.audio_duration)
-        self.start_label.configure(text=f"{float(self.audio_duration):.2f}")
+        self.start_label.configure(text=f"{int(float(self.audio_duration)//60):02}:{float(self.audio_duration)%60:05.2f}")
         self.audio_playing = False
         self.audio_ended = True
         self.play_button.configure(text="\u23f5")
@@ -1751,15 +1751,26 @@ class MainWindow:
             menu=self.recent_file_menu,
             label="Open Recent"
         )
+
+        self.file_menu.add_separator()
+
         self.file_menu.add_cascade(
             menu=self.import_menu,
             label="Import"
         )
-        
-        self.file_menu.add_command(label="Save", command=self.save_mod)
+
+        self.file_menu.add_separator()
+
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Write Separate Patches", command=self.write_separate_patches)
-        
+
+        self.file_menu.add_separator()
+
+        self.file_menu.add_command(label="View Patch Content", command=self.view_patch_content)
+        self.file_menu.add_command(label="Save", command=self.save_mod)
+
+        self.file_menu.add_separator()
+
         self.file_menu.add_command(label="Add a Folder to Workspace",
                                    command=self.add_new_workspace)
         
@@ -3049,6 +3060,27 @@ class MainWindow:
                         self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
                         break
             self.selected_language.set(first)
+
+    def view_patch_content(self, initialdir: str | None = '', archive_file: str | None = ""):
+        self.kill_sound()
+        if not self.check_unsaved("This will clear your work; you have unsaved changes, are you sure?"):
+            return
+        if not archive_file:
+            archive_file = askopenfilename(title="Select patch", initialdir=initialdir, filetypes=[("Patch File", "*.patch_*")])
+        if not archive_file:
+            return
+        if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
+            archive_file = os.path.splitext(archive_file)[0]
+        self.mod_handler.delete_mod(self.mod_handler.get_active_mod())
+        self.reset_unsaved_changes()
+        self.mod_handler.create_new_mod("default")
+        if self.selected_view.get() == "SourceView":
+            self.create_source_view()
+        else:
+            self.create_hierarchy_view()
+        self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}",
+                                   callback=self.load_archive_task_finished, task=self.load_archive_task,
+                                   archive_files=[archive_file])
     
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
         self.kill_sound()
@@ -3058,7 +3090,10 @@ class MainWindow:
             return
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
-        self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
+        if "patch" in os.path.splitext(archive_file)[1]:
+            self.import_patch(archive_file)
+        else:
+            self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
     
     @task
     def load_archive_task(self, archive_files: list[str] = []):
@@ -3307,6 +3342,7 @@ class MainWindow:
         self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
         if reload_view:
             self.task_manager.schedule(name="", callback=self.create_view_callback, task=None)
+        self.update_recent_files(filepath=patch_file)
 
     @callback
     def create_view_callback(self):
