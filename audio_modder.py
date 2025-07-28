@@ -1470,8 +1470,8 @@ class AudioPlayerWindow:
         self.play_button = ttk.Button(self.frame, text='\u23f5', width=2, command=self.button_pressed)
         self.time_var = DoubleVar()
         self.slider = ttk.Scale(self.frame, variable=self.time_var, from_=0, to=100, orient="horizontal")
-        self.start_label = ttk.Label(self.frame, text="0.00")
-        self.end_label = ttk.Label(self.frame, text="0.00")
+        self.start_label = ttk.Label(self.frame, text="00:00.00")
+        self.end_label = ttk.Label(self.frame, text="00:00.00")
         self.name_label = ttk.Label(self.frame, text="Now Playing: ")
         self.name_label.pack(side="top")
         self.play_button.pack(side="left")
@@ -1491,8 +1491,8 @@ class AudioPlayerWindow:
         self.audio_ended = False
         self.audio_duration = 0
         self.time_var.set(0)
-        self.start_label.configure(text="0.00")
-        self.end_label.configure(text="0.00")
+        self.start_label.configure(text="00:00.00")
+        self.end_label.configure(text="00:00.00")
         self.play_button.configure(text="\u23f5")
         self.name_label.configure(text=f"Now Playing:")
         self.sound_handler.kill_sound()
@@ -1511,7 +1511,7 @@ class AudioPlayerWindow:
         self.slider.configure(to=duration)
         self.audio_duration = duration
         self.slider.set(0)
-        self.end_label.configure(text=f"{float(duration):.2f}")
+        self.end_label.configure(text=f"{int(float(duration)//60):02}:{float(duration)%60:05.2f}")
 
     def set_time(self, time, autoplay=True):
         self.time_var.set(time)
@@ -1519,11 +1519,11 @@ class AudioPlayerWindow:
             self.audio_playing = True
             self.play_button.configure(text="\u23f8")
         self.audio_ended = False
-        self.start_label.configure(text=f"{float(time):.2f}")
+        self.start_label.configure(text=f"{int(float(time)//60):02}:{float(time)%60:05.2f}")
 
     def audio_finished(self):
         self.time_var.set(self.audio_duration)
-        self.start_label.configure(text=f"{float(self.audio_duration):.2f}")
+        self.start_label.configure(text=f"{int(float(self.audio_duration)//60):02}:{float(self.audio_duration)%60:05.2f}")
         self.audio_playing = False
         self.audio_ended = True
         self.play_button.configure(text="\u23f5")
