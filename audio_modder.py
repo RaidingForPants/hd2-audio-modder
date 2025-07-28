@@ -55,7 +55,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.18.3"
+VERSION = "1.18.4"
 
 def resource_path(relative_path):
     try:
@@ -3058,7 +3058,10 @@ class MainWindow:
             return
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
-        self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
+        if "patch" in os.path.splitext(archive_file)[1]:
+            self.import_patch(archive_file)
+        else:
+            self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}", callback=self.load_archive_task_finished, task=self.load_archive_task, archive_files=[archive_file])
     
     @task
     def load_archive_task(self, archive_files: list[str] = []):
