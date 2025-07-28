@@ -1077,6 +1077,8 @@ class SoundHandler:
         self.audio_id = 0
         self.playing = False
         self.audio_file = ""
+        self.wave_file = None
+        self.frame_count = 0
         self.audio = pyaudio.PyAudio()
         self.update_func = update_func
         self.start_func = start_func
@@ -1111,11 +1113,17 @@ class SoundHandler:
     def play_audio(self, sound_id: int, sound_data: bytearray, callback: Callable | None = None):
         if not os.path.exists(VGMSTREAM):
             return
-        self.callback = callback
-        if self.audio_id == sound_id:
-            self.toggle_play_pause()
-            return
         self.kill_sound()
+        self.callback = callback
+        if self.wave_file is not None:
+            self.wave_file.close()
+        if self.audio_process is not None:
+            self.audio_process.close()
+        if os.path.exists(self.audio_file):
+            try:
+                os.remove(self.audio_file)
+            except OSError:
+                pass
         filename = f"temp{sound_id}"
         if not os.path.isfile(f"{filename}.wav"):
             with open(f'{os.path.join(TMP, filename)}.wem', 'wb') as f:
@@ -1147,13 +1155,6 @@ class SoundHandler:
             if self.frame_count > self.max_frames:
                 if self.callback is not None:
                     self.callback()
-                    self.callback = None
-                self.audio_id = 0
-                self.wave_file.close()
-                try:
-                    os.remove(self.audio_file)
-                except:
-                    pass
                 return (None, pyaudio.paComplete)
             data = self.wave_file.readframes(frame_count)
             if self.wave_file.getnchannels() > 2:
@@ -1184,7 +1185,17 @@ class SoundHandler:
         if self.audio_process is not None:
             if self.playing:
                 self.playing = False
-                self.audio_process.stop_stream()
+                try:
+                    self.audio_process.stop_stream()
+                except:
+                    self.audio_process.close()
+                    self.audio_process = None
+
+    def play(self):
+        if self.audio_process is not None:
+            if not self.playing and self.audio_id != 0:
+                self.playing = True
+                self.audio_process.start_stream()
 
     def seek(self, time):
         if self.wave_file is not None:

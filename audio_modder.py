@@ -892,22 +892,8 @@ class AudioSourceWindow:
         self.play_original_label.forget()
         self.play_original_button.forget()
         self.parent_text_box.pack_forget()
-        def reset_button_icon(button):
-            button.configure(text= '\u23f5')
-        def press_button(button, file_id, callback):
-            if button['text'] == '\u23f9':
-                button.configure(text= '\u23f5')
-            else:
-                button.configure(text= '\u23f9')
-            self.play(file_id, callback)
-        def play_original_audio(button, file_id, callback):
-            if button['text'] == '\u23f9':
-                button.configure(text= '\u23f5')
-            else:
-                button.configure(text= '\u23f9')
-            self.play(-file_id, callback)
-        self.play_button.configure(command=partial(press_button, self.play_button, audio.get_short_id(), partial(reset_button_icon, self.play_button)))
-        self.play_original_button.configure(command=partial(play_original_audio, self.play_original_button, audio.get_short_id(), partial(reset_button_icon, self.play_original_button)))
+        self.play_button.configure(command=partial(self.play, audio.get_short_id()))
+        self.play_original_button.configure(command=partial(self.play, -audio.get_short_id()))
         self.parent_text_box.pack(side="bottom", pady=5)
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left")
@@ -1479,17 +1465,37 @@ class AudioPlayerWindow:
 
     def __init__(self, parent):
         self.parent = parent
+        self.sound_handler = SoundHandler.get_instance()
         self.frame = Frame(parent)
-        self.play_button = Button(self.frame, text="Play")
+        self.play_button = ttk.Button(self.frame, text='\u23f5', width=2, command=self.button_pressed)
         self.time_var = DoubleVar()
         self.slider = ttk.Scale(self.frame, variable=self.time_var, from_=0, to=100, orient="horizontal")
-        self.start_label = Label(self.frame, text="0.00")
-        self.end_label = Label(self.frame, text="End")
+        self.start_label = ttk.Label(self.frame, text="0.00")
+        self.end_label = ttk.Label(self.frame, text="0.00")
+        self.name_label = ttk.Label(self.frame, text="Now Playing: ")
+        self.name_label.pack(side="top")
+        self.play_button.pack(side="left")
         self.start_label.pack(side="left")
-        self.slider.pack(side="left")
+        self.slider.pack(side="left", fill='x', expand=True)
         self.end_label.pack(side="left")
-        self.play_button.pack(side="bottom")
-        self.frame.pack()
+        self.frame.pack(fill='x', expand=True, padx=5)
+        self.audio_playing = False
+        self.audio_ended = False
+        self.audio_duration = 0
+
+        self.slider.bind("<Button-1>", self.slider_grabbed)
+        self.slider.bind("<ButtonRelease-1>", self.slider_released)
+
+    def reset(self):
+        self.audio_playing = False
+        self.audio_ended = False
+        self.audio_duration = 0
+        self.time_var.set(0)
+        self.start_label.configure(text="0.00")
+        self.end_label.configure(text="0.00")
+        self.play_button.configure(text="\u23f5")
+        self.name_label.configure(text=f"Now Playing:")
+        self.sound_handler.kill_sound()
 
     def set_slider_callback(self, callback):
         self.slider.configure(command=callback)
@@ -1497,14 +1503,53 @@ class AudioPlayerWindow:
     def set_button_callback(self, callback):
         self.play_button.configure(command=callback)
 
+    def play_audio(self, sound_id: int, sound_data: bytearray):
+        self.sound_handler.play_audio(sound_id, sound_data, callback=self.audio_finished)
+        self.name_label.configure(text=f"Now Playing: {sound_id}.wem")
+
     def set_new_audio(self, duration):
         self.slider.configure(to=duration)
+        self.audio_duration = duration
         self.slider.set(0)
         self.end_label.configure(text=f"{float(duration):.2f}")
 
-    def set_time(self, time):
+    def set_time(self, time, autoplay=True):
         self.time_var.set(time)
+        if autoplay:
+            self.audio_playing = True
+            self.play_button.configure(text="\u23f8")
+        self.audio_ended = False
         self.start_label.configure(text=f"{float(time):.2f}")
+
+    def audio_finished(self):
+        self.time_var.set(self.audio_duration)
+        self.start_label.configure(text=f"{float(self.audio_duration):.2f}")
+        self.audio_playing = False
+        self.audio_ended = True
+        self.play_button.configure(text="\u23f5")
+
+    def slider_grabbed(self, event):
+        self.sound_handler.pause()
+
+    def slider_released(self, event):
+        if self.audio_playing:
+            self.sound_handler.play()
+
+    def button_pressed(self):
+        if self.audio_ended:
+            self.set_time(0, autoplay=True)
+            self.sound_handler.seek(0)
+            self.play_button.configure(text="\u23f8")
+            self.sound_handler.toggle_play_pause()
+            self.sound_handler.toggle_play_pause()
+            self.sound_handler.play()
+        else:
+            self.sound_handler.toggle_play_pause()
+            self.audio_playing = self.sound_handler.playing
+            if self.sound_handler.playing:
+                self.play_button.configure(text="\u23f8")
+            else:
+                self.play_button.configure(text="\u23f5")
 
 class MainWindow:
 
@@ -1627,14 +1672,12 @@ class MainWindow:
                                                      
         self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified, self.play_audio)
 
-        temp_window = Toplevel(self.root)
-        self.audio_player = AudioPlayerWindow(temp_window)
-        self.audio_player.set_button_callback(self.sound_handler.toggle_play_pause)
+        #temp_window = Toplevel(self.root)
+        self.audio_player = AudioPlayerWindow(self.top_bar)
+        self.audio_player.frame.pack()
         self.audio_player.set_slider_callback(self.update_audio_slider)
         self.sound_handler.update_func = self.audio_player.set_time
         self.sound_handler.start_func = self.audio_player.set_new_audio
-        #self.audio_player.pack()
-        #self.audio_player.set_button_callback()
                                                      
         self.window.add(self.treeview_panel)
         self.window.add(self.entry_info_panel)
@@ -1778,9 +1821,8 @@ class MainWindow:
         self.root.mainloop()
 
     def update_audio_slider(self, time):
-        self.sound_handler.pause()
         self.sound_handler.seek(float(time))
-        self.audio_player.set_time(time)
+        self.audio_player.set_time(time, autoplay=False)
 
     def open_about_window(self):
         image1 = PIL.Image.open(str(resource_path("support_me_on_kofi_blue.png"))).resize((164, 33))
@@ -1903,7 +1945,7 @@ class MainWindow:
             showerror(title="Missing Required Configuration", message="Unknown game data folder location. Unable to automatically combine mods")
             return
         if self.file_upload_window is None:
-            self.sound_handler.kill_sound()
+            self.kill_sound()
             self.file_upload_window = FileUploadWindow(self.root, callback=self.combine_mods_callback)
             
     def combine_mods_callback(self, files):
@@ -2681,7 +2723,7 @@ class MainWindow:
                 audio_data = None
                 with open(values[0], "rb") as f:
                     audio_data = f.read()
-                self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data)
+                self.sound_handler.play_audio(os.path.basename(os.path.splitext(values[0])[0]), audio_data, self.audio_player.audio_finished)
 
     def set_language(self):
         global language
@@ -3009,7 +3051,7 @@ class MainWindow:
             self.selected_language.set(first)
     
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         if not archive_file:
             archive_file = askopenfilename(title="Select archive", initialdir=initialdir)
         if not archive_file:
@@ -3049,7 +3091,7 @@ class MainWindow:
     def save_mod(self):
         output_folder = filedialog.askdirectory(title="Select save location")
         if output_folder and os.path.exists(output_folder):
-            self.sound_handler.kill_sound()
+            self.kill_sound()
             self.mod_handler.get_active_mod().save(output_folder)
             self.reset_unsaved_changes()
         
@@ -3148,14 +3190,14 @@ class MainWindow:
                     self.mark_modified(entry, item)
         
     def dump_all_as_wem(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
         self.task_manager.schedule(name="Dumping Files", callback=None, task=task(self.mod_handler.get_active_mod().dump_all_as_wem), output_folder=output_folder)
         
     def dump_all_as_wav(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         output_folder = filedialog.askdirectory(title="Select folder to save files to")
         if not output_folder:
             return
@@ -3176,22 +3218,26 @@ class MainWindow:
     def play_audio(self, file_id: int, callback=None):
         audio = self.mod_handler.get_active_mod().get_audio_source(abs(file_id))
         if file_id > 0:
-            self.sound_handler.play_audio(file_id, audio.get_data(), callback)
+            self.audio_player.play_audio(audio.get_id(), audio.get_data())
         else:
-            self.sound_handler.play_audio(file_id, audio.data_old, callback)
+            self.audio_player.play_audio(audio.get_id(), audio.data_old)
         
     def revert_audio(self, file_id):
         self.mod_handler.get_active_mod().revert_audio(file_id)
         
     def revert_all(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         self.mod_handler.get_active_mod().revert_all()
         self.clear_modified()
         self.show_info_window()
         self.reset_unsaved_changes()
 
+    def kill_sound(self):
+        self.sound_handler.pause()
+        self.audio_player.play_button.configure(text="\u23f5")
+
     def write_separate_patches(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         output_folder = filedialog.askdirectory(title="Save Patch File", mustexist=True)
         if not output_folder:
             return
@@ -3200,7 +3246,7 @@ class MainWindow:
                                    output_folder=output_folder)
         
     def write_patch(self):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         output_file = filedialog.asksaveasfilename(title="Save Patch File", initialfile="9ba626afa44a3aa3.patch_0", filetypes=[("Patch File", "*.patch_*")])
         if not output_file:
             return
@@ -3216,7 +3262,7 @@ class MainWindow:
         self.unsaved_changes = False
 
     def import_patch(self, archive_file: str = ""):
-        self.sound_handler.kill_sound()
+        self.kill_sound()
         if archive_file == "":
             archive_file = askopenfilename(title="Select patch file", filetypes=[("Patch File", "*.patch_*")])
         if not archive_file:
