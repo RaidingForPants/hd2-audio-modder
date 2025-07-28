@@ -1751,15 +1751,26 @@ class MainWindow:
             menu=self.recent_file_menu,
             label="Open Recent"
         )
+
+        self.file_menu.add_separator()
+
         self.file_menu.add_cascade(
             menu=self.import_menu,
             label="Import"
         )
-        
-        self.file_menu.add_command(label="Save", command=self.save_mod)
+
+        self.file_menu.add_separator()
+
         self.file_menu.add_command(label="Write Patch", command=self.write_patch)
         self.file_menu.add_command(label="Write Separate Patches", command=self.write_separate_patches)
-        
+
+        self.file_menu.add_separator()
+
+        self.file_menu.add_command(label="View Patch Content", command=self.view_patch_content)
+        self.file_menu.add_command(label="Save", command=self.save_mod)
+
+        self.file_menu.add_separator()
+
         self.file_menu.add_command(label="Add a Folder to Workspace",
                                    command=self.add_new_workspace)
         
@@ -3049,6 +3060,23 @@ class MainWindow:
                         self.language_menu.add_radiobutton(label=name, variable=self.selected_language, value=name, command=self.set_language)
                         break
             self.selected_language.set(first)
+
+    def view_patch_content(self, initialdir: str | None = '', archive_file: str | None = ""):
+        self.kill_sound()
+        if not self.check_unsaved("This will clear your work; you have unsaved changes, are you sure?"):
+            return
+        if not archive_file:
+            archive_file = askopenfilename(title="Select patch", initialdir=initialdir, filetypes=[("Patch File", "*.patch_*")])
+        if not archive_file:
+            return
+        if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
+            archive_file = os.path.splitext(archive_file)[0]
+        self.mod_handler.delete_mod(self.mod_handler.get_active_mod())
+        self.reset_unsaved_changes()
+        self.mod_handler.create_new_mod("default")
+        self.task_manager.schedule(name=f"Loading Archive {os.path.basename(archive_file)}",
+                                   callback=self.load_archive_task_finished, task=self.load_archive_task,
+                                   archive_files=[archive_file])
     
     def load_archive(self, initialdir: str | None = '', archive_file: str | None = ""):
         self.kill_sound()
@@ -3310,6 +3338,7 @@ class MainWindow:
         self.task_manager.schedule(name="Applying Patch", callback=self.import_patch_finished, task=task(self.mod_handler.get_active_mod().import_patch), patch_file=patch_file)
         if reload_view:
             self.task_manager.schedule(name="", callback=self.create_view_callback, task=None)
+        self.update_recent_files(filepath=patch_file)
 
     @callback
     def create_view_callback(self):
