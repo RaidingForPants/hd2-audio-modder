@@ -16,6 +16,10 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 CACHE = posixpath.join(DIR, ".cache")
 TMP = posixpath.join(DIR, ".tmp")
 
+DIR = os.path.abspath(DIR)
+CACHE = os.path.abspath(CACHE)
+TMP = os.path.abspath(TMP)
+
 DEFAULT_WWISE_PROJECT = posixpath.join(
     DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj")
 
