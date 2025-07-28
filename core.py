@@ -911,7 +911,7 @@ class GameArchive:
 
         if stream_type == BANK and plugin_id == REV_AUDIO:
             if not hirc.has_entry(source_id):
-                logger.error(
+                logger.warning(
                     f"There's no custom FX hierarchy entry associated with audio"
                     f" source {source_id}!"
                 )
@@ -921,7 +921,7 @@ class GameArchive:
             )
         if stream_type == BANK:
             if source_id not in media_index.data:
-                logger.error(
+                logger.warning(
                     "There is no media index data associated with audio source ID "
                    f"{source_id}"
                 )
@@ -963,7 +963,7 @@ class GameArchive:
             data[plugin_data_start:plugin_data_end], byteorder="little"
         )
         if media_index_id not in media_index.data:
-            logger.error(
+            logger.warning(
                 f"There is no media index data associated with {media_index_id}"
             )
             return None
@@ -988,7 +988,7 @@ class GameArchive:
             (os.path.dirname(dep.data) + "/" + str(source.source_id)).encode('utf-8')
         )
         if stream_resource_id not in self.wwise_streams:
-            logger.error(
+            logger.warning(
                 "There is no WwiseStream associated with stream resource ID"
                f"{stream_resource_id}"
             )
@@ -996,7 +996,7 @@ class GameArchive:
 
         audio = self.wwise_streams[stream_resource_id].audio_source
         if audio == None:
-            logger.error(
+            logger.warning(
                 f"WwiseStream {stream_resource_id} has no audio source."
             )
             return None
@@ -1018,7 +1018,7 @@ class GameArchive:
                     if source_id == 0:
                         continue
                     if source_id not in self.audio_sources:
-                        logger.error(
+                        logger.warning(
                              "There is no audio source associated with audio "
                             f"source ID {source_id}."
                         )
@@ -1032,7 +1032,7 @@ class GameArchive:
                         continue
                     source_id = source.source_id
                     if source_id not in self.audio_sources:
-                        logger.error(
+                        logger.warning(
                             f"Audio source {source_id} is not tracked and registered "
                             f"in the list of all audio sources!",
                         )
@@ -1053,7 +1053,7 @@ class GameArchive:
                 source = sound.sources[0]
                 source_id = source.source_id
                 if source_id not in self.audio_sources:
-                    logger.error(
+                    logger.warning(
                         f"Audio source {source_id} is not tracked and registered "
                         f"in the list of all audio sources!",
                     )
@@ -1984,7 +1984,7 @@ class Mod:
                     self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
                 except Exception as e:
                     logger.error(e)
-                    logger.warning(f"Unable to import heirarchy information for {bank.dep.data}")
+                    logger.error(f"Unable to import heirarchy information for {bank.dep.data}")
 
         for text_bank in patch_game_archive.get_text_banks().values():
             try:
