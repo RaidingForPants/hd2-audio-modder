@@ -3524,7 +3524,7 @@ if __name__ == "__main__":
                         tkinter.messagebox.showinfo(title="Success", message="The audio modding tool has been updated and will now restart.")
                         a = subprocess.Popen(
                             [
-                                temp_filename
+                                os.path.abspath(temp_filename)
                             ],
                             creationflags=subprocess.DETACHED_PROCESS
                         )
