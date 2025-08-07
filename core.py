@@ -2115,6 +2115,7 @@ class Mod:
 
         length_import_failed = False
         wrong_file_format = False
+        unable_to_find_audio = False
         for filepath, targets in wems.items():
             if not os.path.exists(filepath) or not os.path.isfile(filepath):
                 continue
@@ -2136,37 +2137,46 @@ class Mod:
                     have_length = False
                     length_import_failed = True
             for target in targets:
-                audio: AudioSource | None = self.get_audio_source(target)
-                if audio:
-                    audio.set_data(audio_data)
-                    if have_length:
-                        # find music segment for Audio Source
-                        for item in audio.parents:
-                            if isinstance(item, (wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack)):
-                                if item.parent == None:
-                                    raise AssertionError(
-                                        f"Music track {item.hierarchy_id} does not have"
-                                        " a parent!"
-                                    )
-                                item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
-                                tracks = copy.deepcopy(item.track_info)
-                                for t in tracks:
-                                    if t.source_id == audio.get_short_id():
-                                        t.begin_trim_offset = 0
-                                        t.end_trim_offset = 0
-                                        t.source_duration = len_ms
-                                        t.play_at = 0
-                                        break
-                                item.set_data(track_info=tracks)
-                                
-        if length_import_failed and wrong_file_format:
-            raise RuntimeError("Failed to set track duration for some audio sources. Some audio was not the correct format.")
+                try:
+                    audio: AudioSource | None = self.get_audio_source(target)
+                    if audio:
+                        audio.set_data(audio_data)
+                        if have_length:
+                            # find music segment for Audio Source
+                            for item in audio.parents:
+                                if isinstance(item, (wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack)):
+                                    if item.parent == None:
+                                        raise AssertionError(
+                                            f"Music track {item.hierarchy_id} does not have"
+                                            " a parent!"
+                                        )
+                                    item.parent.set_data(duration=len_ms, entry_marker=0, exit_marker=len_ms)
+                                    tracks = copy.deepcopy(item.track_info)
+                                    for t in tracks:
+                                        if t.source_id == audio.get_short_id():
+                                            t.begin_trim_offset = 0
+                                            t.end_trim_offset = 0
+                                            t.source_duration = len_ms
+                                            t.play_at = 0
+                                            break
+                                    item.set_data(track_info=tracks)
+                except KeyError:
+                    unable_to_find_audio = True
+                    logger.warning(f"Unable to find target audio source {target}")
 
+        error_message = ""
+                                
         if length_import_failed:
-            raise RuntimeError("Failed to set track duration for some audio sources.")
+            error_message += "Failed to set track duration for some audio sources."
             
         if wrong_file_format:
-            raise RuntimeError("Some audio was not the correct format. If using Wwise, ensure your Conversion Setting format is set to Vorbis.")
+            error_message += "Some audio was not the correct format. If using Wwise, ensure your Conversion Setting format is set to Vorbis. "
+
+        if unable_to_find_audio:
+            error_message += "Unable to find matching source IDs for some audio. "
+
+        if error_message:
+            raise RuntimeError(error_message)
     
     def create_external_sources_list(self, sources: list[str], conversion_setting: str = DEFAULT_CONVERSION_SETTING) -> str:
         root = etree.Element("ExternalSourcesList", attrib={
