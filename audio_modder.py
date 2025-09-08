@@ -581,7 +581,7 @@ class StringEntryWindow:
         self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
-        self.text_box.pack()
+        self.text_box.pack(anchor="w", fill="x")
         self.revert_button.pack(side="left")
         self.apply_button.pack(side="left")
         
@@ -875,9 +875,9 @@ class AudioSourceWindow:
         self.parent_text_box.bind("<1>", lambda event: self.parent_text_box.focus_set())
         self.parent_text_box.pack(pady=5, side="bottom")
         self.gain_prop_var = tk.DoubleVar()
-        self.gain_prop_entry = ttk.Entry(self.frame, textvariable=self.gain_prop_var, font=('Segoe UI', 12), width=54)
+        self.gain_prop_entry = ttk.Entry(self.frame, textvariable=self.gain_prop_var, font=('Segoe UI', 12), width=20)
         self.add_gain_button = ttk.Button(self.frame, text="Add Make Up Gain", command=self.add_gain)
-        self.gain_label = ttk.Label(self.frame, text="Make Up Gain")
+        self.gain_label = ttk.Label(self.frame, text="Make Up Gain (db)", font=('Segoe UI', 12))
 
     def add_gain(self):
         if len(self.parent_base_params) > 0:
@@ -919,10 +919,10 @@ class AudioSourceWindow:
             props = self.parent_base_params[0].propBundle
             if 0x05 in props.pIDs:  # makeup gain is ID 5
                 self.gain_prop_var.set(float(struct.unpack("<f", props.pValues[props.pIDs.index(0x05)])[0]))
-                self.gain_label.pack()
-                self.gain_prop_entry.pack()
+                self.gain_label.pack(anchor="w")
+                self.gain_prop_entry.pack(anchor="w", pady=5)
             else:
-                self.add_gain_button.pack()
+                self.add_gain_button.pack(anchor="w", pady=5)
         self.play_button.configure(command=partial(self.play, self.audio.get_short_id()))
         self.play_original_button.configure(command=partial(self.play, -self.audio.get_short_id()))
         self.parent_text_box.pack(side="bottom", pady=5)
@@ -979,14 +979,14 @@ class SequenceContainerWindow:
         self.random_value = tk.BooleanVar()
         self.random_checkbox = ttk.Checkbutton(self.frame, text="Random?", variable=self.random_value, onvalue=False, offvalue=True)
         self.gain_prop_var = tk.DoubleVar()
-        self.gain_prop_entry = ttk.Entry(self.frame, textvariable=self.gain_prop_var, font=('Segoe UI', 12), width=54)
+        self.gain_prop_entry = ttk.Entry(self.frame, textvariable=self.gain_prop_var, font=('Segoe UI', 12), width=20)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.add_gain_button = ttk.Button(self.frame, text="Add Make Up Gain", command=self.add_gain)
         self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c',
                                         width=2, command=self.revert)
-        self.title_label = ttk.Label(self.frame, text="Info for ")
-        self.gain_label = ttk.Label(self.frame, text="Make Up Gain")
+        self.title_label = ttk.Label(self.frame, text="Info for ", font=('Segoe UI', 14))
+        self.gain_label = ttk.Label(self.frame, text="Make Up Gain (db)", font=('Segoe UI', 12))
         self.title_label.pack()
 
     def set_container(self, container):
@@ -1009,15 +1009,15 @@ class SequenceContainerWindow:
         self.random_checkbox.pack_forget()
         self.add_gain_button.pack_forget()
 
-        self.random_checkbox.pack()
+        self.random_checkbox.pack(anchor="w")
 
         self.random_value.set(self.playlistSettings.eMode == 1)
         if 0x05 in self.props.pIDs:  # makeup gain is ID 6
             self.gain_prop_var.set(float(struct.unpack("<f", self.props.pValues[self.props.pIDs.index(0x05)])[0]))
-            self.gain_label.pack()
-            self.gain_prop_entry.pack()
+            self.gain_label.pack(anchor="w")
+            self.gain_prop_entry.pack(anchor="w", pady=5)
         else:
-            self.add_gain_button.pack()
+            self.add_gain_button.pack(anchor="w", pady=5)
 
         self.revert_button.pack(side="left")
         self.apply_button.pack(side="left")
@@ -1056,28 +1056,28 @@ class MusicSegmentWindow:
         self.duration_label = ttk.Label(self.frame,
                                     text="Duration (ms)",
                                     font=('Segoe UI', 12))
-        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=54)
+        self.duration_text = ttk.Entry(self.frame, textvariable=self.duration_text_var, font=('Segoe UI', 12), width=20)
         
         self.fade_in_label = ttk.Label(self.frame,
                                    text="End fade-in (ms)",
                                    font=('Segoe UI', 12))
-        self.fade_in_text = ttk.Entry(self.frame, textvariable=self.fade_in_text_var, font=('Segoe UI', 12), width=54)
+        self.fade_in_text = ttk.Entry(self.frame, textvariable=self.fade_in_text_var, font=('Segoe UI', 12), width=20)
         
         self.fade_out_label = ttk.Label(self.frame,
                                     text="Start fade-out (ms)",
                                     font=('Segoe UI', 12))
-        self.fade_out_text = ttk.Entry(self.frame, textvariable=self.fade_out_text_var, font=('Segoe UI', 12), width=54)
+        self.fade_out_text = ttk.Entry(self.frame, textvariable=self.fade_out_text_var, font=('Segoe UI', 12), width=20)
         self.revert_button = ttk.Button(self.frame, text="\u21b6", command=self.revert)
         self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack(pady=5)
         
-        self.duration_label.pack()
-        self.duration_text.pack()
-        self.fade_in_label.pack()
-        self.fade_in_text.pack()
-        self.fade_out_label.pack()
-        self.fade_out_text.pack()
+        self.duration_label.pack(anchor="w")
+        self.duration_text.pack(anchor="w")
+        self.fade_in_label.pack(anchor="w")
+        self.fade_in_text.pack(anchor="w")
+        self.fade_out_label.pack(anchor="w")
+        self.fade_out_text.pack(anchor="w")
         self.revert_button.pack(side="left")
         self.apply_button.pack(side="left")
         
