@@ -1,3 +1,4 @@
+import copy
 import os
 import subprocess
 import struct
@@ -613,6 +614,8 @@ class MusicTrackWindow:
         self.listbox_scrollbar = ttk.Scrollbar(self.listbox_container, orient=VERTICAL)
         self.graph_notebook = ttk.Notebook(self.frame)
         self.graphs = []
+        self.track = None
+        self.clip_automations = None
         self.selected_track = 0
         self.update_modified = update_modified
         self.play = play
@@ -729,6 +732,7 @@ class MusicTrackWindow:
     def set_track(self, track):
         self.title_label.configure(text=f"Info for Track {track.get_id()}")
         self.track = track
+        self.clip_automations = copy.deepcopy(self.track.clip_automations)
         self.source_selection_listbox.delete(0, 'end')
         for track_info_struct in self.track.track_info:
             if track_info_struct.source_id != 0:
@@ -805,13 +809,13 @@ class MusicTrackWindow:
                 t.source_duration = float(self.duration_text_var.get())
                 t.play_at = float(self.play_at_text_var.get())
                 break
-        clip_automations = copy.deepcopy(self.track.clip_automations)
+        # clip_automations = copy.deepcopy(self.track.clip_automations)
         for index, tab in enumerate(self.graph_notebook.tabs()):
             graph = self.graph_notebook.nametowidget(tab)
             x, y = graph.get_data()
-            clip_automations[index].num_graph_points = len(x)
-            clip_automations[index].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
-        self.track.set_data(track_info=tracks, clip_automations=clip_automations)
+            self.clip_automations[index].num_graph_points = len(x)
+            self.clip_automations[index].graph_points = [(x[i], y[i], 4) for i in range(len(x))] #linear interpolation = 0x04
+        self.track.set_data(track_info=tracks, clip_automations=self.clip_automations)
         self.update_modified(diff=[self.track])
         
         
@@ -820,6 +824,7 @@ class AudioSourceWindow:
     def __init__(self, parent, play, update_modified):
         self.frame = Frame(parent)
         self.update_modified = update_modified
+        self.parent_base_params = []
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
         self.play = play
         self.track_info = None
@@ -869,43 +874,71 @@ class AudioSourceWindow:
         self.parent_text_box.configure(state="disabled")
         self.parent_text_box.bind("<1>", lambda event: self.parent_text_box.focus_set())
         self.parent_text_box.pack(pady=5, side="bottom")
+        self.gain_prop_var = tk.DoubleVar()
+        self.gain_prop_entry = ttk.Entry(self.frame, textvariable=self.gain_prop_var, font=('Segoe UI', 12), width=54)
+        self.add_gain_button = ttk.Button(self.frame, text="Add Make Up Gain", command=self.add_gain)
+        self.gain_label = ttk.Label(self.frame, text="Make Up Gain")
+
+    def add_gain(self):
+        if len(self.parent_base_params) > 0:
+            for base_param in self.parent_base_params:
+                base_param.propBundle.add_prop_value_float(0x05, 0)
+        self.reload_widgets()
         
     def set_audio(self, audio):
-
+        self.audio = audio
+        self.parent_base_params = []
         self.parent_text_box.configure(state="normal")
         self.parent_text_box.delete(1.0, tk.END)
-        if len([p for p in audio.parents if isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound))]) > 0:
+        if len([p for p in self.audio.parents if isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound, wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack))]) > 0:
             self.parent_text_box.insert(tk.END, f"Parent Wwise Source object id(s):")
-            for parent in [p for p in audio.parents if isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound))]:
+            for parent in [p for p in self.audio.parents if isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound, wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack))]:
+                self.parent_base_params.append(copy.deepcopy(parent.baseParam))
                 self.parent_text_box.insert(tk.END, "\n"+f"{parent.get_id()}")
             self.parent_text_box.insert(tk.END, "\n\n")
-        if audio.stream_type != BANK:
-            self.parent_text_box.insert(tk.END, "Wwise Short ID: \n" + f"{audio.get_short_id()}")
+        if self.audio.stream_type != BANK:
+            self.parent_text_box.insert(tk.END, "Wwise Short ID: \n" + f"{self.audio.get_short_id()}")
         self.parent_text_box.configure(state="disabled")
 
-        self.audio = audio
+
         self.title_label.configure(text=f"Info for {audio.get_id()}.wem")
         self.play_button.configure(text= '\u23f5')
+        self.reload_widgets()
+
+    def reload_widgets(self):
         self.revert_button.pack_forget()
         self.play_button.pack_forget()
         self.apply_button.pack_forget()
         self.play_original_label.forget()
         self.play_original_button.forget()
+        self.gain_label.pack_forget()
+        self.gain_prop_entry.pack_forget()
+        self.add_gain_button.pack_forget()
         self.parent_text_box.pack_forget()
-        self.play_button.configure(command=partial(self.play, audio.get_short_id()))
-        self.play_original_button.configure(command=partial(self.play, -audio.get_short_id()))
+        if len(self.parent_base_params) > 0:
+            props = self.parent_base_params[0].propBundle
+            if 0x05 in props.pIDs:  # makeup gain is ID 5
+                self.gain_prop_var.set(float(struct.unpack("<f", props.pValues[props.pIDs.index(0x05)])[0]))
+                self.gain_label.pack()
+                self.gain_prop_entry.pack()
+            else:
+                self.add_gain_button.pack()
+        self.play_button.configure(command=partial(self.play, self.audio.get_short_id()))
+        self.play_original_button.configure(command=partial(self.play, -self.audio.get_short_id()))
         self.parent_text_box.pack(side="bottom", pady=5)
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left")
-        
+        self.apply_button.pack(side="left")
+
         if self.audio.modified and self.audio.data_old != b"":
             self.play_original_label.pack(side="right")
             self.play_original_button.pack(side="right")
-
-
             
     def revert(self):
         self.audio.revert_modifications()
+        for parent in [p for p in self.audio.parents if
+                       isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound, wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack))]:
+            parent.revert_modifications()
         if self.track_info is not None:
             self.track_info.revert_modifications()
             self.play_at_text.delete(0, 'end')
@@ -917,13 +950,98 @@ class AudioSourceWindow:
             self.start_offset_text.insert(END, f"{self.track_info.begin_trim_offset}")
             self.end_offset_text.insert(END, f"{self.track_info.end_trim_offset}")
         self.update_modified([self.audio])
-        self.play_original_label.forget()
-        self.play_original_button.forget()
+        self.reload_widgets()
+        self.set_audio(self.audio)
         
     def apply_changes(self):
-        self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
-        self.update_modified([self.audio])
-        
+        if self.track_info is not None:
+            self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
+        if len(self.parent_base_params) > 0:
+            props = self.parent_base_params[0].propBundle
+            if 0x05 in props.pIDs:  # makeup gain is ID 6
+                for base_param in self.parent_base_params:
+                    base_param.propBundle.set_prop_value_float_by_pid(0x05, self.gain_prop_var.get())
+        parents = [p for p in self.audio.parents if isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound, wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack))]
+        if len(parents) > 0:
+            for i, parent in enumerate(parents):
+                parent.set_data(baseParam=self.parent_base_params[i])
+        self.update_modified(parents + [self.audio])
+
+class SequenceContainerWindow:
+    def __init__(self, parent, update_modified):
+        self.frame = Frame(parent)
+        self.update_modified = update_modified
+        self.advSettings = None
+        self.props = None
+        self.playlistSettings = None
+        self.baseParam = None
+        self.container = None
+        self.random_value = tk.BooleanVar()
+        self.random_checkbox = ttk.Checkbutton(self.frame, text="Random?", variable=self.random_value, onvalue=False, offvalue=True)
+        self.gain_prop_var = tk.DoubleVar()
+        self.gain_prop_entry = ttk.Entry(self.frame, textvariable=self.gain_prop_var, font=('Segoe UI', 12), width=54)
+        self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
+        self.fake_image = tkinter.PhotoImage(width=1, height=1)
+        self.add_gain_button = ttk.Button(self.frame, text="Add Make Up Gain", command=self.add_gain)
+        self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c',
+                                        width=2, command=self.revert)
+        self.title_label = ttk.Label(self.frame, text="Info for ")
+        self.gain_label = ttk.Label(self.frame, text="Make Up Gain")
+        self.title_label.pack()
+
+    def set_container(self, container):
+        self.title_label.configure(text=f"Info for Sequence Container {container.get_id()}")
+
+        self.playlistSettings = container.playListSetting
+        self.baseParam = copy.deepcopy(container.baseParam)
+        self.advSettings = self.baseParam.advSetting
+        self.props = self.baseParam.propBundle
+
+        self.container = container
+
+        self.reload_widgets()
+
+    def reload_widgets(self):
+        self.revert_button.pack_forget()
+        self.apply_button.pack_forget()
+        self.gain_label.pack_forget()
+        self.gain_prop_entry.pack_forget()
+        self.random_checkbox.pack_forget()
+        self.add_gain_button.pack_forget()
+
+        self.random_checkbox.pack()
+
+        self.random_value.set(self.playlistSettings.eRandomMode == 1)
+        if 0x05 in self.props.pIDs:  # makeup gain is ID 6
+            self.gain_prop_var.set(float(struct.unpack("<f", self.props.pValues[self.props.pIDs.index(0x05)])[0]))
+            self.gain_label.pack()
+            self.gain_prop_entry.pack()
+        else:
+            self.add_gain_button.pack()
+
+        self.revert_button.pack(side="left")
+        self.apply_button.pack(side="left")
+
+    def revert(self):
+        self.container.revert_modifications()
+        self.update_modified([self.container])
+        self.set_container(self.container)
+
+    def add_gain(self):
+        self.props.add_prop_value_float(0x05, 0)
+        self.reload_widgets()
+
+    def apply_changes(self):
+        if 0x05 in self.props.pIDs: # makeup gain is ID 6
+            self.props.set_prop_value_float_by_pid(0x05, self.gain_prop_var.get())
+        playlistSettings = copy.deepcopy(self.playlistSettings)
+        if self.random_value.get():
+            playlistSettings.eRandomMode = 1
+        else:
+            playlistSettings.eRandomMode = 0
+        self.container.set_data(baseParam=self.baseParam, playListSetting=playlistSettings)
+        self.update_modified([self.container])
+
 class MusicSegmentWindow:
     def __init__(self, parent, update_modified):
         self.frame = Frame(parent)
@@ -1671,6 +1789,7 @@ class MainWindow:
                                                      self.check_modified)
                                                      
         self.track_info_panel = MusicTrackWindow(self.entry_info_panel, self.check_modified, self.play_audio)
+        self.sequence_container_panel = SequenceContainerWindow(self.entry_info_panel, self.check_modified)
 
         #temp_window = Toplevel(self.root)
         self.audio_player = AudioPlayerWindow(self.top_bar)
@@ -2796,6 +2915,9 @@ class MainWindow:
             pass
         elif selection_type == "Text Bank":
             pass
+        elif selection_type == "Random Sequence":
+            self.sequence_container_panel.set_container(self.mod_handler.get_active_mod().get_hierarchy_entry(selection_id))
+            self.sequence_container_panel.frame.pack(side="top", fill="x", padx=8, pady=8)
 
     def copy_id(self):
         self.root.clipboard_clear()
@@ -2949,8 +3071,8 @@ class MainWindow:
                                         pass
                     elif hierarchy_entry.hierarchy_type == HircType.RandomSequenceContainer:
                         container_entry = self.create_treeview_entry(hierarchy_entry, bank_entry)
-                        for s_id in hierarchy_entry.children.children:
-                            sound = bank.hierarchy.entries[s_id]
+                        for playlist_item in hierarchy_entry.playListItems:
+                            sound = bank.hierarchy.entries[playlist_item.ulPlayID]
                             if not sound.hierarchy_type == HircType.Sound:
                                 continue
                             if len(sound.sources) > 0 and sound.sources[0].plugin_id == VORBIS:

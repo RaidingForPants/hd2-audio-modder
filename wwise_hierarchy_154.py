@@ -561,7 +561,7 @@ class ClipAutomationStruct:
 class MusicTrack(HircEntry):
 
     #import_values = ["bit_flags", "parent_id", "clip_automations", "unk1", "unk2", "misc"]
-    import_values = ["clip_automations"]
+    import_values = ["clip_automations", "baseParam"]
 
     def __init__(self):
         super().__init__()
@@ -573,7 +573,7 @@ class MusicTrack(HircEntry):
         self.parent_id = 0
         self.unk1 =  bytearray()
         self.unk2 =  bytearray()
-        self.base_params: BaseParam = None
+        self.baseParam: BaseParam = None
 
     def set_data(self, entry = None, **data):
         if self.soundbanks == []:
@@ -611,7 +611,7 @@ class MusicTrack(HircEntry):
         self.modified = True
         self.size = len(self.get_data())-5
         try:
-            self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
+            self.parent = self.soundbanks[0].hierarchy.get_entry(self.get_parent_id())
         except:
             self.parent = None
 
@@ -631,24 +631,26 @@ class MusicTrack(HircEntry):
         for _ in range(num_track_info):
             track = TrackInfoStruct.from_bytes(stream.read(48))
             entry.track_info.append(track)
-        entry.unk1 = stream.read(4)
+        if num_track_info > 0:
+            entry.unk1 = stream.read(4)
         num_clip_automations = stream.uint32_read()
         for _ in range(num_clip_automations):
             entry.clip_automations.append(ClipAutomationStruct.from_memory_stream(stream))
-        entry.unk2 = stream.read(4)
-        entry.override_bus_id = stream.uint32_read()
-        entry.parent_id = stream.uint32_read()
+        entry.baseParam = BaseParam.from_memory_stream(stream)
+        #entry.unk2 = stream.read(4)
+        #entry.override_bus_id = stream.uint32_read()
+        #entry.parent_id = stream.uint32_read()
         entry.misc = stream.read(entry.size - (stream.tell()-start_position))
         return entry
         
     def get_parent_id(self):
-        return self.parent_id
+        return self.baseParam.directParentID
 
     def get_data(self):
         b = b"".join([source.get_data() for source in self.sources])
         t = b"".join([track.get_data() for track in self.track_info])
         clips = b"".join([clip.get_data() for clip in self.clip_automations])
-        payload = b + self.bit_flags.to_bytes(1, "little") + len(self.track_info).to_bytes(4, byteorder="little") + t + self.unk1 + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.unk2 + self.override_bus_id.to_bytes(4, byteorder="little") + self.parent_id.to_bytes(4, byteorder="little") + self.misc
+        payload = b + self.bit_flags.to_bytes(1, "little") + len(self.track_info).to_bytes(4, byteorder="little") + t + (self.unk1 if len(self.track_info) > 0 else b'') + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.baseParam.get_data() + self.misc
         self.size = 8 + len(payload)
         return struct.pack("<BIII", self.hierarchy_type, self.size, self.hierarchy_id, len(self.sources)) + payload
 
@@ -2193,7 +2195,7 @@ class WwiseHierarchy_154:
                 
     def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_154'):
         for entry in new_hierarchy.get_entries():
-            if isinstance(entry, (wwise_hierarchy_140.MusicSegment, wwise_hierarchy_140.MusicTrack, MusicSegment, MusicTrack)):
+            #if isinstance(entry, (wwise_hierarchy_140.MusicSegment, wwise_hierarchy_140.MusicTrack, MusicSegment, MusicTrack)):
                 if entry.hierarchy_id in self.entries:
                     self.entries[entry.hierarchy_id].import_entry(entry)
                 #else:
