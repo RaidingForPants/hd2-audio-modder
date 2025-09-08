@@ -282,6 +282,7 @@ class WwiseBank:
         self.modified_count: int = 0
         self.hierarchy: WwiseHierarchy_154 | None = None
         self.content: list[int] = []
+        self.media_index = None
         self.file_id: int = 0
         
     def import_hierarchy(self, new_hierarchy: WwiseHierarchy_154):
@@ -349,6 +350,10 @@ class WwiseBank:
         for entry in entries:
             for source in entry.sources:
                 if source.plugin_id == VORBIS:
+                    if self.media_index is None:
+                        continue
+                    if self.media_index and source.source_id not in self.media_index:
+                        continue
                     try:
                         audio = audio_sources[source.source_id]
                     except KeyError as _:
@@ -799,6 +804,10 @@ class GameArchive:
                 entry.hierarchy = hirc
                 #Add all bank sources to the source list
                 if "DIDX" in bank.chunks.keys():
+                    new_media_index = MediaIndex()
+                    new_media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
+                    new_media_index.data = {}
+                    entry.media_index = list(new_media_index.entries.keys())
                     media_index.load(bank.chunks["DIDX"], bank.chunks["DATA"])
                 
                 entry.bank_misc_data = b''
