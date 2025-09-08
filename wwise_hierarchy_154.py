@@ -224,7 +224,7 @@ class MusicRandomSequence(HircEntry):
 class MusicSegment(HircEntry):
     
     import_values = ["parent_id", "tracks", "duration", "entry_marker", "exit_marker", "markers"]
-    import_objects = ["base_params"]
+    import_objects = ["baseParam"]
 
     def __init__(self):
         super().__init__()
@@ -237,7 +237,7 @@ class MusicSegment(HircEntry):
         self.markers = []
         self.modified = False
         self.parent_id = 0
-        self.base_params: BaseParam = None
+        self.baseParam: BaseParam = None
     
     @classmethod
     def from_memory_stream(cls, stream: MemoryStream):
@@ -246,8 +246,8 @@ class MusicSegment(HircEntry):
         entry.size = stream.uint32_read()
         entry.hierarchy_id = stream.uint32_read()
         entry.bit_flags = stream.uint8_read()
-        entry.base_params = BaseParam.from_memory_stream(stream)
-        entry.parent_id = entry.base_params.directParentID
+        entry.baseParam = BaseParam.from_memory_stream(stream)
+        entry.parent_id = entry.baseParam.directParentID
         n = stream.uint32_read() #number of children (tracks)
         for _ in range(n):
             entry.tracks.append(stream.uint32_read())
@@ -275,7 +275,7 @@ class MusicSegment(HircEntry):
         return entry
 
     def get_parent_id(self):
-        return self.parent_id
+        return self.baseParam.directParentID
       
     def set_data(self, entry = None, **data):
         if self.soundbanks == []:
@@ -306,7 +306,7 @@ class MusicSegment(HircEntry):
         self.modified = True
         self.size = len(self.get_data()) - 5
         try:
-            self.parent = self.soundbanks[0].hierarchy.get_entry(self.parent_id)
+            self.parent = self.soundbanks[0].hierarchy.get_entry(self.get_parent_id())
             #potentially problematic, might need better way of getting the parent
         except:
             self.parent = None
@@ -315,7 +315,7 @@ class MusicSegment(HircEntry):
         return (
             b"".join([
                 struct.pack("<BIIB", self.hierarchy_type, self.size, self.hierarchy_id, self.bit_flags),
-                self.base_params.get_data(),
+                self.baseParam.get_data(),
                 len(self.tracks).to_bytes(4, byteorder="little"),
                 b"".join([x.to_bytes(4, byteorder="little") for x in self.tracks]),
                 self.unused_sections[0],
@@ -574,7 +574,7 @@ class MusicTrack(HircEntry):
         self.unk1 =  bytearray()
         self.unk2 =  bytearray()
         self.baseParam: BaseParam = None
-
+        
     def set_data(self, entry = None, **data):
         if self.soundbanks == []:
             raise AssertionError(
@@ -589,6 +589,9 @@ class MusicTrack(HircEntry):
                 bank.raise_modified()
         if entry:
             for value in self.import_values:
+                if isinstance(entry, wwise_hierarchy_140.MusicTrack):
+                    if value == "baseParam": # not compatible and versions that worked with 140 couldn't edit params anyway
+                        continue
                 try:
                     setattr(self, value, getattr(entry, value))
                 except AttributeError:
