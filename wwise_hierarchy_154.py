@@ -570,6 +570,7 @@ class MusicTrack(HircEntry):
         self.clip_automations = []
         self.sources: list[BankSourceStruct] = []
         self.track_info: list[TrackInfoStruct] = []
+        self.track_type = 0
         self.parent_id = 0
         self.unk1 =  bytearray()
         self.unk2 =  bytearray()
@@ -640,9 +641,7 @@ class MusicTrack(HircEntry):
         for _ in range(num_clip_automations):
             entry.clip_automations.append(ClipAutomationStruct.from_memory_stream(stream))
         entry.baseParam = BaseParam.from_memory_stream(stream)
-        #entry.unk2 = stream.read(4)
-        #entry.override_bus_id = stream.uint32_read()
-        #entry.parent_id = stream.uint32_read()
+        entry.track_type = stream.uint8_read() # 0: normal, 1: random, 2: sequence, 3: switched
         entry.misc = stream.read(entry.size - (stream.tell()-start_position))
         return entry
         
@@ -653,7 +652,7 @@ class MusicTrack(HircEntry):
         b = b"".join([source.get_data() for source in self.sources])
         t = b"".join([track.get_data() for track in self.track_info])
         clips = b"".join([clip.get_data() for clip in self.clip_automations])
-        payload = b + self.bit_flags.to_bytes(1, "little") + len(self.track_info).to_bytes(4, byteorder="little") + t + (self.unk1 if len(self.track_info) > 0 else b'') + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.baseParam.get_data() + self.misc
+        payload = b + self.bit_flags.to_bytes(1, "little") + len(self.track_info).to_bytes(4, byteorder="little") + t + (self.unk1 if len(self.track_info) > 0 else b'') + len(self.clip_automations).to_bytes(4, byteorder="little") + clips + self.baseParam.get_data() + self.track_type.to_bytes(1, "little") + self.misc
         self.size = 8 + len(payload)
         return struct.pack("<BIII", self.hierarchy_type, self.size, self.hierarchy_id, len(self.sources)) + payload
 

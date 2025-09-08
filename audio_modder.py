@@ -925,9 +925,9 @@ class AudioSourceWindow:
                 self.add_gain_button.pack(anchor="w", pady=5)
         self.play_button.configure(command=partial(self.play, self.audio.get_short_id()))
         self.play_original_button.configure(command=partial(self.play, -self.audio.get_short_id()))
-        self.parent_text_box.pack(side="bottom", pady=5)
+        self.parent_text_box.pack(side="bottom", pady=5, anchor="w")
         self.revert_button.pack(side="left")
-        self.play_button.pack(side="left")
+        self.play_button.pack(side="left", padx=2)
         self.apply_button.pack(side="left")
 
         if self.audio.modified and self.audio.data_old != b"":
@@ -1012,7 +1012,7 @@ class SequenceContainerWindow:
         self.random_checkbox.pack(anchor="w")
 
         self.random_value.set(self.playlistSettings.eMode == 1)
-        if 0x05 in self.props.pIDs:  # makeup gain is ID 6
+        if 0x05 in self.props.pIDs:  # makeup gain is ID 5
             self.gain_prop_var.set(float(struct.unpack("<f", self.props.pValues[self.props.pIDs.index(0x05)])[0]))
             self.gain_label.pack(anchor="w")
             self.gain_prop_entry.pack(anchor="w", pady=5)
