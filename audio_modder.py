@@ -1011,7 +1011,7 @@ class SequenceContainerWindow:
 
         self.random_checkbox.pack()
 
-        self.random_value.set(self.playlistSettings.eRandomMode == 1)
+        self.random_value.set(self.playlistSettings.eMode == 1)
         if 0x05 in self.props.pIDs:  # makeup gain is ID 6
             self.gain_prop_var.set(float(struct.unpack("<f", self.props.pValues[self.props.pIDs.index(0x05)])[0]))
             self.gain_label.pack()
@@ -1036,9 +1036,9 @@ class SequenceContainerWindow:
             self.props.set_prop_value_float_by_pid(0x05, self.gain_prop_var.get())
         playlistSettings = copy.deepcopy(self.playlistSettings)
         if self.random_value.get():
-            playlistSettings.eRandomMode = 1
+            playlistSettings.eMode = 1
         else:
-            playlistSettings.eRandomMode = 0
+            playlistSettings.eMode = 0
         self.container.set_data(baseParam=self.baseParam, playListSetting=playlistSettings)
         self.update_modified([self.container])
 

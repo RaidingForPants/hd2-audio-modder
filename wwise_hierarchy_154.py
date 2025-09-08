@@ -2198,6 +2198,7 @@ class WwiseHierarchy_154:
                 
     def import_hierarchy(self, new_hierarchy: 'WwiseHierarchy_154'):
         for entry in new_hierarchy.get_entries():
+            if not isinstance(entry, (Action, wwise_hierarchy_140.Action)):
             #if isinstance(entry, (wwise_hierarchy_140.MusicSegment, wwise_hierarchy_140.MusicTrack, MusicSegment, MusicTrack)):
                 if entry.hierarchy_id in self.entries:
                     self.entries[entry.hierarchy_id].import_entry(entry)
