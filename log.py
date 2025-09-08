@@ -12,7 +12,10 @@ default_formatter = logging.Formatter(
 )
 
 default_file_handler = logging.handlers.RotatingFileHandler("log.txt", backupCount=2)
-default_file_handler.doRollover()
+try:
+    default_file_handler.doRollover()
+except:
+    pass
 default_file_handler.setLevel(logging.INFO)
 default_file_handler.setFormatter(default_formatter)
 
