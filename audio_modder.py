@@ -1352,6 +1352,9 @@ class ArchiveSearch(ttk.Entry):
 
     def on_return(self, _: tkinter.Event):
         if self.error_check() != 0:
+            value = self.get()
+            if self.on_select_cb:
+                self.on_select_cb(value)
             return
         curr_select = self.cmp_list.curselection()
         value = self.cmp_list.get(curr_select[0])
@@ -2676,6 +2679,8 @@ class MainWindow:
                     autocomplete.", stack_info=True)
             return
         archive_file = os.path.join(self.app_state.game_data_path, splits[1])
+        if not os.path.exists(archive_file):
+            return
         self.load_archive(initialdir="", archive_file=archive_file)
 
     def on_category_search_bar_select(self, event):
