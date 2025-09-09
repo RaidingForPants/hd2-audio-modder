@@ -3280,26 +3280,27 @@ class MainWindow:
             self.unsaved_changes = True
         if item is None:
             if isinstance(entry, AudioSource):
-                i = self.treeview.tag_has(entry.get_short_id())
-                if len(i) == 0:
+                items = self.treeview.tag_has(entry.get_short_id())
+                if len(items) == 0:
                     return
-                i = i[0]
+                #i = i[0]
             else:
-                i = self.treeview.tag_has(entry.get_id())
-                if len(i) == 0:
+                items = self.treeview.tag_has(entry.get_id())
+                if len(items) == 0:
                     return
-                i = i[0]
+                #i = i[0]
         else:
-            i = item
-        tags = self.treeview.item(i, option="tags")
-        if modified:
-            if "modified" not in tags:
-                tags = tags + ("modified",)
-        else:
-            if "modified" in tags:
-                tags = list(tags)
-                tags.remove("modified")
-        self.treeview.item(i, tags=tags)
+            items = [item]
+        for i in items:
+            tags = self.treeview.item(i, option="tags")
+            if modified:
+                if "modified" not in tags:
+                    tags = tags + ("modified",)
+            else:
+                if "modified" in tags:
+                    tags = list(tags)
+                    tags.remove("modified")
+            self.treeview.item(i, tags=tags)
         
     def get_all_treeview_items(self, tree, item=""):
         children = tree.get_children(item)
