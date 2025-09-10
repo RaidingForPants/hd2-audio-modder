@@ -56,7 +56,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.18.6"
+VERSION = "1.18.7"
 
 def resource_path(relative_path):
     try:
@@ -3288,6 +3288,8 @@ class MainWindow:
                 items = self.treeview.tag_has(entry.get_id())
                 if len(items) == 0:
                     return
+                if isinstance(entry, TextBank):
+                    items = [items[0]]
                 #i = i[0]
         else:
             items = [item]
