@@ -823,6 +823,7 @@ class AudioSourceWindow:
     
     def __init__(self, parent, play, update_modified):
         self.frame = Frame(parent)
+        self.button_frame = Frame(self.frame)
         self.update_modified = update_modified
         self.parent_base_params = []
         self.fake_image = tkinter.PhotoImage(width=1, height=1)
@@ -830,10 +831,10 @@ class AudioSourceWindow:
         self.track_info = None
         self.audio = None
         self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), width=50, anchor="center")
-        self.revert_button = ttk.Button(self.frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
-        self.play_button = ttk.Button(self.frame, text= '\u23f5', image=self.fake_image, compound='c', width=2)
-        self.play_original_button = ttk.Button(self.frame, text= '\u23f5', width=2)
-        self.play_original_label = ttk.Label(self.frame, font=('Segoe UI', 12), text="Play Original Audio")
+        self.revert_button = ttk.Button(self.button_frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
+        self.play_button = ttk.Button(self.button_frame, text= '\u23f5', image=self.fake_image, compound='c', width=2)
+        self.play_original_button = ttk.Button(self.button_frame, text= '\u23f5', width=2)
+        self.play_original_label = ttk.Label(self.button_frame, font=('Segoe UI', 12), text="Play Original Audio")
         self.play_at_text_var = tkinter.StringVar(self.frame)
         self.duration_text_var = tkinter.StringVar(self.frame)
         self.start_offset_text_var = tkinter.StringVar(self.frame)
@@ -866,7 +867,7 @@ class AudioSourceWindow:
                                       anchor="center")
         self.end_offset_text = ttk.Entry(self.frame, textvariable=self.end_offset_text_var, font=('Segoe UI', 12), width=54)
 
-        self.apply_button = ttk.Button(self.frame, text="Apply", command=self.apply_changes)
+        self.apply_button = ttk.Button(self.button_frame, text="Apply", command=self.apply_changes)
         
         self.title_label.pack(pady=5)
 
@@ -906,6 +907,7 @@ class AudioSourceWindow:
         self.reload_widgets()
 
     def reload_widgets(self):
+        self.button_frame.pack_forget()
         self.revert_button.pack_forget()
         self.play_button.pack_forget()
         self.apply_button.pack_forget()
@@ -925,14 +927,16 @@ class AudioSourceWindow:
                 self.add_gain_button.pack(anchor="w", pady=5)
         self.play_button.configure(command=partial(self.play, self.audio.get_short_id()))
         self.play_original_button.configure(command=partial(self.play, -self.audio.get_short_id()))
-        self.parent_text_box.pack(side="bottom", pady=5, anchor="w")
         self.revert_button.pack(side="left")
         self.play_button.pack(side="left", padx=2)
         self.apply_button.pack(side="left")
+        self.button_frame.pack(anchor="w", fill="x")
+        
+        self.parent_text_box.pack(pady=5)
 
         if self.audio.modified and self.audio.data_old != b"":
-            self.play_original_label.pack(side="right")
-            self.play_original_button.pack(side="right")
+            self.play_original_button.pack(side="right", anchor="e")
+            self.play_original_label.pack(side="right", anchor="e")
             
     def revert(self):
         self.audio.revert_modifications()
