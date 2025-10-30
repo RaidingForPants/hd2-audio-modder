@@ -874,7 +874,7 @@ class AudioSourceWindow:
         self.parent_text_box = Text(self.frame, font=('Segoe UI', 12), highlightthickness=0, borderwidth=0)
         self.parent_text_box.configure(state="disabled")
         self.parent_text_box.bind("<1>", lambda event: self.parent_text_box.focus_set())
-        self.parent_text_box.pack(pady=5, side="bottom")
+        self.parent_text_box.pack(pady=5, side="bottom", anchor="w")
         self.gain_prop_var = tk.DoubleVar()
         self.gain_prop_entry = ttk.Entry(self.frame, textvariable=self.gain_prop_var, font=('Segoe UI', 12), width=20)
         self.add_gain_button = ttk.Button(self.frame, text="Add Make Up Gain", command=self.add_gain)

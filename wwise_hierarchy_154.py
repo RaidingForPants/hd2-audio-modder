@@ -1825,10 +1825,10 @@ class RandomSequenceContainer(HircEntry):
     """
     import_values = [
         "baseParam",
-        "children",
+        #"children",
         "playListSetting",
-        "ulPlayListItem",
-        "playListItems",
+        #"ulPlayListItem",
+        #"playListItems",
     ]
     def __init__(self):
         super().__init__()

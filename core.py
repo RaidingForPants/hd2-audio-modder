@@ -1703,6 +1703,37 @@ class Mod:
         return True
         
     def import_wwise_hierarchy(self, soundbank_id: int, new_hierarchy: WwiseHierarchy_154):
+        # check if 9ba626afa44a3aa3 is loaded (maybe music_init, too?)
+        unload_boot_package = "9ba626afa44a3aa3" not in self.get_game_archives().keys()
+        self.load_archive_file("F:\\SteamLibrary\\steamapps\\common\\Helldivers 2\\data\\9ba626afa44a3aa3")
+        for entry_id, entry in new_hierarchy.entries.items():
+            if self.get_hierarchy_entries().get(entry_id, None) is None: continue
+            # maybe check children/playlist items to try and auto remap them?
+            # check parent and bus IDs:
+            baseParam = getattr(entry, "baseParam", None)
+            if baseParam:
+                #print(baseParam.directParentID)
+                if baseParam.directParentID != 0 and self.get_hierarchy_entries().get(baseParam.directParentID, None) is None:
+                    try:
+                        baseParam.directParentID = self.get_wwise_bank(soundbank_id).hierarchy.entries[entry_id].baseParam.directParentID
+                        logger.info(f"Corrected error in `directParentID` of wwise object id {entry_id}, type {type(entry).__name__}")
+                    except:
+                        logger.error(f"Unable to correct error in `directParentID` of wwise object id {entry_id}, type {type(entry).__name__}")
+                if baseParam.overrideBusId != 0 and self.get_hierarchy_entries().get(baseParam.overrideBusId, None) is None:
+                    try:
+                        baseParam.overrideBusId = self.get_wwise_bank(soundbank_id).hierarchy.entries[entry_id].baseParam.overrideBusId
+                        logger.info(f"Corrected error in `overrideBusID` of wwise object id {entry_id}, type {type(entry).__name__}")
+                    except:
+                        logger.error(f"Unable to correct error in `overrideBusID` of wwise object id {entry_id}, type {type(entry).__name__}")
+                auxParams = baseParam.auxParams
+                if auxParams.reflectionAuxBus != 0 and self.get_hierarchy_entries().get(auxParams.reflectionAuxBus, None) is None:
+                    try:
+                        auxParams.reflectionAuxBus = self.get_wwise_bank(soundbank_id).hierarchy.entries[entry_id].auxParams.reflectionAuxBus
+                        logger.info(f"Corrected error in `reflectionAuxBus` of wwise object id {entry_id}, type {type(entry).__name__}")
+                    except:
+                        logger.error(f"Unable to correct error in `reflectionAuxBus` of wwise object id {entry_id}, type {type(entry).__name__}")
+        if unload_boot_package:
+            self.remove_game_archive("9ba626afa44a3aa3")
         self.get_wwise_bank(soundbank_id).import_hierarchy(new_hierarchy)
         
     def generate_hierarchy_id(self, soundbank_id: int) -> int:
@@ -1983,7 +2014,8 @@ class Mod:
                         f"WwiseBank {bank.file_id} has no WwiseHierarchy"
                     )
                 try:
-                    self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
+                    self.import_wwise_hierarchy(bank.get_id(), bank.hierarchy)
+                    #self.get_wwise_banks()[bank.get_id()].import_hierarchy(bank.hierarchy)
                 except Exception as e:
                     logger.error(e)
                     logger.error(f"Unable to import heirarchy information for {bank.dep.data}")
