@@ -1950,6 +1950,14 @@ class Mod:
                 len_ms = num_samples * 1000 / sample_rate
                 for item in old_audio.parents:
                     if isinstance(item, (wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack)):
+                        pass
+                        # issue when designing a music mod that uses the original track/segment data: it skips importing
+                        # and sets the data to the default length for the audio
+                        # is it actually necessary to set duration here? isn't that what import_hierarchy is for?
+                        # I guess this does something if the MusicSegment/MusicTrack IDs have changed since the patch
+                        # was made? But it would still be wrong data anyway if the user set custom timings, so if it's
+                        # wrong either way, is there a point?
+                        '''
                         if item.parent == None:
                             continue
                         item.parent.set_data(
@@ -1966,6 +1974,7 @@ class Mod:
                                 t.play_at = 0
                                 break
                         item.set_data(track_info=tracks)
+                        '''
 
         if import_hierarchy:
             for bank in patch_game_archive.get_wwise_banks().values():
