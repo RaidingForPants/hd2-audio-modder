@@ -23,6 +23,7 @@ import wwise_hierarchy_140
 import wwise_hierarchy_154
 from wwise_hierarchy_154 import WwiseHierarchy_154
 from wwise_hierarchy_140 import WwiseHierarchy_140
+from slim import load_package
 
 from log import logger
 
@@ -43,9 +44,8 @@ class VideoSource:
 
     def get_data(self):
         if not self.modified:
-            with open(self.filepath+".stream", "rb") as f:
-                f.seek(self.stream_offset)
-                return f.read(self.video_size)
+            _, _, stream_data = load_package(os.path.basename(self.filepath), os.path.dirname(self.filepath))
+            return stream_data[self.stream_offset:self.stream_offset+self.video_size]
         else:
             with open(self.replacement_filepath, "rb") as f:
                 f.seek(self.replacement_video_offset)
@@ -569,14 +569,10 @@ class GameArchive:
         archive = GameArchive()
         archive.name = os.path.basename(path)
         archive.path = path
-        toc_file = MemoryStream()
-        with open(path, 'r+b') as f:
-            toc_file = MemoryStream(f.read())
-
-        stream_file = MemoryStream()
-        if os.path.isfile(path+".stream"):
-            with open(path+".stream", 'r+b') as f:
-                stream_file = MemoryStream(f.read())
+        
+        toc_data, _, stream_data = load_package(os.path.basename(path), os.path.dirname(path))
+        toc_file = MemoryStream(toc_data)
+        stream_file = MemoryStream(stream_data)
         archive.load(toc_file, stream_file)
         return archive
         

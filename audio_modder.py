@@ -56,7 +56,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.18.7"
+VERSION = "1.19.0"
 
 def resource_path(relative_path):
     try:
