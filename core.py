@@ -571,6 +571,8 @@ class GameArchive:
         archive.path = path
         
         toc_data, _, stream_data = load_package(os.path.basename(path), os.path.dirname(path))
+        if not toc_data:
+            return None
         toc_file = MemoryStream(toc_data)
         stream_file = MemoryStream(stream_data)
         archive.load(toc_file, stream_file)
@@ -1682,6 +1684,9 @@ class Mod:
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]
         new_archive = GameArchive.from_file(archive_file)
+        
+        if not new_archive:
+            return False
         
         key = new_archive.name
         if key in self.game_archives.keys():
