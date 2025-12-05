@@ -51,12 +51,12 @@ from env import *
 import env
 from const import *
 from graph import *
-
+from slim import slim_init
 from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.19.0"
+VERSION = "1.19.1"
 
 def resource_path(relative_path):
     try:
@@ -3683,6 +3683,8 @@ if __name__ == "__main__":
             os.rename("audio_modder_temp", "audio_modder")
     except:
         pass
+        
+    slim_init(app_state.game_data_path)
         
     language = language_lookup("English (US)")
     window = MainWindow(app_state, lookup_store)
