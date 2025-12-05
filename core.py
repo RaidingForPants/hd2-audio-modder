@@ -1678,13 +1678,6 @@ class Mod:
         return self.text_banks
         
     def load_archive_file(self, archive_file: str = ""):
-        """
-        @exception
-        - OSError
-            - archive file does not exist
-        """
-        if not archive_file or not os.path.exists(archive_file) or not os.path.isfile(archive_file):
-            raise OSError("Invalid path!")
 
         if os.path.splitext(archive_file)[1] in (".stream", ".gpu_resources"):
             archive_file = os.path.splitext(archive_file)[0]

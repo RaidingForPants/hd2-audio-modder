@@ -2683,8 +2683,6 @@ class MainWindow:
                     autocomplete.", stack_info=True)
             return
         archive_file = os.path.join(self.app_state.game_data_path, splits[1])
-        if not os.path.exists(archive_file):
-            return
         self.load_archive(initialdir="", archive_file=archive_file)
 
     def on_category_search_bar_select(self, event):

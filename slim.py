@@ -185,7 +185,7 @@ def get_resources_from_bundle(bundle_path: str, start_offset: int, size: int):
 
     
 def load_package(package_name: str, game_data_folder: str, toc_only = False):
-    
+
     if not package_contents:
         init_bundle_mapping(game_data_folder)
     
