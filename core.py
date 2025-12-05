@@ -44,7 +44,7 @@ class VideoSource:
 
     def get_data(self):
         if not self.modified:
-            _, _, stream_data = load_package(os.path.basename(self.filepath), os.path.dirname(self.filepath))
+            _, _, stream_data = load_package(self.filepath)
             return stream_data[self.stream_offset:self.stream_offset+self.video_size]
         else:
             with open(self.replacement_filepath, "rb") as f:
@@ -570,7 +570,7 @@ class GameArchive:
         archive.name = os.path.basename(path)
         archive.path = path
         
-        toc_data, _, stream_data = load_package(os.path.basename(path), os.path.dirname(path))
+        toc_data, _, stream_data = load_package(path)
         if not toc_data:
             return None
         toc_file = MemoryStream(toc_data)
