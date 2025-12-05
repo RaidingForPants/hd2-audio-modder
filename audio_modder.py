@@ -1192,7 +1192,7 @@ Currently it's only used specifically for search archive.
 """
 class ArchiveSearch(ttk.Entry):
 
-    ignore_keys: list[str] = ["Up", "Down", "Left", "Right", "Escape", "Return"]
+    ignore_keys: list[str] = ["Up", "Down", "Left", "Right", "Escape", "Return", "Control_L", "Control_R", "Shift_L", "Shift_R", "Alt_L", "Alt_R"]
 
     def __init__(self, 
                  fmt: str,
@@ -1210,7 +1210,7 @@ class ArchiveSearch(ttk.Entry):
         self.cmp_list: tkinter.Listbox | None = None
         self.cmp_scrollbar: ttk.Scrollbar | None = None
 
-        self.bind("<Key>", self.on_key_release)
+        self.bind("<KeyRelease>", self.on_key_release)
         self.bind("<FocusOut>", self.on_focus_out)
         self.bind("<Return>", self.on_return)
         self.bind("<Escape>", self.destroy_cmp)
@@ -2678,11 +2678,7 @@ class MainWindow:
 
     def on_archive_search_bar_return(self, value: str):
         splits = value.split(" || ")
-        if len(splits) != 2:
-            logger.critical("Something went wrong with the archive search \
-                    autocomplete.", stack_info=True)
-            return
-        archive_file = os.path.join(self.app_state.game_data_path, splits[1])
+        archive_file = os.path.join(self.app_state.game_data_path, splits[-1])
         self.load_archive(initialdir="", archive_file=archive_file)
 
     def on_category_search_bar_select(self, event):

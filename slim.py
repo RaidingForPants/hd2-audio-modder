@@ -247,7 +247,10 @@ def reconstruct_package_from_bundles(package_name: str, game_data_folder: str):
     
     global package_contents
     
-    package = package_contents[package_name]
+    try:
+        package = package_contents[package_name]
+    except KeyError:
+        return bytearray()
     
     package_data = bytearray(package.size)
     size = 0
