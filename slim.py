@@ -144,6 +144,7 @@ def init_bundle_mapping():
     bundles = [[] for _ in range(num_bundles)]
 
     global package_contents
+    package_contents = {}
 
     # check name of each package to find the right one
     for n in range(num_packages):
