@@ -721,6 +721,8 @@ class GameArchive:
         stream_file.write(b"".join(stream_data))
 
         with open(os.path.join(path, self.name), 'w+b') as f:
+            min_size = len(toc_entries) * 256
+            if len(toc_file.data) < min_size: toc_file.write(bytearray(min_size-len(toc_file.data)))
             f.write(toc_file.data)
             
         if len(stream_file.data) > 0:

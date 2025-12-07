@@ -56,7 +56,7 @@ from log import logger
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.19.1"
+VERSION = "1.19.2"
 
 def resource_path(relative_path):
     try:
@@ -1728,7 +1728,7 @@ class MainWindow:
         self.search_text_var = tkinter.StringVar(self.root)
         self.search_bar = ttk.Entry(self.top_bar, textvariable=self.search_text_var, font=('Segoe UI', 14))
         self.top_bar.pack(side="top", fill='x')
-        if lookup_store != None and os.path.exists(GAME_FILE_LOCATION):
+        if os.path.exists(GAME_FILE_LOCATION):
             self.init_archive_search_bar()
 
         self.up_button = ttk.Button(self.top_bar, text='\u25b2',
@@ -2652,10 +2652,9 @@ class MainWindow:
 
     def init_archive_search_bar(self):
         if self.name_lookup == None:
-            logger.critical("Audio archive database connection is None after \
-                    bypassing all check.", stack_info=True)
-            return
-        soundbanks = self.name_lookup.query_soundbanks()
+            soundbanks = []
+        else:
+            soundbanks = self.name_lookup.query_soundbanks()
         entries: dict[str, LookupResult] = {
                 bank.id: bank
                 for bank in soundbanks}
@@ -2683,12 +2682,11 @@ class MainWindow:
 
     def on_category_search_bar_select(self, event):
         if self.name_lookup == None:
-            logger.critical("Audio archive database connection is None after \
-                    bypassing all check.", stack_info=True)
-            return
-        category: str = self.category_search.get()
-        self.archive_search.language = category
-        soundbanks = self.name_lookup.query_soundbanks(language=category)
+            soundbanks = []
+        else:
+            category: str = self.category_search.get()
+            self.archive_search.language = category
+            soundbanks = self.name_lookup.query_soundbanks(language=category)
         entries: dict[str, LookupResult] = {
                 bank.id: bank
                 for bank in soundbanks}
