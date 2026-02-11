@@ -830,6 +830,8 @@ class AudioSourceWindow:
         self.play = play
         self.track_info = None
         self.audio = None
+        self.gain_index = -1
+        self.gain_val = 0
         self.title_label = ttk.Label(self.frame, font=('Segoe UI', 14), width=50, anchor="center")
         self.revert_button = ttk.Button(self.button_frame, text='\u21b6', image=self.fake_image, compound='c', width=2, command=self.revert)
         self.play_button = ttk.Button(self.button_frame, text= '\u23f5', image=self.fake_image, compound='c', width=2)
@@ -881,8 +883,8 @@ class AudioSourceWindow:
         self.gain_label = ttk.Label(self.frame, text="Make Up Gain (db)", font=('Segoe UI', 12))
 
     def add_gain(self):
-        if len(self.parent_base_params) > 0:
-            for base_param in self.parent_base_params:
+        for base_param in self.parent_base_params:
+            if 0x05 not in base_param.propBundle.pIDs:
                 base_param.propBundle.add_prop_value_float(0x05, 0)
         self.reload_widgets()
         
@@ -900,7 +902,7 @@ class AudioSourceWindow:
         if self.audio.stream_type != BANK:
             self.parent_text_box.insert(tk.END, "Wwise Short ID: \n" + f"{self.audio.get_short_id()}")
         self.parent_text_box.configure(state="disabled")
-
+        self.gain_index = -1
 
         self.title_label.configure(text=f"Info for {audio.get_id()}.wem")
         self.play_button.configure(text= '\u23f5')
@@ -917,14 +919,20 @@ class AudioSourceWindow:
         self.gain_prop_entry.pack_forget()
         self.add_gain_button.pack_forget()
         self.parent_text_box.pack_forget()
-        if len(self.parent_base_params) > 0:
-            props = self.parent_base_params[0].propBundle
+        gain_found = False
+        for i, parent_base_param in enumerate(self.parent_base_params):
+            props = parent_base_param.propBundle
             if 0x05 in props.pIDs:  # makeup gain is ID 5
+                gain_found = True
+                if self.gain_index == -1:
+                    self.gain_index = i
+                    self.gain_val = float(struct.unpack("<f", props.pValues[props.pIDs.index(0x05)])[0])
                 self.gain_prop_var.set(float(struct.unpack("<f", props.pValues[props.pIDs.index(0x05)])[0]))
                 self.gain_label.pack(anchor="w")
                 self.gain_prop_entry.pack(anchor="w", pady=5)
-            else:
-                self.add_gain_button.pack(anchor="w", pady=5)
+                break
+        if not gain_found:
+            self.add_gain_button.pack(anchor="w", pady=5)
         self.play_button.configure(command=partial(self.play, self.audio.get_short_id()))
         self.play_original_button.configure(command=partial(self.play, -self.audio.get_short_id()))
         self.revert_button.pack(side="left")
@@ -954,17 +962,16 @@ class AudioSourceWindow:
             self.start_offset_text.insert(END, f"{self.track_info.begin_trim_offset}")
             self.end_offset_text.insert(END, f"{self.track_info.end_trim_offset}")
         self.update_modified([self.audio])
+        self.gain_index = -1
         self.reload_widgets()
         self.set_audio(self.audio)
         
     def apply_changes(self):
         if self.track_info is not None:
             self.track_info.set_data(play_at=float(self.play_at_text_var.get()), begin_trim_offset=float(self.start_offset_text_var.get()), end_trim_offset=float(self.end_offset_text_var.get()), source_duration=float(self.duration_text_var.get()))
-        if len(self.parent_base_params) > 0:
-            props = self.parent_base_params[0].propBundle
-            if 0x05 in props.pIDs:  # makeup gain is ID 6
-                for base_param in self.parent_base_params:
-                    base_param.propBundle.set_prop_value_float_by_pid(0x05, self.gain_prop_var.get())
+        for base_param in self.parent_base_params:
+            if 0x05 in base_param.propBundle.pIDs:
+                base_param.propBundle.set_prop_value_float_by_pid(0x05, float(struct.unpack("<f", base_param.propBundle.pValues[base_param.propBundle.pIDs.index(0x05)])[0]) + (self.gain_prop_var.get() - self.gain_val))
         parents = [p for p in self.audio.parents if isinstance(p, (wwise_hierarchy_154.Sound, wwise_hierarchy_140.Sound, wwise_hierarchy_140.MusicTrack, wwise_hierarchy_154.MusicTrack))]
         if len(parents) > 0:
             for i, parent in enumerate(parents):
