@@ -537,7 +537,8 @@ class OptionsWindow:
         self.config.ui_scale = self.treeview_text_scale_var.get()
         self.config.game_data_path = self.game_data_path.cget("text")
         self.config.rad_tools_path = self.rad_tools_path.cget("text")
-        self.config.wwise_path = self.wwise_path.cget("text")
+        if os.path.exists(self.wwise_path.cget("text")) and os.path.isfile(self.wwise_path.cget("text")):
+            self.config.wwise_path = self.wwise_path.cget("text")
         self.config.theme = self.theme_var.get()
         wwise_setup(self.config)
         
@@ -3515,15 +3516,20 @@ def wwise_setup(app_state, show_warnings=False):
                     message="Wwise installation not found. The only file type available for import is WEM.")
 
     if os.path.exists(app_state.wwise_path) and not os.path.exists(DEFAULT_WWISE_PROJECT):
-        process = subprocess.run([
-            app_state.wwise_path,
-            "create-new-project",
-            DEFAULT_WWISE_PROJECT,
-            "--platform",
-            "Windows",
-            "--quiet",
-        ])
-        if process.returncode != 0:
+        try:
+            process = subprocess.run([
+                app_state.wwise_path,
+                "create-new-project",
+                DEFAULT_WWISE_PROJECT,
+                "--platform",
+                "Windows",
+                "--quiet",
+            ])
+            if process.returncode != 0:
+                logger.error("Error creating Wwise project. Audio import restricted to .wem files only")
+                showwarning(title="Wwise Error",
+                            message="Error creating Wwise project. Audio import restricted to .wem files only")
+        except:
             logger.error("Error creating Wwise project. Audio import restricted to .wem files only")
             showwarning(title="Wwise Error",
                         message="Error creating Wwise project. Audio import restricted to .wem files only")
@@ -3688,8 +3694,11 @@ if __name__ == "__main__":
             os.rename("audio_modder_temp", "audio_modder")
     except:
         pass
-        
-    slim_init(app_state.game_data_path)
+    
+    try:
+        slim_init(app_state.game_data_path)
+    except FileNotFoundError:
+        logger.warning("Unable to initialize slim decompression module; game data path may be invalid")
         
     language = language_lookup("English (US)")
     window = MainWindow(app_state, lookup_store)
