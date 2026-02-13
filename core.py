@@ -10,6 +10,7 @@ import random
 import xml.etree.ElementTree as etree
 import posixpath as xpath
 import asyncio
+import json #added by pito
 
 from typing import Callable, Literal, Union
 
@@ -460,6 +461,39 @@ class StringEntry:
                 self.parent.lower_modified()
         
 class TextBank:
+    
+    #added by pito
+    def to_json_obj(self) -> dict:
+        return {
+        "file_id": self.get_id(),
+        "language": self.get_language(),
+        "entries": {str(sid): entry.get_text() for sid, entry in self.entries.items()},
+    }
+
+    def export_json(self, out_path: str):
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(self.to_json_obj(), f, ensure_ascii=False, indent=2)
+
+    def import_json(self, json_path: str) -> int:
+        with open(json_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        # allow either {"entries": {...}} or just {...}
+        entries = payload.get("entries", payload)
+
+        replaced = 0
+        for k, new_text in entries.items():
+            try:
+                sid = int(k)
+            except Exception:
+                continue
+
+            if sid in self.entries and new_text != self.entries[sid].get_text():
+                self.entries[sid].set_text(new_text)
+                replaced += 1
+
+        return replaced
+    #end of pito update
     
     def __init__(self):
         self.file_id = 0
@@ -1248,7 +1282,52 @@ class Mod:
         self.hierarchy_count: dict[int, int] = {}
         self.game_archives: dict[str, GameArchive] = {}
         self.name: str = name
-        
+    
+    #updated by pito
+    def export_all_textbanks_json(self, out_dir: str) -> tuple[str, int]:
+        os.makedirs(out_dir, exist_ok=True)
+        count = 0
+
+        for tb_id, tb in self.text_banks.items():
+            out_file = os.path.join(out_dir, f"{tb_id}.json")
+            tb.export_json(out_file)
+            count += 1
+
+        return out_dir, count
+
+    def import_all_textbanks_json(self, in_dir: str) -> tuple[int, int, int]:
+        """
+        Returns: (banks_processed, total_replaced, missing_banks)
+        """
+        banks_processed = 0
+        total_replaced = 0
+        missing_banks = 0
+
+        for name in os.listdir(in_dir):
+            if not name.lower().endswith(".json"):
+                continue
+
+            path = os.path.join(in_dir, name)
+
+            # filename style: 123456.json
+            base = os.path.splitext(name)[0]
+            try:
+                tb_id = int(base)
+            except:
+                continue
+
+            if tb_id not in self.text_banks:
+                missing_banks += 1
+                continue
+
+            tb = self.text_banks[tb_id]
+            replaced, _missing = tb.import_json(path)
+            total_replaced += replaced
+            banks_processed += 1
+
+        return banks_processed, total_replaced, missing_banks
+    #end updated by pito
+
     def revert_all(self):
         for audio in self.audio_sources.values():
             audio.revert_modifications()
