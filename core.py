@@ -1701,7 +1701,7 @@ class Mod:
     def import_wwise_hierarchy(self, soundbank_id: int, new_hierarchy: WwiseHierarchy_154):
         # check if 9ba626afa44a3aa3 is loaded (maybe music_init, too?)
         unload_boot_package = "9ba626afa44a3aa3" not in self.get_game_archives().keys()
-        self.load_archive_file("F:\\SteamLibrary\\steamapps\\common\\Helldivers 2\\data\\9ba626afa44a3aa3")
+        self.load_archive_file("9ba626afa44a3aa3")
         for entry_id, entry in new_hierarchy.entries.items():
             if self.get_hierarchy_entries().get(entry_id, None) is None: continue
             # maybe check children/playlist items to try and auto remap them?
@@ -1729,7 +1729,10 @@ class Mod:
                     except:
                         logger.error(f"Unable to correct error in `reflectionAuxBus` of wwise object id {entry_id}, type {type(entry).__name__}")
         if unload_boot_package:
-            self.remove_game_archive("9ba626afa44a3aa3")
+            try:
+                self.remove_game_archive("9ba626afa44a3aa3")
+            except AssertionError:
+                pass
         self.get_wwise_bank(soundbank_id).import_hierarchy(new_hierarchy)
         
     def generate_hierarchy_id(self, soundbank_id: int) -> int:
