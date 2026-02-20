@@ -3138,10 +3138,10 @@ class MainWindow:
     def recursive_match(self, search_text_var, item):
         if self.treeview.item(item, option="values")[0] == "String":
             string_entry = self.mod_handler.get_active_mod().get_string_entry(textbank_id=int(self.treeview.item(item, option="tags")[1]), entry_id=int(self.treeview.item(item, option="tags")[0]))
-            match = search_text_var in string_entry.get_text()
+            match = search_text_var in string_entry.get_text().lower()
         else:
             s = self.treeview.item(item, option="text")
-            match = s.startswith(search_text_var) or s.endswith(search_text_var)
+            match = s.lower().startswith(search_text_var) or s.lower().endswith(search_text_var)
         children = self.treeview.get_children(item)
         if match: self.search_results.append(item)
         if len(children) > 0:
@@ -3151,7 +3151,7 @@ class MainWindow:
     def search(self):
         self.search_results.clear()
         self.search_result_index = 0
-        text = self.search_text_var.get()
+        text = self.search_text_var.get().lower()
         if text != "":
             for child in self.treeview.get_children():
                 self.recursive_match(text, child)
