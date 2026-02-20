@@ -54,6 +54,8 @@ from graph import *
 from slim import slim_init
 from log import logger
 
+import sys #added by pito
+
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
 VERSION = "1.19.3"
@@ -2462,7 +2464,69 @@ class MainWindow:
         # I'm too lazy so I'm just going to unschedule and then reschedule all the watches
         # instead of locating all subfolders and then figuring out which ones to not schedule
         self.reload_watched_paths()
-            
+    #updated by pito
+    def export_textbank_json(self, textbank_id: int):
+        tb = self.mod_handler.get_active_mod().get_text_bank(textbank_id)
+
+        out_file = filedialog.asksaveasfilename(
+            title="Export TextBank JSON",
+            initialfile=f"{textbank_id}.json",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")]
+        )
+        if not out_file:
+            return
+
+        tb.export_json(out_file)
+        self.check_modified()
+        tkinter.messagebox.showinfo("Export complete", f"Exported TextBank {textbank_id} to:\n{out_file}")
+
+
+    def import_textbank_json(self, textbank_id: int):
+        tb = self.mod_handler.get_active_mod().get_text_bank(textbank_id)
+
+        in_file = filedialog.askopenfilename(
+            title="Import TextBank JSON",
+            filetypes=[("JSON", "*.json")]
+        )
+        if not in_file:
+            return
+
+        replaced = tb.import_json(in_file)
+        self.check_modified()
+        tkinter.messagebox.showinfo(
+            "Import complete",
+            f"Imported into TextBank {textbank_id}\nReplaced strings: {replaced}"
+        )
+
+
+    def export_all_textbanks_json(self):
+        out_dir = filedialog.askdirectory(title="Export ALL TextBanks JSON to folder")
+        if not out_dir:
+            return
+
+        folder, count = self.mod_handler.get_active_mod().export_all_textbanks_json(out_dir)
+        self.check_modified()
+        tkinter.messagebox.showinfo(
+            "Export complete",
+            f"Exported {count} TextBanks to:\n{folder}"
+        )
+
+
+    def import_all_textbanks_json(self):
+        in_dir = filedialog.askdirectory(title="Import ALL TextBanks JSON from folder")
+        if not in_dir:
+            return
+
+        banks_processed, total_replaced, missing_banks = self.mod_handler.get_active_mod().import_all_textbanks_json(in_dir)
+        self.check_modified()
+        tkinter.messagebox.showinfo(
+            "Import complete",
+            f"Banks processed: {banks_processed}\n"
+            f"Strings replaced: {total_replaced}\n"
+            f"JSON files with missing bank: {missing_banks}"
+        )
+    #end of pito update         
     def reload_watched_paths(self):
         for p in self.watched_paths:
             self.observer.unschedule(p)
@@ -2771,7 +2835,23 @@ class MainWindow:
                         command=lambda: self.play_video(
                             int(self.treeview.item(self.treeview.selection()[0], option="tags")[0]))
                     )
+            #updated by pito
+            select_item = selects[0]
+            item_type = self.treeview.item(select_item, option="values")[0]
+            tags = self.treeview.item(select_item, option="tags")
 
+            if is_single and item_type == "Text Bank":
+                textbank_id = int(tags[0])
+
+                self.right_click_menu.add_command(
+                    label="Export TextBank (JSON)",
+                    command=lambda tb_id=textbank_id: self.export_textbank_json(tb_id)
+                )
+                self.right_click_menu.add_command(
+                    label="Import TextBank (JSON)",
+                    command=lambda tb_id=textbank_id: self.import_textbank_json(tb_id)
+                )
+            #end updated by pito
             if all_audio:
                 self.right_click_menu.add_command(
                     label="Import audio",
