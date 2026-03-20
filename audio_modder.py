@@ -2188,7 +2188,7 @@ class MainWindow:
         #self.mod_handler.set_active_mod(current_mod.name)
         
         for file in os.listdir(CACHE):
-            if os.path.splitext(file)[1] == ".bik":
+            if os.path.splitext(file)[1] == ".bk2":
                 continue
             file = os.path.join(CACHE, file)
             try:
@@ -2318,7 +2318,7 @@ class MainWindow:
             if os.path.exists(os.path.join(self.app_state.rad_tools_path, RAD_TOOLS)):
                 video_files = [file for file in import_files if os.path.splitext(file)[1].lower() in SUPPORTED_VIDEO_TYPES]
             else:
-                video_files = [file for file in import_files if os.path.splitext(file)[1].lower() == ".bik"]
+                video_files = [file for file in import_files if os.path.splitext(file)[1].lower() == ".bk2"]
             import_files = audio_files + video_files
             if (
                 self.treeview.item(event.widget.identify_row(event.y_root - self.treeview.winfo_rooty()), option="values")
@@ -2593,12 +2593,12 @@ class MainWindow:
     def import_video(self, video_ids: list[int], video_file: str = ""):
         if not video_file:
             if RAD_TOOLS and os.path.exists(os.path.join(app_state.rad_tools_path, RAD_TOOLS)):
-                video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Video Files", "*.mp4 *.mov *.bik")])
+                video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Video Files", "*.mp4 *.mov *.bk2")])
             else:
-                video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Bink Video", "*.bik")])
+                video_file = filedialog.askopenfilename(title="Select video file", filetypes=[("Bink Video", "*.bk2")])
         if not video_file:
             return
-        if os.path.splitext(video_file)[1].lower() != ".bik":
+        if os.path.splitext(video_file)[1].lower() != ".bk2":
             # convert to bik
             self.task_manager.schedule_async(name=f"Converting {os.path.basename(video_file)}", callback=self.bik_conversion_callback, task=self.convert_to_bik, video_file=video_file, video_ids=video_ids)
             return
@@ -2609,8 +2609,8 @@ class MainWindow:
     @async_task
     async def convert_to_bik(self, video_file: str, video_ids: list[int]):
         timestamp = int(time.time() * 1000)
-        converted_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bik"))
-        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        converted_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bk2"))
+        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, "/V6344", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await p.wait()
         return converted_filename, video_ids
 
@@ -2624,13 +2624,13 @@ class MainWindow:
         if not output_file:
             if RAD_TOOLS and os.path.exists(os.path.join(app_state.rad_tools_path, RAD_TOOLS)):
                 output_file = filedialog.asksaveasfilename(title="Save video file",
-                                                        filetypes=[("MP4", "*.mp4"), ("Bink Video", "*.bik")])
+                                                        filetypes=[("MP4", "*.mp4"), ("Bink Video", "*.bk2")])
             else:
-                output_file = filedialog.asksaveasfilename(title="Save video file", filetypes=[("Bink Video", "*.bik")])
+                output_file = filedialog.asksaveasfilename(title="Save video file", filetypes=[("Bink Video", "*.bk2")])
         if not output_file:
             return
-        if os.path.splitext(output_file)[1].lower() != ".bik":
-            temp_filename = os.path.normpath(os.path.join(CACHE, f"{int(time.time() * 1000)}.bik"))
+        if os.path.splitext(output_file)[1].lower() != ".bk2":
+            temp_filename = os.path.normpath(os.path.join(CACHE, f"{int(time.time() * 1000)}.bk2"))
             with open(temp_filename, "wb") as f:
                 f.write(self.mod_handler.get_active_mod().get_video(video_id).get_data())
             self.task_manager.schedule_async(name=f"Converting video {video_id} to mp4", callback=None,
@@ -2651,7 +2651,7 @@ class MainWindow:
 
     def play_video(self, video_id: int):
         timestamp = int(time.time()*1000)
-        output_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bik"))
+        output_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bk2"))
         self.dump_video(video_id, output_file = output_filename)
         t = threading.Thread(target=self.play_bik, args=(output_filename,))
         t.start()
