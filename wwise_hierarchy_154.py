@@ -1917,7 +1917,10 @@ class RandomSequenceContainer(HircEntry):
         if entry:
             for value in self.import_values:
                 try:
-                    setattr(self, value, getattr(entry, value))
+                    if value == "baseParam":
+                        self.baseParam.propBundle = entry.baseParam.propBundle
+                    else:
+                        setattr(self, value, getattr(entry, value))
                 except AttributeError:
                     pass
         else:
@@ -2090,7 +2093,10 @@ class Sound(HircEntry):
         if entry:
             for value in self.import_values:
                 try:
-                    setattr(self, value, getattr(entry, value))
+                    if value == "baseParam":
+                        self.baseParam.propBundle = entry.baseParam.propBundle
+                    else:
+                        setattr(self, value, getattr(entry, value))
                 except AttributeError:
                     pass
         else:
