@@ -2735,7 +2735,7 @@ class MainWindow:
                                             on_select_cb=self.on_archive_search_bar_return,
                                             master=self.top_bar,
                                             width=64)
-        categories = ["English", "Spanish, Castilian", "Spanish, Latin America", "French", "Italian", "German", "Japanese", "Portuguese"]
+        categories = ["English", "Spanish, Castilian", "Spanish, Latin America", "French", "Italian", "German", "Japanese", "Portuguese", "Chinese"]
         categories = [""] + categories
         self.category_search = ttk.Combobox(self.top_bar,
                                             state="readonly",
