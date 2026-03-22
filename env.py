@@ -3,7 +3,6 @@ import pathlib
 import platform
 import posixpath
 import sys
-import distro
 
 import fileutil
 
@@ -25,12 +24,12 @@ DEFAULT_WWISE_PROJECT = posixpath.join(
     DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj")
 
 SYSTEM = platform.system()
-if SYSTEM == "Linux":
-    SYSTEM = distro.like()
 
 FFMPEG = ""
 VGMSTREAM = ""
 SYS_CLIPBOARD = ""
+# type 1: usr/lib/x86_64-linux-gnu exists, type 2, it doesn't
+LINUX_DISTRO_TYPE = 1
 WWISE_CLI = ""
 WWISE_VERSION = ""
 RAD_TOOLS = ""
@@ -38,7 +37,7 @@ RAD_COMPRESS = "bink2c"
 RAD_CONVERT = "binkconv"
 RAD_PLAY = ""
 
-match SYSTEM:
+match platform.system():
     case "Windows":
         FFMPEG = "ffmpeg.exe"
         RAD_TOOLS = "radvideo64.exe"
@@ -52,20 +51,17 @@ match SYSTEM:
         else:
             logger.warning("Failed to locate WwiseConsole.exe")
         SYS_CLIPBOARD = "clip"
-    case "debian":
+    case "Linux":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
         FFMPEG = "ffmpeg"
         WWISE_CLI = ""
         logger.warning("Wwise integration is not supported for Linux. WAV file "
                        "import is disabled.")
         SYS_CLIPBOARD = "xclip"
-    case "arch":
-        VGMSTREAM = "vgmstream-linux/vgmstream-cli"
-        FFMPEG = "ffmpeg"
-        WWISE_CLI = ""
-        logger.warning("Wwise integration is not supported for Linux. WAV file "
-                       "import is disabled.")
-        SYS_CLIPBOARD = "xclip"
+        if os.path.exists("/usr/lib/x86_64-linux-gnu"):
+            LINUX_DISTRO_TYPE = 1
+        else:
+            LINUX_DISTRO_TYPE = 2
     case "Darwin":
         VGMSTREAM = "vgmstream-macos/vgmstream-cli"
         FFMPEG = "ffmpeg"
