@@ -33,7 +33,8 @@ DEFAULT_CONVERSION_SETTING = "Vorbis Quality High"
 
 SUPPORTED_AUDIO_TYPES = [".wem", ".wav", ".mp3", ".m4a", ".ogg"]
 SUPPORTED_VIDEO_TYPES = [".bik", ".mp4", ".mov"]
-WWISE_SUPPORTED_SYSTEMS = ["Windows", "Darwin"]
+WWISE_SUPPORTED_SYSTEMS = ["Windows", "Darwin", "debian", "arch"]
+SUPPORTED_LINUX_DISTROS = ["debian", "arch"]
 # [End]
 
 class HircType:
