@@ -2029,7 +2029,7 @@ class BankSourceStruct:
 class Sound(HircEntry):
     
     import_values = [
-        "sources",
+        #"sources",
         "baseParam",
     ]
     
