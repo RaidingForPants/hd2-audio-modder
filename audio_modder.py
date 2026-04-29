@@ -493,7 +493,7 @@ class OptionsWindow:
                         return str(path / "Tools/WwiseConsole.sh")
                     elif (path / "WwiseConsole.sh").exists():
                         return str(path / "WwiseConsole.sh")
-                elif SYSTEM == "Linux": # auto install path locating not supported
+                elif SYSTEM in ["debian", "arch"]: # not supported
                     return wwise_path
             if not wwise_path:
                 return ""
@@ -3696,13 +3696,15 @@ if __name__ == "__main__":
         data = r.json()
         if SYSTEM == "Darwin":
             download_url = data["assets"][1]["browser_download_url"]
+            updater = "updater"
         elif SYSTEM == "Windows":
             download_url = data["assets"][2]["browser_download_url"]
-        elif SYSTEM == "Linux":
-            if LINUX_DISTRO_TYPE == 1:
-                download_url = data["assets"][0]["browser_download_url"]
-            elif LINUX_DISTRO_TYPE == 2:
-                download_url = data["assets"][3]["browser_download_url"]
+            updater = "updater.exe"
+        elif SYSTEM == "debian":
+            download_url = data["assets"][0]["browser_download_url"]
+            updater = "updater"
+        elif SYSTEM == "arch":
+            download_url = data["assets"][3]["browser_download_url"]
         latest_version = [int(i) for i in data["tag_name"].replace("v", "").split(".")]
         current_version = [int(i) for i in VERSION.split(".")]
         while len(latest_version) < 3:
