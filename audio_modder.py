@@ -2610,7 +2610,7 @@ class MainWindow:
     async def convert_to_bik(self, video_file: str, video_ids: list[int]):
         timestamp = int(time.time() * 1000)
         converted_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bk2"))
-        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, "/V6344", "/Y", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, "/V6344", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await p.wait()
         return converted_filename, video_ids
 
