@@ -493,7 +493,7 @@ class OptionsWindow:
                         return str(path / "Tools/WwiseConsole.sh")
                     elif (path / "WwiseConsole.sh").exists():
                         return str(path / "WwiseConsole.sh")
-                elif SYSTEM == "Linux": # not supported
+                elif SYSTEM in ["debian", "arch"]: # not supported
                     return wwise_path
             if not wwise_path:
                 return ""
@@ -2610,7 +2610,7 @@ class MainWindow:
     async def convert_to_bik(self, video_file: str, video_ids: list[int]):
         timestamp = int(time.time() * 1000)
         converted_filename = os.path.normpath(os.path.join(CACHE, f"{timestamp}.bk2"))
-        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, "/V6344", "/Y", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        p = await asyncio.create_subprocess_exec(os.path.join(app_state.rad_tools_path, RAD_TOOLS), RAD_COMPRESS, video_file, converted_filename, "/V6344", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await p.wait()
         return converted_filename, video_ids
 
@@ -3590,7 +3590,7 @@ class MainWindow:
 def wwise_setup(app_state, show_warnings=False):
     if os.path.exists(app_state.wwise_path):
         env.WWISE_CLI = app_state.wwise_path
-    if show_warnings and not os.path.exists(app_state.wwise_path) and SYSTEM != "Linux":
+    if show_warnings and not os.path.exists(app_state.wwise_path):
         logger.warning("Wwise installation not found. The only file type available for import is WEM.")
         showwarning(title="Missing Plugin",
                     message="Wwise installation not found. The only file type available for import is WEM.")
@@ -3700,9 +3700,11 @@ if __name__ == "__main__":
         elif SYSTEM == "Windows":
             download_url = data["assets"][2]["browser_download_url"]
             updater = "updater.exe"
-        elif SYSTEM == "Linux":
+        elif SYSTEM == "debian":
             download_url = data["assets"][0]["browser_download_url"]
             updater = "updater"
+        elif SYSTEM == "arch":
+            download_url = data["assets"][3]["browser_download_url"]
         latest_version = [int(i) for i in data["tag_name"].replace("v", "").split(".")]
         current_version = [int(i) for i in VERSION.split(".")]
         while len(latest_version) < 3:
