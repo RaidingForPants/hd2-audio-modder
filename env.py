@@ -3,7 +3,6 @@ import pathlib
 import platform
 import posixpath
 import sys
-import distro
 
 import fileutil
 
@@ -25,8 +24,6 @@ DEFAULT_WWISE_PROJECT = posixpath.join(
     DIR, "AudioConversionTemplate/AudioConversionTemplate.wproj")
 
 SYSTEM = platform.system()
-if SYSTEM == "Linux":
-    SYSTEM = distro.like()
 
 FFMPEG = ""
 VGMSTREAM = ""
@@ -52,14 +49,7 @@ match SYSTEM:
         else:
             logger.warning("Failed to locate WwiseConsole.exe")
         SYS_CLIPBOARD = "clip"
-    case "debian":
-        VGMSTREAM = "vgmstream-linux/vgmstream-cli"
-        FFMPEG = "ffmpeg"
-        WWISE_CLI = ""
-        logger.warning("Wwise integration is not supported for Linux. WAV file "
-                       "import is disabled.")
-        SYS_CLIPBOARD = "xclip"
-    case "arch":
+    case "Linux":
         VGMSTREAM = "vgmstream-linux/vgmstream-cli"
         FFMPEG = "ffmpeg"
         WWISE_CLI = ""
