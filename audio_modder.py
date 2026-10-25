@@ -58,7 +58,7 @@ import sys #added by pito
 
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
-VERSION = "1.20.0"
+VERSION = "1.20.2"
 
 def resource_path(relative_path):
     try:
