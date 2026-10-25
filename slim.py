@@ -1,6 +1,5 @@
 import struct
 import os
-#import lz4.block
 from lz4 import block
 import sys
 
@@ -34,6 +33,10 @@ LEGACY = 3
 BUNDLED = 2
 DSAR = 1
 UNKNOWN = 0
+
+# file types
+DSAR_FILE = 0x52415344
+PACKAGE_FILE = 0xF0000011
 
 done_init = False
 package_contents = {}
@@ -150,6 +153,10 @@ def init_bundle_mapping():
             bundle_name = os.path.basename(filename)
             bundle_offsets[bundle_name] = {}
             with open(os.path.join(game_data_folder, bundle_name), 'rb') as bundle:
+                magic = int.from_bytes(bundle.read(4), byteorder="little")
+                if magic != DSAR_FILE:
+                    del bundle_offsets[bundle_name]
+                    continue
                 bundle.seek(8)
                 num_chunks = read_int(bundle) # num data chunks
                 bundle.seek(0x20)
@@ -214,7 +221,7 @@ def get_package_toc(package_name: str):
     if os.path.exists(full_path):
         with open(full_path, 'rb') as f:
             magic = int.from_bytes(f.read(4), "little")
-            if magic == 1380012868: # compressed DSAR file
+            if magic == DSAR_FILE: # compressed DSAR file
                 package_type = DSAR
             else:
                 package_type = LEGACY
@@ -241,7 +248,7 @@ def get_package_toc(package_name: str):
         bin_data = b""
         bin_data = package_file.read(12)
         magic, numTypes, numFiles = struct.unpack("<III", bin_data)
-        if magic != 4026531857:
+        if magic != PACKAGE_FILE:
             package_file.close()
             return bytearray()
 
@@ -260,7 +267,7 @@ def load_package(package_path: str):
     if os.path.exists(package_path):
         with open(package_path, 'rb') as f:
             magic = int.from_bytes(f.read(4), "little")
-            if magic == 1380012868: # compressed DSAR file
+            if magic == DSAR_FILE: # compressed DSAR file
                 package_type = DSAR
             else:
                 package_type = LEGACY
